@@ -1,0 +1,32 @@
+{
+  "name": "@macula/mcp",
+  "version": "0.2.0",
+  "description": "Model Context Protocol server that exposes the Macula mesh to any agent harness, via the local hecate-daemon",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "macula-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
