@@ -31,7 +31,7 @@ export class DaemonError extends Error {
 }
 
 interface CallOpts {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "DELETE";
   path: string;
   body?: unknown;
 }
@@ -154,6 +154,54 @@ export interface PublishReply {
   error?: string;
 }
 
+/** POST /api/mesh/subscriptions — apps/guide_mesh_subscriptions/src/add_mesh_subscription */
+export interface SubscribeReply {
+  ok: boolean;
+  topic?: string;
+  requested_at?: number;
+  fact_id?: string;
+  error?: string;
+}
+
+/** DELETE /api/mesh/subscriptions/:topic — apps/guide_mesh_subscriptions/src/remove_mesh_subscription */
+export interface UnsubscribeReply {
+  ok: boolean;
+  topic?: string;
+  requested_at?: number;
+  fact_id?: string;
+  error?: string;
+}
+
+/** GET /api/mesh/subscriptions/list — apps/query_mesh_activity/src/get_mesh_subscriptions */
+export interface SubscriptionEntry {
+  topic: string;
+  subscribed_at: number;
+  fact_id: string;
+}
+export interface SubscriptionsReply {
+  ok: boolean;
+  subscriptions: SubscriptionEntry[];
+}
+
+/** GET /api/mesh/inbox — apps/query_mesh_activity/src/get_mesh_inbox */
+export interface InboxEvent {
+  fact_id: string;
+  kind: "mesh_fact_received";
+  ts_ms: number;
+  payload: {
+    direction: "in";
+    topic: string;
+    fact: Record<string, unknown>;
+    sender_node_id: string | null;
+    sender_mri: string | null;
+    sig_verified: boolean;
+  };
+}
+export interface InboxReply {
+  ok: boolean;
+  events: InboxEvent[];
+}
+
 export const daemon = {
   identity: () => call<Identity>({ method: "GET", path: "/api/mesh/identity" }),
 
@@ -174,7 +222,7 @@ export const daemon = {
     call<CallReply>({ method: "POST", path: "/api/mesh/call", body: args }),
 
   artifactPut: (args: { content: string; content_type: string }) =>
-    call<PutArtifactReply>({ method: "POST", path: "/api/mesh/artifact/put", body: args }),
+    call<PutArtifactReply>({ method: "POST", path: "/api/mesh/artifact", body: args }),
 
   artifactGet: (hashHex: string) =>
     call<GetArtifactReply>({
@@ -184,4 +232,28 @@ export const daemon = {
 
   publish: (args: { topic: string; fact: Record<string, unknown> }) =>
     call<PublishReply>({ method: "POST", path: "/api/mesh/publish", body: args }),
+
+  subscribe: (args: { topic: string }) =>
+    call<SubscribeReply>({ method: "POST", path: "/api/mesh/subscriptions", body: args }),
+
+  unsubscribe: (topic: string) =>
+    call<UnsubscribeReply>({
+      method: "DELETE",
+      path: `/api/mesh/subscriptions/${encodeURIComponent(topic)}`,
+    }),
+
+  subscriptions: () =>
+    call<SubscriptionsReply>({ method: "GET", path: "/api/mesh/subscriptions/list" }),
+
+  inbox: (since?: number, topic?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (since !== undefined) params.set("since", String(since));
+    if (topic !== undefined) params.set("topic", topic);
+    if (limit !== undefined) params.set("limit", String(limit));
+    const qs = params.toString();
+    return call<InboxReply>({
+      method: "GET",
+      path: "/api/mesh/inbox" + (qs ? `?${qs}` : ""),
+    });
+  },
 };

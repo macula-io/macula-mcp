@@ -18,20 +18,28 @@ import { registerActivity } from "./mesh_activity.js";
 import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshPublish } from "./mesh_publish.js";
+import { registerMeshSubscribe } from "./mesh_subscribe.js";
+import { registerMeshUnsubscribe } from "./mesh_unsubscribe.js";
+import { registerMeshSubscriptions } from "./mesh_subscriptions.js";
+import { registerMeshInbox } from "./mesh_inbox.js";
 
 const server = new McpServer({
   name: "macula-mcp",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 // Resources — read-only context an agent should consult before acting.
 registerIdentity(server);
 registerActivity(server);
+registerMeshInbox(server); // also registers the mesh_inbox tool below
 
 // Tools — actions, each producing an accountable event in the daemon's store.
 registerMeshCall(server);
 registerMeshArtifact(server);
 registerMeshPublish(server);
+registerMeshSubscribe(server);
+registerMeshUnsubscribe(server);
+registerMeshSubscriptions(server);
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
