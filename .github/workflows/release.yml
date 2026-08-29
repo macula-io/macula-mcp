@@ -1,0 +1,51 @@
+name: Release to npm
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # npm OIDC Trusted Publishing -- no NPM_TOKEN secret needed or stored
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate version matches package.json
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$PKG_VERSION" != "${{ steps.version.outputs.VERSION }}" ]; then
+            echo "::error::Tag version (${{ steps.version.outputs.VERSION }}) doesn't match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+
+      # Rebuilds and re-runs the offline suite here rather than trusting
+      # an artifact from the CI workflow -- this workflow triggers off a
+      # tag push, which is a separate event from the branch push CI
+      # already validated, so there's no prior run's output to reuse.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      # npm >=11.5.0 (ships with Node 20's bundled npm on this runner)
+      # auto-detects GitHub Actions' OIDC token when id-token: write is
+      # granted and this package has a Trusted Publisher configured on
+      # npmjs.com (Settings -> Trusted Publisher, repo macula-io/macula-mcp,
+      # workflow release.yml) -- no login step, no stored secret, npm
+      # exchanges the OIDC token for a short-lived publish credential
+      # itself. --provenance attaches a signed build-provenance
+      # attestation (this exact commit/workflow run) to the published
+      # package, free once OIDC is already wired up.
+      - run: npm publish --access public --provenance
