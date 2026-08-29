@@ -39,8 +39,17 @@ jobs:
       - run: npm run build
       - run: npm test
 
-      # npm >=11.5.0 (ships with Node 20's bundled npm on this runner)
-      # auto-detects GitHub Actions' OIDC token when id-token: write is
+      # Trusted Publishing (OIDC) needs npm CLI >=11.5.0. Node 20's
+      # bundled npm on GitHub-hosted runners is older than that (10.x) --
+      # verified 2026-08-29 when v0.3.1 failed here: provenance signing
+      # succeeded (that's an older, separate feature) but the actual
+      # publish PUT came back 404, because the old CLI had no idea how to
+      # do the OIDC-for-auth exchange and fell through to an unauthenticated
+      # request. Pin an explicit floor rather than trust the runner's default.
+      - run: npm install -g npm@latest
+      - run: npm --version
+
+      # Auto-detects GitHub Actions' OIDC token when id-token: write is
       # granted and this package has a Trusted Publisher configured on
       # npmjs.com (Settings -> Trusted Publisher, repo macula-io/macula-mcp,
       # workflow release.yml) -- no login step, no stored secret, npm
