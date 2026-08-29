@@ -1,5 +1,17 @@
 # macula-mcp
 
+[![CI](https://img.shields.io/github/actions/workflow/status/macula-io/macula-mcp/ci.yml?branch=main&label=CI)](https://github.com/macula-io/macula-mcp/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
+[![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg)](https://buymeacoffee.com/rlefever)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/macula-mcp-full-dark.svg">
+    <img src="assets/macula-mcp-full-light.svg" alt="Macula MCP" width="320">
+  </picture>
+</p>
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server that
 exposes the Macula mesh to any agent harness: Claude Code, Cursor, Cline,
 Continue, and anything else that speaks MCP.
