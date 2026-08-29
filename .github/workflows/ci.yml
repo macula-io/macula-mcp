@@ -44,3 +44,34 @@ jobs:
       # server against a real macula-cli," done by hand, same convention
       # macula-cli's own README documents for itself.
       - run: npm test
+
+  shellcheck:
+    name: shellcheck install.sh / uninstall.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "."
+          ignore_paths: dist
+
+  powershell-parse:
+    name: parse-check install.ps1 / uninstall.ps1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Syntax-only validation -- actually running install.ps1 would need
+      # a real published npm package to install, which isn't available in
+      # this job. Same convention as macula-cli's own powershell-parse job.
+      - shell: pwsh
+        run: |
+          $allErrors = @()
+          foreach ($f in @("install.ps1", "uninstall.ps1")) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$null, [ref]$errors) | Out-Null
+            $allErrors += $errors
+          }
+          if ($allErrors.Count -gt 0) {
+            $allErrors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }

@@ -84,27 +84,57 @@ to connect through; all default to `MACULA_MESH_STATION` (see
 
 ## Prerequisites
 
-- [`macula-cli`](https://github.com/macula-io/macula-cli) installed and on
-  `PATH` — `curl -fsSL https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash`
-  (Windows: `irm https://raw.githubusercontent.com/macula-io/macula-cli/master/install.ps1 | iex`).
-  Run `macula-mcp status` (or `npx @macula/mcp status`) to check.
-- Node.js 20+.
+- Node.js 20+ (the one thing the installer below checks but won't install for
+  you — get it from [nodejs.org](https://nodejs.org), nvm, fnm, or volta).
+
+Everything else — [`macula-cli`](https://github.com/macula-io/macula-cli),
+the `@macula/mcp` package itself, and registering with your MCP client — is
+handled by the installer.
 
 ## Install
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | iex
+```
+
+Both check Node.js, install `macula-cli` if it isn't already on `PATH`,
+`npm install -g @macula/mcp`, then run `macula-mcp-install` to register the
+`macula` MCP server with every detected client (Claude Code, Claude Desktop,
+Cursor, Windsurf) — safe-merges into existing configs and backs them up
+first. Idempotent; re-running is a no-op if everything's already current.
+
+To uninstall (unregisters from every MCP client, then removes the `npm`
+package — leaves `macula-cli` untouched, that has its own
+[install/uninstall](https://github.com/macula-io/macula-cli#quick-start)):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.sh | bash
+```
+
+```powershell
+irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.ps1 | iex
+```
+
+**From source** (contributing, or before a version is published):
 
 ```bash
 npm install
 npm run build
 npm link            # puts `macula-mcp` on PATH
+macula-mcp-install  # register with detected MCP clients
 ```
 
-Then register it with your MCP client:
-
-```bash
-macula-mcp-install                 # detects Claude Code, Claude Desktop, Cursor, Windsurf
-macula-mcp-status                  # read-only check: is macula-cli found, which clients are configured
-macula-mcp-uninstall               # removes the registered entry only — doesn't touch macula-cli
-```
+See the [guide](guides/HOWTO.md) for env var overrides (pinning a version,
+skipping the `macula-cli` step, installing without registering any client)
+and troubleshooting.
 
 ## Environment
 
@@ -112,6 +142,7 @@ macula-mcp-uninstall               # removes the registered entry only — doesn
 |---|---|---|
 | `MACULA_CLI_BIN` | Override the `macula-cli` binary path/name. | `macula-cli` (resolved via `PATH`) |
 | `MACULA_MESH_STATION` | Default station every tool connects through when a call doesn't override `host`. | `station-de-frankfurt.macula.io:4433` |
+| `MACULA_MCP_WATCH_IDENTITY` | Override `mesh_watch`'s dedicated identity file path (kept separate from every other tool's default identity — see the [guide](guides/HOWTO.md) §2). | `~/.macula-mcp/watch-identity.seed` |
 
 ## Status
 
@@ -149,6 +180,12 @@ Known mesh limits, unchanged from before (memory:
 `project_inter_station_routing_unshipped`): cross-station DHT replication
 is not fully shipped — `mesh_put`/`mesh_get` is reliable same-station,
 best-effort cross-station.
+
+## Documentation
+
+| Guide | Description |
+|---|---|
+| [HOW-TO Guide](guides/HOWTO.md) | Install/uninstall env var reference, each tool's exact behavior, troubleshooting a failed tool call, the two real gotchas found live-testing this rework |
 
 ## License
 
