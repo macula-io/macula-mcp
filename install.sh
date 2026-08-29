@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs macula-mcp for Linux and macOS end to end: checks Node.js,
 # installs macula-cli if it isn't already on PATH (macula-mcp shells out
-# to it for every mesh operation), npm-installs @macula/mcp globally,
+# to it for every mesh operation), npm-installs @macula-io/mcp globally,
 # then registers the 'macula' MCP server with every detected MCP client
 # (Claude Code, Claude Desktop, Cursor, Windsurf).
 #
@@ -40,11 +40,11 @@ else
   need macula-cli
 fi
 
-# ---- 3. @macula/mcp itself --------------------------------------------------
+# ---- 3. @macula-io/mcp itself --------------------------------------------------
 
-pkg="@macula/mcp"
+pkg="@macula-io/mcp"
 if [ -n "${MACULA_MCP_VERSION:-}" ]; then
-  pkg="@macula/mcp@${MACULA_MCP_VERSION}"
+  pkg="@macula-io/mcp@${MACULA_MCP_VERSION}"
 fi
 
 log "installing ${pkg} globally..."
@@ -67,7 +67,7 @@ if ! command -v macula-mcp >/dev/null 2>&1; then
   PATH (try: export PATH=\"${npm_bin}:\$PATH\") and re-run, or just restart your shell."
 fi
 
-log "installed: $(macula-mcp --version 2>&1 || echo "@macula/mcp")"
+log "installed: $(macula-mcp --version 2>&1 || echo "@macula-io/mcp")"
 
 # ---- 4. Register with detected MCP clients ---------------------------------
 

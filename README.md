@@ -88,7 +88,7 @@ to connect through; all default to `MACULA_MESH_STATION` (see
   you — get it from [nodejs.org](https://nodejs.org), nvm, fnm, or volta).
 
 Everything else — [`macula-cli`](https://github.com/macula-io/macula-cli),
-the `@macula/mcp` package itself, and registering with your MCP client — is
+the `@macula-io/mcp` package itself, and registering with your MCP client — is
 handled by the installer.
 
 ## Install
@@ -106,7 +106,7 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 ```
 
 Both check Node.js, install `macula-cli` if it isn't already on `PATH`,
-`npm install -g @macula/mcp`, then run `macula-mcp-install` to register the
+`npm install -g @macula-io/mcp`, then run `macula-mcp-install` to register the
 `macula` MCP server with every detected client (Claude Code, Claude Desktop,
 Cursor, Windsurf) — safe-merges into existing configs and backs them up
 first. Idempotent; re-running is a no-op if everything's already current.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Uninstalls macula-mcp: unregisters the 'macula' entry from every
 # detected MCP client's config (via the installed macula-mcp-uninstall,
-# while it's still present), then npm-uninstalls the @macula/mcp package
+# while it's still present), then npm-uninstalls the @macula-io/mcp package
 # globally. Leaves macula-cli and its identity alone -- separate concern,
 # see macula-cli's own uninstall.sh/uninstall.ps1 for that -- and leaves
 # the mesh_watch dedicated identity (~/.macula-mcp/watch-identity.seed)
@@ -29,11 +29,11 @@ else
   log "macula-mcp-uninstall not found on PATH -- skipping MCP client config cleanup (already uninstalled, or never installed via npm -g)."
 fi
 
-if command -v npm >/dev/null 2>&1 && npm list -g @macula/mcp >/dev/null 2>&1; then
-  log "removing the @macula/mcp package..."
-  npm uninstall -g @macula/mcp
+if command -v npm >/dev/null 2>&1 && npm list -g @macula-io/mcp >/dev/null 2>&1; then
+  log "removing the @macula-io/mcp package..."
+  npm uninstall -g @macula-io/mcp
 else
-  log "@macula/mcp not found as a global npm package -- nothing to remove there."
+  log "@macula-io/mcp not found as a global npm package -- nothing to remove there."
 fi
 
 watch_identity="$HOME/.macula-mcp/watch-identity.seed"

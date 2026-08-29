@@ -18,7 +18,7 @@ const VERSION = "0.3.0";
 function help(): void {
   console.log(`macula-mcp status ${VERSION}
 
-Usage: npx @macula/mcp status
+Usage: npx @macula-io/mcp status
 
 Read-only diagnostic. Reports macula-cli availability and MCP-client
 configuration state.

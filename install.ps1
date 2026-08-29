@@ -1,6 +1,6 @@
 # Installs macula-mcp for Windows end to end: checks Node.js, installs
 # macula-cli if it isn't already on PATH (macula-mcp shells out to it for
-# every mesh operation), npm-installs @macula/mcp globally, then registers
+# every mesh operation), npm-installs @macula-io/mcp globally, then registers
 # the 'macula' MCP server with every detected MCP client (Claude Code,
 # Claude Desktop, Cursor, Windsurf).
 #
@@ -46,11 +46,11 @@ if ($env:MACULA_MCP_SKIP_CLI_INSTALL) {
     }
 }
 
-# ---- 3. @macula/mcp itself ---------------------------------------------
+# ---- 3. @macula-io/mcp itself ---------------------------------------------
 
-$pkg = "@macula/mcp"
+$pkg = "@macula-io/mcp"
 if ($env:MACULA_MCP_VERSION) {
-    $pkg = "@macula/mcp@$($env:MACULA_MCP_VERSION)"
+    $pkg = "@macula-io/mcp@$($env:MACULA_MCP_VERSION)"
 }
 
 Write-Host "installing $pkg globally..."

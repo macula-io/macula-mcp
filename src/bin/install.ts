@@ -54,7 +54,7 @@ function help(): void {
   console.log(
     `macula-mcp install ${VERSION}
 
-Usage: npx @macula/mcp install [--force] [--only <client[,client,...]>]
+Usage: npx @macula-io/mcp install [--force] [--only <client[,client,...]>]
 
 Detects installed MCP clients and registers the 'macula' MCP server,
 which shells out to macula-cli for mesh operations. Idempotent;

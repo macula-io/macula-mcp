@@ -1,6 +1,6 @@
 # Uninstalls macula-mcp: unregisters the 'macula' entry from every
 # detected MCP client's config (via the installed macula-mcp-uninstall,
-# while it's still present), then npm-uninstalls the @macula/mcp package
+# while it's still present), then npm-uninstalls the @macula-io/mcp package
 # globally. Leaves macula-cli and its identity alone -- separate concern,
 # see macula-cli's own uninstall.ps1 for that -- and leaves the
 # mesh_watch dedicated identity (%APPDATA%\macula-mcp\watch-identity.seed)
@@ -31,15 +31,15 @@ if (Test-Command macula-mcp-uninstall) {
 
 $installed = $false
 try {
-    npm list -g "@macula/mcp" *> $null
+    npm list -g "@macula-io/mcp" *> $null
     if ($LASTEXITCODE -eq 0) { $installed = $true }
 } catch { $installed = $false }
 
 if ($installed) {
-    Write-Host "removing the @macula/mcp package..."
-    npm uninstall -g "@macula/mcp"
+    Write-Host "removing the @macula-io/mcp package..."
+    npm uninstall -g "@macula-io/mcp"
 } else {
-    Write-Host "@macula/mcp not found as a global npm package -- nothing to remove there."
+    Write-Host "@macula-io/mcp not found as a global npm package -- nothing to remove there."
 }
 
 # Node's os.homedir() (used by macula_cli.ts), not any XDG/AppData

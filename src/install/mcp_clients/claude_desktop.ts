@@ -46,7 +46,7 @@ export function isInstalled(): boolean {
 export async function install(): Promise<MergeResult> {
   return mergeMcpServer(configPath(), "macula", {
     command: "npx",
-    args: ["-y", "@macula/mcp"],
+    args: ["-y", "-p", "@macula-io/mcp", "macula-mcp"],
   });
 }
 

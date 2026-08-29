@@ -24,9 +24,13 @@ export function isInstalled(): boolean {
 }
 
 export async function install(): Promise<MergeResult> {
+  // "-p <pkg> <bin>", not bare "npx -y @macula-io/mcp": this package
+  // has 4 bin entries and none is literally "mcp", so npx's default
+  // heuristic can't pick one -- see claude_code.ts's doc comment for
+  // the full story (found running a real packed tarball through npx).
   return mergeMcpServer(configPath(), "macula", {
     command: "npx",
-    args: ["-y", "@macula/mcp"],
+    args: ["-y", "-p", "@macula-io/mcp", "macula-mcp"],
   });
 }
 

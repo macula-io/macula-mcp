@@ -19,7 +19,7 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 
 Four steps, in order: check Node.js 20+ is present (won't install it for
 you), install `macula-cli` if it isn't already on `PATH`, `npm install -g
-@macula/mcp`, then run `macula-mcp-install` to register with every detected
+@macula-io/mcp`, then run `macula-mcp-install` to register with every detected
 MCP client.
 
 | Env var | Effect |
@@ -43,7 +43,7 @@ iwr -useb .../uninstall.ps1 -OutFile uninstall.ps1; .\uninstall.ps1 -Purge
 Unregisters from every detected MCP client (`macula-mcp-uninstall --all`
 under the hood — `--all` on purpose, so a client you've since uninstalled
 still gets its stale config entry cleaned up), then `npm uninstall -g
-@macula/mcp`. **Does not touch `macula-cli`** — that's a separate concern
+@macula-io/mcp`. **Does not touch `macula-cli`** — that's a separate concern
 with its own [install/uninstall](https://github.com/macula-io/macula-cli).
 
 ### Troubleshooting the install
