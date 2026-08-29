@@ -130,7 +130,7 @@ Then verify it actually works, not just that the config file has the
 entry:
 
 ```bash
-npx @macula-io/mcp doctor
+macula-mcp-doctor
 ```
 
 To uninstall (unregisters from every MCP client, then removes the `npm`

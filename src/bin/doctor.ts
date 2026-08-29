@@ -44,7 +44,7 @@ function parseArgs(argv: string[]): Args {
 function help(): void {
   console.log(`macula-mcp doctor ${VERSION}
 
-Usage: npx @macula-io/mcp doctor [--only <client[,client,...]>]
+Usage: macula-mcp-doctor [--only <client[,client,...]>]
 
 Real smoke test, not a config-file check: reads each configured client's
 recorded macula entry, spawns the EXACT command it would run, connects a

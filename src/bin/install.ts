@@ -56,7 +56,7 @@ function help(): void {
   console.log(
     `macula-mcp install ${VERSION}
 
-Usage: npx @macula-io/mcp install [--force] [--only <client[,client,...]>]
+Usage: macula-mcp-install [--force] [--only <client[,client,...]>]
 
 Detects installed MCP clients and registers the 'macula' MCP server,
 which shells out to macula-cli for mesh operations. Idempotent;
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
   console.log(
     `\nRestart your MCP client(s), then verify the entry actually works (not just that\n` +
       `the config file has it) with:\n` +
-      `  npx @macula-io/mcp doctor\n` +
+      `  macula-mcp-doctor\n` +
       `\nOr ask your LLM directly:\n` +
       `  "Read the mesh://identity resource and tell me my node ID."\n`,
   );

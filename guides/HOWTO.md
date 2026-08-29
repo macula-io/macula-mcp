@@ -54,7 +54,7 @@ still works non-interactively if you want to be specific there too).
 config file has it:**
 
 ```bash
-npx @macula-io/mcp doctor
+macula-mcp-doctor
 ```
 
 This spawns the exact command your client would run and talks real MCP

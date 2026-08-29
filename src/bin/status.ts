@@ -18,7 +18,7 @@ const VERSION = "0.4.0";
 function help(): void {
   console.log(`macula-mcp status ${VERSION}
 
-Usage: npx @macula-io/mcp status
+Usage: macula-mcp-status
 
 Read-only diagnostic. Reports macula-cli availability and MCP-client
 configuration state.
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     await reportClient(client);
   }
   console.log("\n\"registered\" above means the config file has the right entry -- it does not");
-  console.log("prove the entry actually runs. Run `npx @macula-io/mcp doctor` for a real check.");
+  console.log("prove the entry actually runs. Run `macula-mcp-doctor` for a real check.");
 }
 
 async function reportClient(c: ClientAdapter): Promise<void> {

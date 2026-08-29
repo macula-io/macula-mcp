@@ -32,7 +32,7 @@ function help(): void {
   console.log(
     `macula-mcp uninstall ${VERSION}
 
-Usage: npx @macula-io/mcp uninstall [--all]
+Usage: macula-mcp-uninstall [--all]
 
 Removes the 'macula' MCP server entry from every detected MCP
 client's config. The macula-cli binary and your persisted identity
