@@ -5,6 +5,17 @@ Every flag, default, and gotcha below is read from the actual source
 mesh, not assumed — see the citation or the pasted output in each section
 if you want to verify it yourself.
 
+**Re-verified end-to-end from inside a real Claude Code session, 2026-08-29**
+(not just the built server against a bare MCP `Client`, the actual
+`mcp__macula__*` tools as Claude Code exposes them, registered via the real
+installer against a real `~/.claude.json`): `mesh://identity`, `mesh_put`/
+`mesh_get` round trip (byte-exact), `mesh_call` against an unadvertised
+procedure (clean error, no crash), `mesh_publish`, and `mesh_watch` (works;
+see the concurrency caveat under §2 for how *not* to test it). Two things
+not previously documented came out of this pass — the bool/CBOR gotcha
+under `mesh_publish` and the tool-call-concurrency caveat under
+`mesh_watch`, both below.
+
 ---
 
 ## 1. Install / uninstall reference
@@ -94,6 +105,19 @@ send succeeding (PUBLISH has no ack on this wire protocol).
 { "topic": "macula_mcp.smoketest", "seq": 1788005387052, "duration_ms": 158 }
 ```
 
+**`fact`/`args` cannot contain a JSON boolean.** Macula's wire format has no
+`bool` type (see `macula-cli`'s own
+[README](https://github.com/macula-io/macula-cli#readme) and
+[HOWTO](https://github.com/macula-io/macula-cli/blob/master/guides/HOWTO.md) —
+deliberate, not a bug). A `true`/`false` anywhere in a `mesh_publish` fact or
+`mesh_call` args fails the whole call, real output from a live run:
+
+```
+mesh_publish failed: wirevalue: JSON boolean true has no wire representation (macula's CBOR has no bool type) — use 0/1 instead
+```
+
+Use `0`/`1` instead of `false`/`true`.
+
 ### `mesh_watch`
 
 **Blocks for `duration_seconds`** (max 120) or until `count` events arrive,
@@ -129,6 +153,23 @@ watch-identity.seed` on Windows — override with
 `MACULA_MCP_WATCH_IDENTITY`). **Two concurrent `mesh_watch` calls would
 still collide with each other** — not solved, a known limitation, not a
 silent one.
+
+**If you're driving this from an agent harness (e.g. Claude Code) and want
+to see `mesh_watch` actually catch something, don't race it against a
+`mesh_publish` issued as a second "parallel" tool call in the same turn.**
+Verified live: three separate attempts to call `mesh_watch` and a publish
+(via the `mesh_publish` tool, and separately via a backgrounded raw
+`macula-cli pubsub publish`) as two tool-use blocks in one assistant message
+all returned `event_count: 0` — the harness appears to run them one after
+the other, not concurrently, so the watch's window closes before the
+publish ever fires. A single Bash call that backgrounds both processes
+itself (`( macula-cli pubsub watch ... ) & sleep 3; macula-cli pubsub
+publish ...; wait`) sees the event immediately, confirming pubsub delivery
+itself is fine — it's specifically racing two harness-level tool calls that
+doesn't give real concurrency. In practice `mesh_watch` is for catching
+facts published by *someone else* (another party's agent, a station-side
+process) that are already in flight when you call it, not for self-testing
+a publish you're about to issue in the same turn.
 
 ### `mesh_put` / `mesh_get`
 
