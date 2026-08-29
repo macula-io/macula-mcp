@@ -40,13 +40,15 @@ jobs:
       - run: npm test
 
       # Trusted Publishing (OIDC) needs npm CLI >=11.5.0. Node 20's
-      # bundled npm on GitHub-hosted runners is older than that (10.x) --
+      # bundled npm on GitHub-hosted runners is older than that (10.8.2) --
       # verified 2026-08-29 when v0.3.1 failed here: provenance signing
       # succeeded (that's an older, separate feature) but the actual
       # publish PUT came back 404, because the old CLI had no idea how to
       # do the OIDC-for-auth exchange and fell through to an unauthenticated
-      # request. Pin an explicit floor rather than trust the runner's default.
-      - run: npm install -g npm@latest
+      # request. `npm@latest` (12.x) turned out to require Node >=22, which
+      # this job doesn't have -- pin the 11.x line instead, which supports
+      # both Node 20 and Trusted Publishing.
+      - run: npm install -g npm@11
       - run: npm --version
 
       # Auto-detects GitHub Actions' OIDC token when id-token: write is
