@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 // macula-mcp status — at-a-glance report of:
-//   * whether a hecate-daemon is reachable on the local UDS
+//   * whether macula-cli is installed and functional
 //   * which MCP clients are installed
 //   * which already have a `macula` entry configured
 //
-// Read-only: never writes config, never touches the daemon. Safe to
+// Read-only: never writes config, never touches the mesh. Safe to
 // run any time.
 
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { detect } from "../install/platform.js";
-import { probe } from "../install/existing_daemon.js";
+import { probe } from "../install/existing_cli.js";
 import { ALL, type ClientAdapter } from "../install/mcp_clients/index.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 function help(): void {
   console.log(`macula-mcp status ${VERSION}
 
 Usage: npx @macula/mcp status
 
-Read-only diagnostic. Reports daemon connectivity and MCP-client
+Read-only diagnostic. Reports macula-cli availability and MCP-client
 configuration state.
 `);
 }
@@ -35,15 +35,13 @@ async function main(): Promise<void> {
   const p = detect();
   line("platform", p.label);
 
-  const dp = await probe();
-  if (dp.running && dp.identity) {
-    line("daemon", `running (${dp.socket})`);
-    line("  mri", dp.identity.mri ?? "(unbound)");
-    line("  realm", dp.identity.realm ?? "(none)");
-    line("  membership", dp.identity.membership);
+  const cp = await probe();
+  if (cp.available && cp.nodeId) {
+    line("macula-cli", "available");
+    line("  node id", cp.nodeId);
   } else {
-    line("daemon", "NOT running");
-    if (dp.reason) line("  reason", dp.reason);
+    line("macula-cli", "NOT found on PATH");
+    if (cp.reason) line("  reason", cp.reason);
   }
 
   console.log("");

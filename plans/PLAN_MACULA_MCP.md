@@ -1,5 +1,14 @@
 # PLAN: macula-mcp
 
+⚠ **SUPERSEDED 2026-08-29.** This plan describes the original
+`hecate-daemon`-backed design (HTTP over a Unix socket). `hecate-daemon`
+is now treated as obsolete; the server was reworked to shell out to
+[`macula-cli`](https://github.com/macula-io/macula-cli) instead — see the
+current [README.md](../README.md) for the real architecture, tool set, and
+what was deliberately dropped (standing subscriptions, the activity audit
+log, `mesh://peers`). Kept here for historical context only, not as a
+phase tracker.
+
 Status: **Phase 1 + 2 landed; Phase 3 spec'd (2026-05-16).** Phase 3 spec at "## Phase 3 spec" — unblocks the two-agent demo and pairs with `PLAN_MACULA_MCP_INSTALLER.md` + `PLAN_PROVISIONAL_REALM_TIER` Phase 0 for the Tier 1 push.
 
 ## Goal

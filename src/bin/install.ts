@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// macula-mcp install — wire the local hecate-daemon into every
-// detected MCP client's config in one shot.
+// macula-mcp install — wire macula-cli into every detected MCP client's
+// config in one shot.
 //
-// MVP scope (this ship):
-//   * Detects an already-running hecate-daemon on the well-known
-//     UDS, prints its identity for visual confirmation.
+// Scope:
+//   * Detects an installed macula-cli binary (identity probe, no
+//     network), prints its node ID for visual confirmation.
 //   * Detects installed MCP clients (Claude Code, Claude Desktop,
 //     Cursor, Windsurf) by their canonical paths.
 //   * Safe-merges a `macula` mcpServers entry into each — idempotent
@@ -13,20 +13,21 @@
 //   * Backs up any existing config to `<path>.macula-bak-<timestamp>`
 //     before writing.
 //
-// Out of scope for MVP (separate ship, see
-// plans/PLAN_MACULA_MCP_INSTALLER.md):
-//   * Downloading + launching a Burrito-built hecate-daemon for
-//     clean-slate users.
-//   * Sovereign `curl … | sh` alternative.
+// Reworked 2026-08-29: this used to detect a running hecate-daemon and
+// offer to fetch+launch one; hecate-daemon is now treated as obsolete
+// and macula-mcp shells out to macula-cli instead (src/macula_cli.ts).
+// If macula-cli isn't found, this prints the install command rather
+// than fetching a binary itself -- macula-cli already ships its own
+// tested cross-platform install.sh/install.ps1, no reason to duplicate
+// that fetch/verify logic here.
 //
-// Exit codes: 0 = ok, 1 = bad input, 2 = no MCP clients detected,
-// 3 = no daemon running and no MCP clients to configure.
+// Exit codes: 0 = ok, 1 = bad input, 2 = no MCP clients detected.
 
 import { detect } from "../install/platform.js";
-import { probe } from "../install/existing_daemon.js";
+import { probe } from "../install/existing_cli.js";
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 interface Args {
   force: boolean;
@@ -55,9 +56,9 @@ function help(): void {
 
 Usage: npx @macula/mcp install [--force] [--only <client[,client,...]>]
 
-Detects installed MCP clients and registers the 'macula' MCP server
-pointing at the local hecate-daemon. Idempotent; safe-merges into
-existing configs and backs up first.
+Detects installed MCP clients and registers the 'macula' MCP server,
+which shells out to macula-cli for mesh operations. Idempotent;
+safe-merges into existing configs and backs up first.
 
 Supported MCP clients:
   claude-code, claude-desktop, cursor, windsurf
@@ -98,21 +99,18 @@ async function main(): Promise<void> {
   const p = detect();
   info(`platform: ${p.label}`);
 
-  // 1) Probe for an already-running hecate-daemon.
-  const dp = await probe();
-  if (dp.running && dp.identity) {
-    ok(`hecate-daemon found at ${dp.socket}`);
-    info(`identity: ${dp.identity.mri ?? "(unbound)"}`);
-    info(`realm:    ${dp.identity.realm ?? "(none)"}`);
-    info(`status:   membership=${dp.identity.membership}`);
+  // 1) Probe for an installed macula-cli binary.
+  const cp = await probe();
+  if (cp.available && cp.nodeId) {
+    ok(`macula-cli found`);
+    info(`node id:  ${cp.nodeId}`);
   } else {
-    warn(`no hecate-daemon found at ${dp.socket}`);
-    info("running daemon is required for the MCP server to function.");
-    info("see codeberg.org/hecate-social/hecate-daemon for install,");
-    info("or wait for the bundled Burrito installer (Phase 0 of");
-    info("plans/PLAN_MACULA_MCP_INSTALLER.md). Continuing with MCP-config");
-    info("registration anyway; the entry will start working once a daemon");
-    info("is running on the standard UDS path.");
+    warn(`macula-cli not found on PATH`);
+    info("macula-mcp shells out to macula-cli for every mesh operation --");
+    info("install it before the registered MCP entry will actually work:");
+    info("  curl -fsSL https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash");
+    info("  (Windows: irm https://raw.githubusercontent.com/macula-io/macula-cli/master/install.ps1 | iex)");
+    info("Continuing with MCP-config registration anyway.");
   }
 
   // 2) Detect MCP clients.
@@ -136,7 +134,7 @@ async function main(): Promise<void> {
   ok("done.");
   console.log(
     `\nRestart your MCP client(s). To test, ask your LLM:\n` +
-      `  "Read the mesh://identity resource and tell me my MRI."\n`,
+      `  "Read the mesh://identity resource and tell me my node ID."\n`,
   );
 }
 

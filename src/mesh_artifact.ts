@@ -1,59 +1,74 @@
 // Tools: mesh_put / mesh_get — content-addressed artifact exchange.
 //
-// The Content Sharing primitive. An agent produces something (a build output,
-// a generated module, a dataset slice), puts it on the mesh, gets back an
-// MCID (Macula Content ID, 34-byte content hash, surfaced as 68 hex chars).
-// Another node's agent fetches it by that hex MCID.
+// The Content Sharing primitive. An agent produces something (a build
+// output, a generated module, a dataset slice), puts it on the mesh, gets
+// back an MCID (Macula Content ID, 34-byte content hash, surfaced as
+// 68 hex chars). Another node's agent fetches it by that hex MCID.
 //
-// mesh_put is event-sourced inside the daemon: each share emits a
-// mesh_artifact_shared_v1 domain event in mesh_artifacts_store; the audit
-// anchor is the returned fact_id. mesh_get is REQUESTER-style (read only).
+// mesh_put writes the base64 content to a temp file and runs
+// `macula-cli content put`, deleting the temp file after -- macula-cli's
+// own put command is file-based (composable, scriptable, testable from a
+// real terminal too), while MCP's put tool hands over in-memory base64
+// bytes; the temp file is the bridge between those two shapes. mesh_get
+// needs no such bridge: `macula-cli content get --json` already returns
+// content_base64 directly in its envelope.
 //
-// Caveat (memory: project_inter_station_routing_unshipped): DHT replication
-// is not fully shipped cross-station — same-station put/get is reliable,
-// cross-station is best-effort.
+// No accountable fact_id anymore (that was hecate-daemon's ReckonDB audit
+// trail, dropped with the daemon).
+//
+// Caveat (memory: project_inter_station_routing_unshipped): DHT
+// replication is not fully shipped cross-station -- same-station
+// put/get is reliable, cross-station is best-effort.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { daemon } from "./daemon.js";
-import { errorContent, jsonContent } from "./reply.js";
+import { artifactGet, artifactPut, defaultStation } from "./macula_cli.js";
+import { describeCliError, errorContent, jsonContent } from "./reply.js";
 
 export function registerMeshArtifact(server: McpServer): void {
   server.tool(
     "mesh_put",
-    "Publish a content-addressed artifact to the mesh. Returns its 68-hex-char MCID and the " +
-      "fact_id of the accountable event recorded by the daemon. Fetch it elsewhere with mesh_get.",
+    "Publish a content-addressed artifact to the mesh. Returns its 68-hex-char MCID. " +
+      `Fetch it elsewhere with mesh_get. Defaults to ${defaultStation()} if host isn't given.`,
     {
       content: z.string().describe("Artifact bytes, base64-encoded."),
-      content_type: z
+      host: z
         .string()
-        .default("application/octet-stream")
-        .describe("MIME type of the artifact (recorded as metadata; v1 does not return it on get)."),
+        .optional()
+        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ content, content_type }) => {
-      const res = await daemon.artifactPut({ content, content_type });
-      return res.ok
-        ? jsonContent({ mcid_hex: res.mcid_hex, size_bytes: res.size_bytes, fact_id: res.fact_id })
-        : errorContent(res.error ?? "mesh_put failed");
+    async ({ content, host }) => {
+      try {
+        const res = await artifactPut({ host, contentBase64: content });
+        return jsonContent({ mcid_hex: res.mcid_hex, size_bytes: res.size_bytes });
+      } catch (e) {
+        return errorContent(describeCliError("mesh_put failed", e));
+      }
     },
   );
 
   server.tool(
     "mesh_get",
     "Fetch a content-addressed artifact from the mesh by its hex MCID (68 chars, " +
-      "as returned by mesh_put). Returns base64 content.",
+      `as returned by mesh_put). Returns base64 content. Defaults to ${defaultStation()} if host isn't given.`,
     {
       mcid_hex: z
         .string()
         .length(68)
         .regex(/^[0-9a-fA-F]+$/, "must be hex")
         .describe("MCID returned by mesh_put."),
+      host: z
+        .string()
+        .optional()
+        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ mcid_hex }) => {
-      const res = await daemon.artifactGet(mcid_hex);
-      return res.ok
-        ? jsonContent({ content: res.content, size_bytes: res.size_bytes })
-        : errorContent(res.error ?? "mesh_get failed");
+    async ({ mcid_hex, host }) => {
+      try {
+        const res = await artifactGet({ host, mcidHex: mcid_hex });
+        return jsonContent({ content: res.content, size_bytes: res.size_bytes });
+      } catch (e) {
+        return errorContent(describeCliError("mesh_get failed", e));
+      }
     },
   );
 }

@@ -2,13 +2,13 @@
 // macula-mcp uninstall — remove the `macula` entry from every
 // detected MCP client's config. Idempotent.
 //
-// Does NOT remove the local hecate-daemon, its identity, or any
-// realm-cert files. The MCP integration is the only thing this
-// command touches.
+// Does NOT remove the macula-cli binary or its persisted identity
+// (see macula-cli's own uninstall.sh/uninstall.ps1 for that). The
+// MCP integration is the only thing this command touches.
 
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 interface Args {
   all: boolean; // touch every supported client, not just detected
@@ -35,8 +35,8 @@ function help(): void {
 Usage: npx @macula/mcp uninstall [--all]
 
 Removes the 'macula' MCP server entry from every detected MCP
-client's config. The hecate-daemon and your realm cert are NOT
-touched.
+client's config. The macula-cli binary and your persisted identity
+are NOT touched.
 
 Flags:
   --all     Touch every supported client config, not just those whose

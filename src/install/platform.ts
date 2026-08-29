@@ -1,6 +1,7 @@
 // Platform detection for the installer. Used to pick MCP-client
-// config paths (which vary per OS), and — once Burrito daemon
-// binaries ship — to pick the right release artifact.
+// config paths, which vary per OS. macula-cli's own install.sh/
+// install.ps1 handle platform detection for fetching that binary --
+// not this installer's job.
 
 import { platform, arch } from "node:os";
 

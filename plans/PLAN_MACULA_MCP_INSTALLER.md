@@ -1,5 +1,17 @@
 # PLAN: macula-mcp one-line installer
 
+⚠ **SUPERSEDED 2026-08-29.** The Burrito-built hecate-daemon fetch/launch
+path this plan specs (Phase 0 onward) was never built past a dead,
+unreferenced `install/fetcher.ts` (deleted in the 2026-08-29 rework) and
+is no longer the direction: `macula-mcp` shells out to
+[`macula-cli`](https://github.com/macula-io/macula-cli), which already
+ships its own tested cross-platform `install.sh`/`install.ps1` — no
+reason to duplicate that fetch/verify logic here. The "existing-daemon
+path" (detect what's already installed, register MCP config) is still the
+live shape, just probing for `macula-cli` now instead of a running
+`hecate-daemon` — see `src/install/existing_cli.ts` and the current
+[README.md](../README.md). Kept here for historical context only.
+
 **Status:** MVP shipped (existing-daemon path). Phase 0 spec'd 2026-05-16.
 **Created:** 2026-05-16
 **Last Updated:** 2026-05-16
