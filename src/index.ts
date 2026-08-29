@@ -25,6 +25,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { registerIdentity } from "./mesh_identity.js";
 import { registerEtiquette } from "./mesh_etiquette.js";
+import { registerHelp } from "./mesh_help.js";
 import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshPublish } from "./mesh_publish.js";
@@ -45,7 +46,9 @@ station is a public demo fleet, not your sandbox). Before publishing or calling 
 a way to synchronize with something you're about to send yourself; use mesh_call if you need \
 a response.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
-for the full reasoning behind these rules.`;
+for the full reasoning behind these rules. A person in this conversation can also ask for \
+help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
+help_install -- if their client supports MCP prompts).`;
 
 const server = new McpServer(
   { name: "macula-mcp", version: "0.4.0" },
@@ -55,6 +58,10 @@ const server = new McpServer(
 // Resources — read-only context an agent should consult before acting.
 registerIdentity(server);
 registerEtiquette(server);
+
+// Prompts — in-conversation help for a HUMAN (slash command in clients
+// that support MCP prompts), not the agent; see mesh_help.ts.
+registerHelp(server);
 
 // Tools — actions, each a one-shot macula-cli subprocess call.
 registerMeshCall(server);

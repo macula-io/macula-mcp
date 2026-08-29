@@ -23,9 +23,10 @@ the shared identity, 1 succeeded; 6 concurrent calls under 6 distinct
 identities, all 6 succeeded) — fixed by minting a fresh identity per
 server process (§2, §3). Also new: the server's MCP `instructions` field
 and a `mesh://etiquette` resource carrying the mesh-citizenship norms
-(§3), an interactive client picker on install (§1), and a `doctor`
-command that actually spawns the configured entry and talks MCP to it,
-rather than just checking a config file has the right shape (§1).
+(§3), five in-conversation help prompts for a human (§4), an interactive
+client picker on install (§1), and a `doctor` command that actually
+spawns the configured entry and talks MCP to it, rather than just
+checking a config file has the right shape (§1).
 
 ---
 
@@ -260,7 +261,46 @@ receipts behind each rule rather than just the rule.
 
 ---
 
-## 4. A note for anyone extending this server
+## 4. Prompts — in-conversation help for a HUMAN
+
+Unlike everything above, these aren't for the agent — they're for the
+person in the conversation. A client that supports the MCP prompts
+primitive surfaces each as a slash command, e.g. `/mcp__macula__help` in
+Claude Code. Invoking one asks the connected model to explain that area,
+using the tool descriptions/`instructions`/`mesh://etiquette` it already
+has loaded — it doesn't duplicate that content, it prompts for a tailored
+explanation of it.
+
+| Prompt | Asks for |
+|---|---|
+| `help` | Full quick-start: tool overview, one example each, top gotchas. |
+| `help_identity` | How identity works, `mesh_watch`'s separate identity, pinning with env vars. |
+| `help_wire_format` | The no-bool / naming rules, with a valid and invalid example. |
+| `help_watch` | What `mesh_watch` is actually for, and the mistake to avoid. |
+| `help_install` | Install, register, verify (`doctor`), what a failure means. |
+
+**Five separate zero-argument prompts, not one `help` prompt with an
+optional `topic` argument — a real bug found live, not a style choice.**
+`@modelcontextprotocol/sdk` 1.30.0 (the latest at the time) throws
+`Invalid arguments for prompt help: Required` on `getPrompt` when a
+prompt's argument schema is all-optional and the caller's request omits
+the `arguments` field entirely — which is exactly how a client invokes a
+bare slash command with no value typed, the single most common
+invocation. Root cause, found reading the SDK's own source
+(`server/mcp.js`): it parses `request.params.arguments` straight through
+the Zod object schema without defaulting a missing field to `{}`, and
+`z.object({...}).parse(undefined)` fails at the top level regardless of
+whether the individual fields inside are optional. A prompt registered
+with NO argument schema at all skips that parse path entirely (`if
+(prompt.argsSchema) { ...parse... } else { cb(extra) }`), so five
+zero-arg prompts sidestep the bug rather than trigger it. Verified live:
+calling every prompt above via a real MCP `Client`, passing no
+`arguments` field at all (the exact shape that failed before), all five
+now respond correctly.
+
+---
+
+## 5. A note for anyone extending this server
 
 The argv-ordering gotcha bit this repo's own code once, not just users of
 it: `src/macula_cli.ts` originally appended `--json` at the END of the
@@ -275,7 +315,7 @@ than building the argv by hand.
 
 ---
 
-## 5. See also
+## 6. See also
 
 - [`README.md`](../README.md) — what macula-mcp is, architecture, tool/resource tables, status
 - [`macula-io/macula-cli`](https://github.com/macula-io/macula-cli)'s own [HOW-TO guide](https://github.com/macula-io/macula-cli/blob/master/guides/HOWTO.md) — the identity-collision and argv-ordering gotchas were both found and documented there first

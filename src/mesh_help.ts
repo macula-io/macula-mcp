@@ -1,0 +1,88 @@
+// Prompts: mesh help -- in-conversation help for a HUMAN, not the agent.
+//
+// The server's `instructions` field and the mesh://etiquette resource
+// (see mesh_etiquette.ts) are for the agent to consult on its own. This
+// is different: an MCP prompt surfaces as a slash command in a client
+// that supports the prompts primitive (e.g. /mcp__macula__help in Claude
+// Code), so a person mid-conversation can ask for a tailored explanation
+// without leaving the chat or reading GitHub docs. It doesn't duplicate
+// the etiquette resource's content -- it asks the model to EXPLAIN using
+// what it already has loaded (tool descriptions, instructions,
+// mesh://etiquette), tailored to whichever topic was picked.
+//
+// Five separate zero-argument prompts, not one `help` prompt with an
+// optional `topic` argument -- found live: @modelcontextprotocol/sdk
+// 1.30.0 (the latest at the time) throws "Invalid arguments ... Required"
+// on getPrompt when a prompt's args are ALL optional and the caller
+// omits the `arguments` field entirely, because it parses
+// `request.params.arguments` (undefined in that case) straight through
+// zod's object schema instead of defaulting to {}. That's exactly how a
+// client invokes a bare slash command with no argument typed -- the
+// single most common case -- so a one-prompt-with-optional-arg design
+// would fail on its own primary use case. A prompt with NO argsSchema at
+// all skips that parse path entirely (verified in the SDK source:
+// `if (prompt.argsSchema) { ...parse... } else { cb(extra) }`), so
+// separate zero-arg prompts sidestep the bug rather than work around it.
+
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+interface HelpTopic {
+  name: string;
+  description: string;
+  ask: string;
+}
+
+const TOPICS: HelpTopic[] = [
+  {
+    name: "help",
+    description:
+      "Quick-start help for the Macula mesh tools in this conversation -- overview, examples, gotchas.",
+    ask:
+      "Give me a quick, example-driven overview of the Macula mesh tools available in this " +
+      "conversation: mesh_call, mesh_put, mesh_get, mesh_publish, mesh_watch, plus the " +
+      "mesh://identity and mesh://etiquette resources. Show one realistic example call per " +
+      "tool and the top 3 gotchas to avoid.",
+  },
+  {
+    name: "help_identity",
+    description: "Explain how mesh identity works in this conversation (mesh_watch vs. every other tool).",
+    ask:
+      "Explain how identity works for the Macula mesh tools in this conversation: what " +
+      "mesh://identity shows, why mesh_watch uses a separate identity from the other tools, " +
+      "and how to pin either one to a fixed path with MACULA_MCP_IDENTITY / " +
+      "MACULA_MCP_WATCH_IDENTITY if a stable node ID across restarts is needed.",
+  },
+  {
+    name: "help_wire_format",
+    description: "Explain the Macula wire-format rules (no booleans, naming conventions) with examples.",
+    ask:
+      "Explain the Macula wire-format rules that apply to mesh_call's args and mesh_publish's " +
+      "fact: what's not representable on the wire (booleans -- show the right way to encode " +
+      "true/false instead), and the naming conventions (business verbs never CRUD, entity IDs " +
+      "in the payload never in the topic name). Give one valid and one invalid example payload.",
+  },
+  {
+    name: "help_watch",
+    description: "Explain what mesh_watch is actually good for and the mistake to avoid with it.",
+    ask:
+      "Explain how mesh_watch works, including why it can't be used to catch a mesh_publish " +
+      "issued as a second call in the same turn, and what it's actually good for (catching " +
+      "facts already in flight from someone else, not synchronizing with your own send).",
+  },
+  {
+    name: "help_install",
+    description: "Explain how to install macula-mcp, register it, and verify it's actually working.",
+    ask:
+      "Explain how someone installs macula-mcp, registers it with their MCP client, and " +
+      "verifies it's actually working (install, doctor, status) -- including what `doctor` " +
+      "reporting a failure means and what to do about it.",
+  },
+];
+
+export function registerHelp(server: McpServer): void {
+  for (const topic of TOPICS) {
+    server.prompt(topic.name, topic.description, () => ({
+      messages: [{ role: "user", content: { type: "text", text: topic.ask } }],
+    }));
+  }
+}

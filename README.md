@@ -83,6 +83,18 @@ to connect through; all default to `MACULA_MESH_STATION` (see
 | `mesh://identity` | This macula-mcp server process's own Ed25519 identity (node ID) — minted fresh per process since v0.4.0, not the same as running `macula-cli` by hand. |
 | `mesh://etiquette` | The reasoning and receipts behind the mesh-citizenship rules also condensed into this server's MCP `instructions` (wire-format limits, naming norms, what this server deliberately doesn't do). |
 
+## Prompts
+
+For a HUMAN in the conversation, not the agent — surfaces as a slash command in clients that support MCP prompts (e.g. `/mcp__macula__help` in Claude Code). Five zero-argument prompts rather than one with a topic argument: `@modelcontextprotocol/sdk` 1.30.0 errors on a bare invocation (no `arguments` field at all — the normal way to invoke a plain slash command) of a prompt whose args are all optional, so separate prompts sidestep it.
+
+| Prompt | Asks the model to explain |
+|---|---|
+| `help` | Full quick-start: tool overview, one example each, top gotchas. |
+| `help_identity` | How identity works, `mesh_watch`'s separate identity, pinning with env vars. |
+| `help_wire_format` | The no-bool / naming rules, with a valid and invalid example. |
+| `help_watch` | What `mesh_watch` is actually for, and the mistake to avoid. |
+| `help_install` | Install, register, verify (`doctor`), what a failure means. |
+
 ## Prerequisites
 
 - Node.js 20+ (the one thing the installer below checks but won't install for
@@ -157,7 +169,7 @@ and troubleshooting.
 
 ## Status
 
-**v0.4.0 — per-process identity, MCP `instructions`, `doctor`, 2026-08-29.**
+**v0.4.0 — per-process identity, MCP `instructions`, `doctor`, in-conversation help, 2026-08-29.**
 Re-verified live from inside a real Claude Code session (the actual
 `mcp__macula__*` tools, not just a bare MCP `Client`) and found a real
 concurrency bug in the process: every tool but `mesh_watch` shared one
