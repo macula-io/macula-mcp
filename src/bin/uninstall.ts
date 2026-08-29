@@ -8,7 +8,7 @@
 
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 interface Args {
   all: boolean; // touch every supported client, not just detected

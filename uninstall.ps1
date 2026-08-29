@@ -2,9 +2,16 @@
 # detected MCP client's config (via the installed macula-mcp-uninstall,
 # while it's still present), then npm-uninstalls the @macula-io/mcp package
 # globally. Leaves macula-cli and its identity alone -- separate concern,
-# see macula-cli's own uninstall.ps1 for that -- and leaves the
-# mesh_watch dedicated identity (%APPDATA%\macula-mcp\watch-identity.seed)
-# in place unless -Purge is passed.
+# see macula-cli's own uninstall.ps1 for that.
+#
+# -Purge removes a LEGACY persisted identity at
+# %USERPROFILE%\.macula-mcp\watch-identity.seed, if one exists. Since
+# v0.4.0, macula-mcp mints fresh per-process identities in a temp
+# directory that clean themselves up when the process exits -- nothing
+# persists here by default anymore. This only matters if you're
+# upgrading from a pre-0.4.0 install with a leftover file, or if you set
+# MACULA_MCP_IDENTITY / MACULA_MCP_WATCH_IDENTITY yourself, in which case
+# that file is yours to manage, not this script's.
 #
 # Usage:
 #   irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.ps1 | iex
@@ -48,16 +55,14 @@ if ($installed) {
 # %LOCALAPPDATA% (binary) from %AppData% (identity) -- checked here
 # rather than assumed, after getting exactly that distinction wrong
 # once already writing this same file.
-$watchIdentity = Join-Path "$env:USERPROFILE\.macula-mcp" "watch-identity.seed"
+$legacyWatchIdentity = Join-Path "$env:USERPROFILE\.macula-mcp" "watch-identity.seed"
 if ($Purge) {
-    if (Test-Path $watchIdentity) {
-        Remove-Item -Force $watchIdentity
-        Write-Host "removed $watchIdentity (-Purge)"
-    } else {
-        Write-Host "no watch identity found at $watchIdentity"
+    if (Test-Path $legacyWatchIdentity) {
+        Remove-Item -Force $legacyWatchIdentity
+        Write-Host "removed $legacyWatchIdentity (-Purge, leftover from a pre-0.4.0 install)"
     }
-} elseif (Test-Path $watchIdentity) {
-    Write-Host "left $watchIdentity in place (mesh_watch's dedicated identity) -- pass -Purge to remove it too"
+} elseif (Test-Path $legacyWatchIdentity) {
+    Write-Host "left $legacyWatchIdentity in place (leftover from a pre-0.4.0 install) -- pass -Purge to remove it"
 }
 
 Write-Host "done. macula-cli itself was NOT touched -- see its own uninstall.ps1."

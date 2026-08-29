@@ -80,7 +80,8 @@ to connect through; all default to `MACULA_MESH_STATION` (see
 
 | Resource | Content |
 |---|---|
-| `mesh://identity` | This node's Ed25519 identity (node ID), minted and persisted locally by `macula-cli`. |
+| `mesh://identity` | This macula-mcp server process's own Ed25519 identity (node ID) — minted fresh per process since v0.4.0, not the same as running `macula-cli` by hand. |
+| `mesh://etiquette` | The reasoning and receipts behind the mesh-citizenship rules also condensed into this server's MCP `instructions` (wire-format limits, naming norms, what this server deliberately doesn't do). |
 
 ## Prerequisites
 
@@ -110,6 +111,15 @@ Both check Node.js, install `macula-cli` if it isn't already on `PATH`,
 `macula` MCP server with every detected client (Claude Code, Claude Desktop,
 Cursor, Windsurf) — safe-merges into existing configs and backs them up
 first. Idempotent; re-running is a no-op if everything's already current.
+If more than one client is detected in a real terminal, it asks which to
+register with (Enter for all).
+
+Then verify it actually works, not just that the config file has the
+entry:
+
+```bash
+npx @macula-io/mcp doctor
+```
 
 To uninstall (unregisters from every MCP client, then removes the `npm`
 package — leaves `macula-cli` untouched, that has its own
@@ -142,9 +152,26 @@ and troubleshooting.
 |---|---|---|
 | `MACULA_CLI_BIN` | Override the `macula-cli` binary path/name. | `macula-cli` (resolved via `PATH`) |
 | `MACULA_MESH_STATION` | Default station every tool connects through when a call doesn't override `host`. | `station-de-frankfurt.macula.io:4433` |
-| `MACULA_MCP_WATCH_IDENTITY` | Override `mesh_watch`'s dedicated identity file path (kept separate from every other tool's default identity — see the [guide](guides/HOWTO.md) §2). | `~/.macula-mcp/watch-identity.seed` |
+| `MACULA_MCP_IDENTITY` | Pin the identity `mesh_call`/`mesh_put`/`mesh_get`/`mesh_publish` use to a fixed path, instead of a fresh one minted per process. | fresh temp file per process, deleted on exit |
+| `MACULA_MCP_WATCH_IDENTITY` | Same, for `mesh_watch`'s identity (kept separate from every other tool's — see the [guide](guides/HOWTO.md) §2). | fresh temp file per process, deleted on exit |
 
 ## Status
+
+**v0.4.0 — per-process identity, MCP `instructions`, `doctor`, 2026-08-29.**
+Re-verified live from inside a real Claude Code session (the actual
+`mcp__macula__*` tools, not just a bare MCP `Client`) and found a real
+concurrency bug in the process: every tool but `mesh_watch` shared one
+identity machine-wide, which failed 5/6 of the time under genuine
+concurrent use (two sessions, two subagents). Fixed by minting a fresh
+identity per server process instead — see [Environment](#environment)
+and the [guide](guides/HOWTO.md) §2-3 for the full story and the one real
+behavior change it carries. Also new this round: an `instructions` field
+and `mesh://etiquette` resource carrying mesh-citizenship norms to any
+connecting client, an interactive client picker on install, and a
+`doctor` command that spawns the real configured entry and talks MCP to
+it rather than just checking a config file's shape — the class of check
+that would have caught two config-registration bugs this project
+shipped, immediately, instead of a human finding them by hand.
 
 **v0.3.0 — reworked onto `macula-cli`, 2026-08-29.** Every tool shells out
 to a real `macula-cli` subprocess and has been exercised against the live

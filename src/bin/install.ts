@@ -23,11 +23,13 @@
 //
 // Exit codes: 0 = ok, 1 = bad input, 2 = no MCP clients detected.
 
+import { createInterface } from "node:readline/promises";
 import { detect } from "../install/platform.js";
 import { probe } from "../install/existing_cli.js";
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
+import { parseSelection } from "../install/selection.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 interface Args {
   force: boolean;
@@ -67,13 +69,43 @@ Flags:
   --force                Replace an existing 'macula' entry that
                          differs from the new one. Without --force
                          conflicting entries are left alone.
-  --only <a,b,c>         Only configure the listed clients.
+  --only <a,b,c>         Only configure the listed clients, no prompt.
   --help, -h             This message.
+
+If more than one client is detected and --only wasn't given, and this is
+running in a real terminal (not piped), you'll be asked which to register
+with -- press Enter to register with all of them, same as before.
 
 After install: restart your MCP client; ask your LLM to read the
 mesh://identity resource or call mesh_publish on any topic.
 `,
   );
+}
+
+/**
+ * Only reached when >1 client is detected, --only wasn't passed, and
+ * stdin is a real terminal (curl|bash installs have no TTY and must
+ * never block waiting for input -- they keep today's register-everything
+ * behavior). Enter with no input registers all, same as running with no
+ * prompt at all, so this can never make an unattended run behave
+ * differently from before.
+ */
+async function pickInteractively(clients: ClientAdapter[]): Promise<ClientAdapter[]> {
+  console.log("\nMultiple MCP clients detected:");
+  clients.forEach((c, i) => console.log(`  [${i + 1}] ${c.CLIENT_LABEL}`));
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  let raw: string;
+  try {
+    raw = await rl.question("\nRegister with which? (comma-separated numbers, Enter for all): ");
+  } finally {
+    rl.close();
+  }
+  const selection = parseSelection(raw, clients.length);
+  if (selection === "all") {
+    if (raw.trim() !== "") warn("no valid selection -- registering with all detected clients.");
+    return clients;
+  }
+  return clients.filter((_, i) => selection.has(i + 1));
 }
 
 function ok(msg: string) {
@@ -115,7 +147,7 @@ async function main(): Promise<void> {
 
   // 2) Detect MCP clients.
   const requested = args.only.length > 0 ? args.only : null;
-  const targets = (requested ? ALL.filter((c) => requested.includes(c.CLIENT_ID)) : detected());
+  let targets = (requested ? ALL.filter((c) => requested.includes(c.CLIENT_ID)) : detected());
   if (targets.length === 0) {
     err("no MCP clients detected.");
     info("install Claude Code, Claude Desktop, Cursor, or Windsurf and re-run.");
@@ -125,6 +157,11 @@ async function main(): Promise<void> {
 
   info(`detected MCP clients: ${targets.map((c) => c.CLIENT_LABEL).join(", ")}`);
 
+  if (!requested && targets.length > 1 && process.stdin.isTTY) {
+    targets = await pickInteractively(targets);
+    info(`registering with: ${targets.map((c) => c.CLIENT_LABEL).join(", ")}`);
+  }
+
   // 3) Register macula entry in each.
   for (const client of targets) {
     await configureOne(client);
@@ -133,7 +170,10 @@ async function main(): Promise<void> {
   console.log("");
   ok("done.");
   console.log(
-    `\nRestart your MCP client(s). To test, ask your LLM:\n` +
+    `\nRestart your MCP client(s), then verify the entry actually works (not just that\n` +
+      `the config file has it) with:\n` +
+      `  npx @macula-io/mcp doctor\n` +
+      `\nOr ask your LLM directly:\n` +
       `  "Read the mesh://identity resource and tell me my node ID."\n`,
   );
 }

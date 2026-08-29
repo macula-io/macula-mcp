@@ -3,9 +3,16 @@
 # detected MCP client's config (via the installed macula-mcp-uninstall,
 # while it's still present), then npm-uninstalls the @macula-io/mcp package
 # globally. Leaves macula-cli and its identity alone -- separate concern,
-# see macula-cli's own uninstall.sh/uninstall.ps1 for that -- and leaves
-# the mesh_watch dedicated identity (~/.macula-mcp/watch-identity.seed)
-# in place unless --purge is passed.
+# see macula-cli's own uninstall.sh/uninstall.ps1 for that.
+#
+# --purge removes a LEGACY persisted identity at
+# ~/.macula-mcp/watch-identity.seed, if one exists. Since v0.4.0,
+# macula-mcp mints fresh per-process identities in a temp directory that
+# clean themselves up when the process exits -- nothing persists here by
+# default anymore. This only matters if you're upgrading from a
+# pre-0.4.0 install with a leftover file, or if you set
+# MACULA_MCP_IDENTITY / MACULA_MCP_WATCH_IDENTITY yourself, in which case
+# that file is yours to manage, not this script's.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.sh | bash
@@ -36,16 +43,14 @@ else
   log "@macula-io/mcp not found as a global npm package -- nothing to remove there."
 fi
 
-watch_identity="$HOME/.macula-mcp/watch-identity.seed"
+legacy_watch_identity="$HOME/.macula-mcp/watch-identity.seed"
 if [ "$purge" -eq 1 ]; then
-  if [ -e "$watch_identity" ]; then
-    rm -f "$watch_identity"
-    log "removed ${watch_identity} (--purge)"
-  else
-    log "no watch identity found at ${watch_identity}"
+  if [ -e "$legacy_watch_identity" ]; then
+    rm -f "$legacy_watch_identity"
+    log "removed ${legacy_watch_identity} (--purge, leftover from a pre-0.4.0 install)"
   fi
-elif [ -e "$watch_identity" ]; then
-  log "left ${watch_identity} in place (mesh_watch's dedicated identity) -- pass --purge to remove it too"
+elif [ -e "$legacy_watch_identity" ]; then
+  log "left ${legacy_watch_identity} in place (leftover from a pre-0.4.0 install) -- pass --purge to remove it"
 fi
 
 log "done. macula-cli itself was NOT touched -- see its own uninstall.sh/uninstall.ps1."

@@ -6,6 +6,17 @@
 // belonged to hecate-daemon, now dropped). Report what's actually true
 // rather than fake the fields the old daemon-backed shape had.
 //
+// This is THIS macula-mcp server process's own identity (see
+// defaultIdentityPath() in macula_cli.ts) -- freshly minted per process,
+// not macula-cli's own persisted default. Running `macula-cli identity`
+// by hand on the same machine will report a DIFFERENT node ID. That's a
+// deliberate 2026-08-29 fix, not a regression: sharing one identity
+// across every concurrent mesh-mcp process/session caused real
+// connection collisions (verified live: 5/6 concurrent calls failed
+// under a shared identity, 0/6 failed once each had its own). mesh_watch
+// uses yet another, separate identity of its own -- see its own tool
+// description for why.
+//
 // mesh://peers was dropped, not reworked: it was already an admitted
 // stub even under the old daemon-backed design ("v1 surfaces an empty
 // list until hecate_mesh:get_peers/0 returns real data"), and
@@ -20,7 +31,9 @@ export function registerIdentity(server: McpServer): void {
     "mesh-identity",
     "mesh://identity",
     {
-      description: "This node's Ed25519 identity (node ID), minted and persisted locally by macula-cli.",
+      description:
+        "This macula-mcp server process's own Ed25519 identity (node ID), freshly minted per process -- " +
+        "not the same identity as running macula-cli by hand, and not mesh_watch's identity either.",
       mimeType: "application/json",
     },
     async (uri) => {

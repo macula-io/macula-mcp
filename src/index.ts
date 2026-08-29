@@ -24,18 +24,37 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { registerIdentity } from "./mesh_identity.js";
+import { registerEtiquette } from "./mesh_etiquette.js";
 import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
 
-const server = new McpServer({
-  name: "macula-mcp",
-  version: "0.3.0",
-});
+// Surfaced by every MCP client at connect time (the SDK's own
+// ServerOptions.instructions), not something a model has to think to go
+// read -- this is the mechanism for baking mesh-citizenship norms into
+// the server itself rather than a HOWTO only this project's own users
+// read. Kept terse on purpose; mesh://etiquette carries the reasoning
+// and the receipts behind each rule for a model that wants them.
+const INSTRUCTIONS = `This connects you to the Macula mesh, a real shared network (the default \
+station is a public demo fleet, not your sandbox). Before publishing or calling anything:
+- No booleans on the wire -- encode true/false as 1/0, everywhere (RPC args, pubsub facts).
+- Name topics and facts with business verbs, never CRUD (no *_created/*_updated/*_deleted).
+- Put IDs in the payload, never in the topic name.
+- mesh_publish has no ack and mesh_watch only catches what's already in flight -- neither is \
+a way to synchronize with something you're about to send yourself; use mesh_call if you need \
+a response.
+- Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
+for the full reasoning behind these rules.`;
+
+const server = new McpServer(
+  { name: "macula-mcp", version: "0.4.0" },
+  { instructions: INSTRUCTIONS },
+);
 
 // Resources — read-only context an agent should consult before acting.
 registerIdentity(server);
+registerEtiquette(server);
 
 // Tools — actions, each a one-shot macula-cli subprocess call.
 registerMeshCall(server);

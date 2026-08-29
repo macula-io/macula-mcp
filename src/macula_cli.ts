@@ -15,8 +15,10 @@
 // invocations. Point-in-time operations only.
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, rmSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** The station this server targets when a tool call doesn't override it. */
@@ -30,25 +32,84 @@ function binPath(): string {
 }
 
 /**
- * A dedicated, persisted identity for mesh_watch, separate from
- * macula-cli's own default identity (used by every other tool here).
+ * Per-server-process identities, freshly minted (temp dir, deleted on
+ * exit) rather than macula-cli's own shared machine-wide default.
  *
- * Found live (2026-08-29): a station kicks a connection the moment a
- * SECOND connection arrives under the same node ID -- a real
+ * History: the first fix here (2026-08-29) gave only mesh_watch a
+ * dedicated identity, because a station kicks a connection the moment
+ * a SECOND connection arrives under the same node ID -- a real
  * anti-duplicate-session guard, not a bug (see macula-cli's own HOWTO
- * guide §1). mesh_watch holds a connection open for up to
- * MAX_DURATION_SECONDS; any OTHER tool call (mesh_call, mesh_publish,
- * ...) that fires while a watch is in flight would otherwise share the
- * same default identity and silently kill the watcher's connection.
- * A separate persisted identity for watch is the minimum fix that
- * covers the common case (watch running alongside other calls) without
- * paying a fresh puzzle-grind on every single tool call the way a
- * per-invocation ephemeral identity would. Two CONCURRENT mesh_watch
- * calls would still collide with each other -- not solved here, a
- * known limitation, not a silent one.
+ * guide §1) -- and mesh_watch holds a connection open long enough for
+ * another tool call sharing the default identity to trigger exactly
+ * that. That fix was too narrow: verified live, same day, that the
+ * collision isn't watch-specific at all -- 6 concurrent one-shot
+ * `content put` calls under the shared default identity produced 1
+ * success and 5 "connection closed" failures; the same 6 calls under 6
+ * distinct identities all succeeded. Every tool but mesh_watch was
+ * still sharing ONE identity, so two Claude Code sessions (or two
+ * subagents) doing ordinary mesh work at overlapping moments would
+ * silently fail each other, with no clue why from the error message
+ * alone.
+ *
+ * Fix: mint two identities per macula-mcp server process at first use
+ * -- one for mesh_call/mesh_put/mesh_get/mesh_publish ("default"), one
+ * for mesh_watch, kept separate from each other for the original
+ * watch-vs-others reason above. Different processes (different
+ * sessions, different subagents each with their own macula-mcp
+ * connection) get different identities and can never collide with each
+ * other. `mesh_call`'s own docs already tells the model this is
+ * commons infrastructure, not a private sandbox -- these are
+ * throwaway per-run identities, not an attempt to look like a stable
+ * durable node.
+ *
+ * Tradeoff, called out because it's a real behavior change: `macula-cli
+ * identity` run by hand on the same machine, and mesh://identity read
+ * through this server, now report DIFFERENT node IDs -- previously
+ * every non-watch tool shared macula-cli's own persisted default
+ * identity, so they matched. Override with MACULA_MCP_IDENTITY /
+ * MACULA_MCP_WATCH_IDENTITY to pin either to a fixed path (e.g. to
+ * restore the old shared-identity behavior, or to give a long-running
+ * server a stable node ID across restarts) -- an explicit override is
+ * never auto-cleaned on exit, only a freshly minted one is.
  */
-function watchIdentityPath(): string {
-  return process.env.MACULA_MCP_WATCH_IDENTITY ?? join(homedir(), ".macula-mcp", "watch-identity.seed");
+const identityDir = join(tmpdir(), "macula-mcp-identities");
+const mintedIdentityPaths = new Set<string>();
+
+function mintIdentityPath(kind: "default" | "watch"): string {
+  mkdirSync(identityDir, { recursive: true });
+  const p = join(identityDir, `${kind}-${process.pid}-${randomBytes(6).toString("hex")}.seed`);
+  mintedIdentityPaths.add(p);
+  return p;
+}
+
+process.on("exit", () => {
+  for (const p of mintedIdentityPaths) {
+    try {
+      rmSync(p, { force: true });
+    } catch {
+      // best effort -- OS temp cleanup will catch anything left behind
+    }
+  }
+});
+// Node doesn't fire "exit" on a bare SIGINT/SIGTERM unless the process
+// actually exits; without this, Ctrl-C or a client-initiated shutdown
+// would skip the cleanup above and leak a temp identity file per run.
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => process.exit(0));
+}
+
+let cachedDefaultIdentityPath: string | undefined;
+/** Exported for mesh_identity.ts (the mesh://identity resource) and for tests. */
+export function defaultIdentityPath(): string {
+  if (process.env.MACULA_MCP_IDENTITY) return process.env.MACULA_MCP_IDENTITY;
+  return (cachedDefaultIdentityPath ??= mintIdentityPath("default"));
+}
+
+let cachedWatchIdentityPath: string | undefined;
+/** Exported for tests only -- no other module needs it, mesh_watch calls watch() directly. */
+export function watchIdentityPath(): string {
+  if (process.env.MACULA_MCP_WATCH_IDENTITY) return process.env.MACULA_MCP_WATCH_IDENTITY;
+  return (cachedWatchIdentityPath ??= mintIdentityPath("watch"));
 }
 
 export class MaculaCliUnavailable extends Error {}
@@ -134,7 +195,9 @@ export interface IdentityResult {
   path: string;
   generated: boolean;
 }
-export const identity = (): Promise<IdentityResult> => run<IdentityResult>(argv(["identity"], [], []));
+/** The identity every mesh_call/mesh_put/mesh_get/mesh_publish call uses -- see the comment above defaultIdentityPath(). */
+export const identity = (): Promise<IdentityResult> =>
+  run<IdentityResult>(argv(["identity"], ["--identity", defaultIdentityPath()], []));
 
 export interface CallResult {
   procedure: string;
@@ -148,7 +211,7 @@ export const call = (args: {
   callArgs?: Record<string, unknown>;
   timeoutMs?: number;
 }): Promise<CallResult> => {
-  const flags: string[] = [];
+  const flags: string[] = ["--identity", defaultIdentityPath()];
   if (args.timeoutMs) flags.push("--timeout", `${Math.max(1, Math.round(args.timeoutMs / 1000))}s`);
   if (args.callArgs !== undefined) flags.push("--args", JSON.stringify(args.callArgs));
   return run<CallResult>(argv(["call"], flags, [args.host ?? defaultStation(), args.procedure]));
@@ -165,7 +228,11 @@ export const publish = (args: {
   fact: Record<string, unknown>;
 }): Promise<PublishResult> =>
   run<PublishResult>(
-    argv(["pubsub", "publish"], ["--payload", JSON.stringify(args.fact)], [args.host ?? defaultStation(), args.topic]),
+    argv(
+      ["pubsub", "publish"],
+      ["--identity", defaultIdentityPath(), "--payload", JSON.stringify(args.fact)],
+      [args.host ?? defaultStation(), args.topic],
+    ),
   );
 
 export interface WatchEvent {
@@ -249,7 +316,7 @@ export const artifactPut = async (args: {
   try {
     await writeFile(filePath, Buffer.from(args.contentBase64, "base64"));
     const result = await run<{ host: string; mcid: string; size_bytes: number; duration_ms: number }>(
-      argv(["content", "put"], [], [args.host ?? defaultStation(), filePath]),
+      argv(["content", "put"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), filePath]),
     );
     return { mcid_hex: result.mcid, size_bytes: result.size_bytes };
   } finally {
@@ -268,7 +335,7 @@ export const artifactGet = async (args: { host?: string; mcidHex: string }): Pro
     size_bytes: number;
     content_base64?: string;
     duration_ms: number;
-  }>(argv(["content", "get"], [], [args.host ?? defaultStation(), args.mcidHex]));
+  }>(argv(["content", "get"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), args.mcidHex]));
   if (!result.content_base64) {
     throw new MaculaCliUnavailable("macula-cli content get returned no content_base64 (unexpected)");
   }

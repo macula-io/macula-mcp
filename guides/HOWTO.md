@@ -16,6 +16,17 @@ not previously documented came out of this pass — the bool/CBOR gotcha
 under `mesh_publish` and the tool-call-concurrency caveat under
 `mesh_watch`, both below.
 
+**v0.4.0, same day, follow-up round:** every tool but `mesh_watch` was
+found to share ONE identity machine-wide, which fails 5/6 of the time
+under genuine concurrent use (verified: 6 concurrent one-shot calls under
+the shared identity, 1 succeeded; 6 concurrent calls under 6 distinct
+identities, all 6 succeeded) — fixed by minting a fresh identity per
+server process (§2, §3). Also new: the server's MCP `instructions` field
+and a `mesh://etiquette` resource carrying the mesh-citizenship norms
+(§3), an interactive client picker on install (§1), and a `doctor`
+command that actually spawns the configured entry and talks MCP to it,
+rather than just checking a config file has the right shape (§1).
+
 ---
 
 ## 1. Install / uninstall reference
@@ -30,8 +41,28 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 
 Four steps, in order: check Node.js 20+ is present (won't install it for
 you), install `macula-cli` if it isn't already on `PATH`, `npm install -g
-@macula-io/mcp`, then run `macula-mcp-install` to register with every detected
-MCP client.
+@macula-io/mcp`, then run `macula-mcp-install`.
+
+If more than one MCP client is detected and you're running in a real
+terminal (not a piped `curl | bash`), `macula-mcp-install` asks which to
+register with -- press Enter to register with all of them, same as
+before this existed. A piped install never prompts (`--only <a,b,c>`
+still works non-interactively if you want to be specific there too).
+
+**After installing, verify the entry actually works, not just that the
+config file has it:**
+
+```bash
+npx @macula-io/mcp doctor
+```
+
+This spawns the exact command your client would run and talks real MCP
+to it -- config-file presence alone ("macula registered" in `status`)
+would have looked identical for two real bugs this project shipped and
+only caught by a human restarting their client and trying it (a wrong
+hardcoded config path, and a launch command that failed outright because
+this package ships 4 bin entries and none is literally "mcp"). `doctor`
+is the check that would have caught both immediately.
 
 | Env var | Effect |
 |---|---|
@@ -145,14 +176,15 @@ again to keep watching.
 kicks a connection the moment a second one arrives under the same node
 ID — a real anti-duplicate-session guard (see `macula-cli`'s own HOWTO
 guide §1), not a bug. `mesh_watch` holds a connection open for up to 120s;
-any other tool call sharing the default identity while a watch is in
-flight would silently kill the watcher's connection the moment it fired.
-Fixed by giving `mesh_watch` its own persisted identity
-(`~/.macula-mcp/watch-identity.seed`, or `%USERPROFILE%\.macula-mcp\
-watch-identity.seed` on Windows — override with
-`MACULA_MCP_WATCH_IDENTITY`). **Two concurrent `mesh_watch` calls would
-still collide with each other** — not solved, a known limitation, not a
-silent one.
+any other tool call sharing the same identity while a watch is in flight
+would silently kill the watcher's connection the moment it fired. Fixed
+by giving `mesh_watch` its own identity, separate from the one every
+other tool uses — see §3 for how that identity is chosen (per server
+process since v0.4.0, not a fixed shared path). **Two concurrent
+`mesh_watch` calls from the SAME server process would still collide with
+each other** — not solved, a known limitation, not a silent one; two
+watches from two DIFFERENT processes (two sessions, two subagents) do
+not collide, since each process mints its own.
 
 **If you're driving this from an agent harness (e.g. Claude Code) and want
 to see `mesh_watch` actually catch something, don't race it against a
@@ -195,14 +227,36 @@ reliable, cross-station is best-effort.
 ```json
 {
   "node_id": "7facb3bdbf646393c3177fbf84b3d83dd2e5dce81235966bf8a5ae38e0ec7b47",
-  "path": "/home/user/.config/macula-cli/identity.seed",
-  "generated": false
+  "path": "/tmp/macula-mcp-identities/default-40706-2645fd688c76.seed",
+  "generated": true
 }
 ```
 
-This is `macula-cli`'s own default identity (the one `mesh_call`/
-`mesh_publish`/`mesh_put`/`mesh_get` use) — not the same file as
-`mesh_watch`'s dedicated one, see above.
+**Since v0.4.0, this is minted fresh per macula-mcp server process, in a
+temp directory, deleted when the process exits** — it is the identity
+`mesh_call`/`mesh_publish`/`mesh_put`/`mesh_get` use (not `mesh_watch`'s
+separate one, see §2). This is a deliberate fix, not a regression:
+before v0.4.0 every non-watch tool shared macula-cli's own persisted
+default identity across every concurrent process on the machine, which
+verified live to fail 5/6 of the time under real concurrent use (§2's
+history note). One real consequence worth knowing: running `macula-cli
+identity` by hand on the same machine now reports a DIFFERENT node ID
+than this resource — they used to match. Pin either identity to a fixed
+path with `MACULA_MCP_IDENTITY` / `MACULA_MCP_WATCH_IDENTITY` if you want
+a stable node ID across restarts, or to restore the old shared-identity
+behavior; a pinned path is never auto-deleted, only a freshly minted one
+is.
+
+### `mesh://etiquette`
+
+The fuller version of the mesh-citizenship rules also condensed into this
+server's MCP `instructions` (surfaced to every client at connect time,
+whether or not a model thinks to look for a resource): no booleans on
+the wire, business verbs not CRUD, IDs in payloads not topic names,
+`mesh_publish`/`mesh_watch` are fire-and-forget not a handshake, and what
+this server deliberately doesn't do (no standing subscriptions, no local
+audit log, no peer listing). Read it once if you want the reasoning and
+receipts behind each rule rather than just the rule.
 
 ---
 

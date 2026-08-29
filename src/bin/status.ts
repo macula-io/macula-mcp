@@ -13,7 +13,7 @@ import { detect } from "../install/platform.js";
 import { probe } from "../install/existing_cli.js";
 import { ALL, type ClientAdapter } from "../install/mcp_clients/index.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 function help(): void {
   console.log(`macula-mcp status ${VERSION}
@@ -49,6 +49,8 @@ async function main(): Promise<void> {
   for (const client of ALL) {
     await reportClient(client);
   }
+  console.log("\n\"registered\" above means the config file has the right entry -- it does not");
+  console.log("prove the entry actually runs. Run `npx @macula-io/mcp doctor` for a real check.");
 }
 
 async function reportClient(c: ClientAdapter): Promise<void> {
