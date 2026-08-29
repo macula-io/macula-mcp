@@ -188,6 +188,89 @@ function execFile(
   });
 }
 
+/**
+ * The oldest macula-cli release this macula-mcp version is known to work
+ * correctly against. macula-mcp shells out to a SEPARATELY installed
+ * macula-cli binary (see this file's own top-of-file comment) rather
+ * than vendoring one of the Go/Rust/.NET SDKs directly -- a deliberate
+ * choice (avoids native-binding packaging complexity for a Node.js
+ * package), but it means a real macula-cli bug fix landing upstream does
+ * NOT reach an macula-mcp user until they separately update their
+ * installed macula-cli binary. That gap was real, not hypothetical: on
+ * 2026-08-29, macula-cli v0.1.2 (and everything before v0.1.3) shipped a
+ * PUBLISH-then-Close race that could silently drop a `pubsub publish`
+ * call -- exactly the shape `mesh_publish` uses -- with zero error
+ * surfaced anywhere. Bump this constant whenever a macula-cli fix this
+ * server's own tools depend on ships in a new release.
+ */
+export const MIN_MACULA_CLI_VERSION = "0.1.3";
+
+export interface CliVersionCheck {
+  ok: boolean;
+  /** The raw `macula-cli --version` output, or undefined if it couldn't be run at all. */
+  raw?: string;
+  /** Parsed X.Y.Z, or undefined if raw didn't contain a recognizable version (e.g. a local "dev" build). */
+  installed?: string;
+  required: string;
+  error?: string;
+}
+
+/**
+ * Parses "X.Y.Z" (optionally "vX.Y.Z") out of an arbitrary string;
+ * undefined if none found. Exported standalone so this parsing can be
+ * unit-tested without spawning a real subprocess -- same rationale as
+ * parseWatchOutput above.
+ */
+export function extractSemver(s: string): string | undefined {
+  const m = /v?(\d+)\.(\d+)\.(\d+)/.exec(s);
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : undefined;
+}
+
+/** True if `a` is older than `b`, comparing "X.Y.Z" strings numerically per segment. */
+export function isOlder(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] < pb[i];
+  }
+  return false;
+}
+
+/**
+ * Checks the installed macula-cli binary's version against
+ * MIN_MACULA_CLI_VERSION. Does not throw -- a version problem is
+ * something a caller reports, not a hard failure of whatever operation
+ * triggered the check, since an old-but-still-functional binary should
+ * degrade to a warning, not block every tool call.
+ */
+export async function checkCliVersion(): Promise<CliVersionCheck> {
+  const bin = binPath();
+  let stdout: string;
+  try {
+    ({ stdout } = await execFile(bin, ["--version"]));
+  } catch (e) {
+    return {
+      ok: false,
+      required: MIN_MACULA_CLI_VERSION,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+  const raw = stdout.trim();
+  const installed = extractSemver(raw);
+  if (!installed) {
+    // A "dev" build (no -ldflags version injection, e.g. `go build`
+    // straight from source) is a legitimate thing to develop against --
+    // warn, don't fail, since there's no version to actually compare.
+    return { ok: true, raw, required: MIN_MACULA_CLI_VERSION };
+  }
+  return {
+    ok: !isOlder(installed, MIN_MACULA_CLI_VERSION),
+    raw,
+    installed,
+    required: MIN_MACULA_CLI_VERSION,
+  };
+}
+
 // ---- typed operations -------------------------------------------------
 
 export interface IdentityResult {

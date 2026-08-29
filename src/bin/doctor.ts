@@ -21,6 +21,7 @@ import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ALL } from "../install/mcp_clients/index.js";
+import { checkCliVersion } from "../macula_cli.js";
 
 const VERSION = "0.4.0";
 const TIMEOUT_MS = 30_000; // a cold `npx` fetch from the registry can be slow
@@ -51,6 +52,12 @@ real MCP client over stdio, and confirms it actually answers with the
 expected tools and resources. Config-file presence alone does not prove
 the entry works -- this project has shipped two entries that looked
 correct and silently never ran.
+
+Also checks the installed macula-cli binary's own version against the
+minimum this server's tools depend on -- this server shells out to a
+separately installed macula-cli, so an upstream bug fix does not reach
+you until macula-cli itself is updated, independent of this package's
+own version.
 
 Flags:
   --only <a,b,c>   Only check the listed clients.
@@ -119,7 +126,28 @@ async function main(): Promise<void> {
   let anyChecked = false;
   let anyFailed = false;
 
-  console.log("[macula-mcp doctor] spawning each configured client's real command -- this can take a moment.\n");
+  const versionCheck = await checkCliVersion();
+  process.stdout.write(`  ${pad("macula-cli")} `);
+  if (!versionCheck.raw) {
+    // MaculaCliUnavailable-shaped failure -- same "not installed / not on
+    // PATH" case checkEntry() below would eventually hit per-client too,
+    // but this catches it once, up front, with a clearer message.
+    console.log(`✗ ${versionCheck.error}`);
+    anyFailed = true;
+  } else if (!versionCheck.installed) {
+    console.log(`? ${versionCheck.raw} (no version info -- a local/dev build; skipping the version check)`);
+  } else if (!versionCheck.ok) {
+    console.log(
+      `✗ v${versionCheck.installed} is older than v${versionCheck.required} -- a real bug fix this server's ` +
+        `tools depend on (e.g. mesh_publish) is missing. Re-run: curl -fsSL ` +
+        `https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash`,
+    );
+    anyFailed = true;
+  } else {
+    console.log(`✓ v${versionCheck.installed} (>= v${versionCheck.required} required)`);
+  }
+
+  console.log("\n[macula-mcp doctor] spawning each configured client's real command -- this can take a moment.\n");
 
   for (const client of targets) {
     const entry = await readMaculaEntry(client.configPath());

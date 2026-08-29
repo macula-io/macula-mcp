@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MaculaCliError, defaultIdentityPath, parseWatchOutput, watchIdentityPath } from "./macula_cli.js";
+import {
+  MaculaCliError,
+  defaultIdentityPath,
+  extractSemver,
+  isOlder,
+  parseWatchOutput,
+  watchIdentityPath,
+} from "./macula_cli.js";
 
 describe("parseWatchOutput", () => {
   it("parses one WatchEvent per NDJSON line", () => {
@@ -36,6 +43,43 @@ describe("parseWatchOutput", () => {
   it("ignores a non-JSON line rather than throwing", () => {
     const stdout = `not json at all\n{"topic":"t","publisher":"p","seq":1,"payload":null,"delivered_via":"direct","received_at":"x"}\n`;
     expect(parseWatchOutput(stdout)).toHaveLength(1);
+  });
+});
+
+describe("extractSemver", () => {
+  it("parses the real macula-cli --version output shape", () => {
+    expect(extractSemver("macula-cli 0.1.2 (commit deadbeef, built 2026-08-29T14:22:11Z)")).toBe("0.1.2");
+  });
+
+  it("strips a leading v", () => {
+    expect(extractSemver("v0.1.3")).toBe("0.1.3");
+  });
+
+  it("returns undefined for a dev build with no injected version", () => {
+    expect(extractSemver("macula-cli dev (commit none, built unknown)")).toBeUndefined();
+  });
+
+  it("returns undefined for a string with no version-shaped substring at all", () => {
+    expect(extractSemver("not a version")).toBeUndefined();
+  });
+});
+
+describe("isOlder", () => {
+  it("compares patch versions", () => {
+    expect(isOlder("0.1.2", "0.1.3")).toBe(true);
+    expect(isOlder("0.1.3", "0.1.2")).toBe(false);
+  });
+
+  it("compares minor versions ahead of patch", () => {
+    expect(isOlder("0.1.9", "0.2.0")).toBe(true);
+  });
+
+  it("compares major versions ahead of minor and patch", () => {
+    expect(isOlder("0.9.9", "1.0.0")).toBe(true);
+  });
+
+  it("is false for equal versions", () => {
+    expect(isOlder("0.1.3", "0.1.3")).toBe(false);
   });
 });
 
