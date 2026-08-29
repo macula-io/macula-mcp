@@ -1,8 +1,16 @@
 // Claude Code MCP client integration.
 //
-// Config path: ~/.claude/mcp.json (global) AND/OR project-local
-// .mcp.json. MVP writes the global file only; project-local is the
-// user's choice on a per-repo basis.
+// Config path: ~/.claude.json (a FILE, not inside the ~/.claude/
+// directory) -- this is Claude Code's real user-scope config, storing
+// startup counts, project state, and MCP servers all in one JSON
+// object under a top-level `mcpServers` key. Verified directly (not
+// assumed) 2026-08-29 via `claude mcp add --scope user`, since an
+// earlier guess of `~/.claude/mcp.json` here was simply wrong --
+// Claude Code never reads that path, so every prior install this ran
+// against was silently a no-op for this client. Project-local
+// `.mcp.json` (checked into or living alongside a specific project)
+// takes precedence over this when both define the same server name;
+// this installer only ever writes user scope.
 //
 // Entry format (Claude Code's spec):
 //   {
@@ -37,15 +45,11 @@ export const CLIENT_ID = "claude-code";
 export const CLIENT_LABEL = "Claude Code";
 
 export function configPath(): string {
-  return join(homedir(), ".claude", "mcp.json");
+  return join(homedir(), ".claude.json");
 }
 
 export function isInstalled(): boolean {
-  // Claude Code installs at ~/.claude — presence of that directory
-  // (or any of the canonical files) is a strong-enough signal for
-  // MVP. False positives are harmless (we just write a config file
-  // the client can pick up later).
-  return existsSync(join(homedir(), ".claude"));
+  return existsSync(configPath());
 }
 
 export async function install(): Promise<MergeResult> {
