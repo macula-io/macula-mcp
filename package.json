@@ -4,6 +4,26 @@
   "description": "Model Context Protocol server that exposes the Macula mesh to any agent harness, via macula-cli",
   "license": "Apache-2.0",
   "type": "module",
+  "homepage": "https://github.com/macula-io/macula-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/macula-io/macula-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/macula-io/macula-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "macula",
+    "mesh",
+    "agent",
+    "claude"
+  ],
+  "author": {
+    "name": "Macula",
+    "email": "raf.lefever@erlef.org"
+  },
   "bin": {
     "macula-mcp": "dist/index.js",
     "macula-mcp-install": "dist/bin/install.js",
