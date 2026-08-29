@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run typecheck
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run build
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      # Offline only: parseWatchOutput's NDJSON parsing (src/macula_cli.test.ts).
+      # No live-fleet test here -- every tool in this repo shells out to
+      # macula-cli, which isn't installed on this runner and shouldn't need
+      # to be for a unit-test job; live verification is "run the built MCP
+      # server against a real macula-cli," done by hand, same convention
+      # macula-cli's own README documents for itself.
+      - run: npm test
