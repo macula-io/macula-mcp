@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-30
+
 ### Added
 - `mesh_serve` / `mesh_unserve`: advertise a procedure on the mesh,
   answered by a local shell command run once per inbound call (JSON
@@ -153,7 +155,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/macula-io/macula-mcp/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/macula-io/macula-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/macula-io/macula-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/macula-io/macula-mcp/compare/v0.4.0...v0.4.1
