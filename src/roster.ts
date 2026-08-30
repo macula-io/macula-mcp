@@ -14,6 +14,17 @@
 // one process's own local cache, and pulling in PouchDB's dependency
 // weight for a single-writer key-value table would be solving a
 // problem this doesn't have.
+//
+// better-sqlite3 is pinned to the 12.x line, NOT latest (13.x)
+// deliberately: 13.0.3 requires Node >=22 and segfaults outright under
+// this project's own CI-tested Node 20 (confirmed live -- exit 139,
+// reproduced locally under Node 20 via asdf before landing the fix,
+// npm only warns on the engine mismatch rather than failing the
+// install, so this is silent until something actually touches the
+// native binding). 12.11.1 explicitly declares support for 20.x --
+// don't bump past the 12.x line without first confirming the new
+// version's own declared `engines` covers Node 20, not just running
+// `npm test` on whatever Node happens to be on the developer's PATH.
 
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
