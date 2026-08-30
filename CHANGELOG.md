@@ -10,15 +10,32 @@ fires on a `v*` tag push, not on every commit to `main`).
 ### Added
 - `mesh_call`/`mesh_watch`/`mesh_publish` take an optional `realm` (64 hex
   chars, `macula-cli`'s `-realm`), all three previously hardcoded to the
-  default all-zero realm with no way to override it. Found live: a real
-  service (`hecate_stations.list_stations`), genuinely being served, came
-  back `unknown_next_peer` through this server for no reason other than
-  this parameter not existing -- confirmed by reproducing the exact same
-  call directly against `macula-cli` with `-realm` set correctly. This
-  server still has no way to discover which realm a capability lives in
-  (that's a DHT query, `macula:find_records_by_type/2` server-side, not
-  yet a `macula-cli` subcommand this server could wrap) -- see the new
+  default all-zero realm with no way to override it -- confirmed by
+  reproducing the exact same call directly against `macula-cli` with
+  `-realm` set. The service that motivated this (`hecate_stations.list_stations`)
+  turned out NOT to be a realm-mismatch case -- see the `mesh_find_records_by_type`
+  entry below, which is how that was actually determined. Still real and
+  still needed: a wrong realm and a missing advertisement produce the
+  identical `unknown_next_peer` from the caller's side, and this parameter
+  is required to rule the first one out. See the new
   [Realms](README.md#realms) section.
+- `mesh_find_record`/`mesh_find_records`/`mesh_find_records_by_type` read
+  the mesh's signed DHT record store (`macula-cli dht find-record`/
+  `find-records`/`find-records-by-type`, added alongside these tools).
+  `mesh_find_records_by_type` with `record_type: "procedure_advertisement"`
+  is the discovery entry point this server was missing: every capability a
+  station knows about, with each one's realm decoded straight out of its
+  `procedure_uri` (embedded there, not a separate field). Built to
+  actually answer why `hecate_stations.list_stations` was unreachable --
+  verified live against the real demo fleet that it simply isn't in the
+  DHT under any realm this station can see, meaning the earlier realm-
+  mismatch theory (previous changelog entry, before this correction) was
+  wrong: the advertisement itself never landed, a publish-side problem,
+  not something a caller's `realm` parameter could ever have fixed. Every
+  record's signature is verified and reported (`verified`/`verify_error`),
+  never silently assumed good. Requires a `macula-cli` release exposing
+  `dht` (not yet tagged as of this entry) -- see `macula-cli`'s own
+  CHANGELOG/README.
 
 ### Changed
 - `mesh_watch`'s `duration_seconds` ceiling raised from 120 to 3600. Not a

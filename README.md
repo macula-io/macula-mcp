@@ -69,6 +69,7 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_call`    | RPC             | Invoke a capability a peer advertises (build, test, search, deploy) over the mesh. Returns the result + `duration_ms`.                                                                                                                                                            |
 | `mesh_put`     | Content Sharing | Publish a content-addressed artifact; returns its MCID hex.                                                                                                                                                                                                                       |
 | `mesh_get`     | Content Sharing | Fetch a content-addressed artifact by MCID hex.                                                                                                                                                                                                                                   |
+| `mesh_find_record` / `mesh_find_records` / `mesh_find_records_by_type` | DHT | Read the mesh's signed DHT record store directly. `mesh_find_records_by_type` with `record_type: "procedure_advertisement"` is the discovery entry point — every capability a station knows about, each one's realm decoded out of its `procedure_uri`. Always the DHT's own all-zero realm; none of the three take a `realm` parameter. See [Realms](#realms). |
 | `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
 | `mesh_watch`   | Pub/Sub         | Watch a topic for up to `duration_seconds` (max 3600) and return whatever arrived. **Blocks for the call's duration** (or until `count` events arrive) — there's no standing background subscription; call again to keep watching. On a host that backgrounds slow tool calls, a long duration + `count: 1` behaves like a low-latency push, not a client stuck waiting. |
 | `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately, and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
@@ -90,17 +91,22 @@ tools default to the all-zero realm (`macula-cli`'s own default) when
 to a caller using the wrong one — `unknown_next_peer` (or, with `-direct`
 resolution, "no direct-dial advertisement in the DHT") doesn't necessarily
 mean the procedure doesn't exist, only that this call didn't carry the
-realm it's actually scoped to. Found live: `hecate_stations.list_stations`
-exists and is genuinely being served, but is unreachable through this
-server without its realm, because nothing here could pass one through at
-all until this was added.
+realm it's actually scoped to. `realm` is 64 lowercase-or-uppercase hex
+characters (32 bytes).
 
-`realm` is 64 lowercase-or-uppercase hex characters (32 bytes). This
-server has no way to discover which realm a given capability lives in —
-that's a mesh-wide DHT query (`macula:find_records_by_type/2` server-side,
-type `procedure_advertisement`), not yet exposed as a `macula-cli`
-subcommand this server could wrap. If you don't already know the realm,
-you have to get it from whoever operates the service.
+Use `mesh_find_records_by_type` with `record_type: "procedure_advertisement"`
+to find out which realm a capability actually lives in, rather than
+guessing — see the DHT row in the table above. Worth being precise about
+what this proves and doesn't: `hecate_stations.list_stations` was the
+original motivating case for adding `realm` here, on the theory that it
+was being called under the wrong one. Running the DHT query once it
+existed showed that theory was wrong — the capability isn't in the DHT
+under *any* realm this station can see, so the advertisement itself never
+landed (a publish-side problem, unrelated to what a caller passes as
+`realm`). Left in as an accurate account of how this was actually found,
+not a hypothetical: a realm mismatch and a missing advertisement produce
+the identical symptom (`unknown_next_peer`) from the caller's side, and
+only a DHT query tells them apart.
 
 ### Presence
 

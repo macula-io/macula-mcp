@@ -35,6 +35,7 @@ import { registerEtiquette } from "./mesh_etiquette.js";
 import { registerHelp } from "./mesh_help.js";
 import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
+import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
 import { registerMeshHello } from "./mesh_hello.js";
@@ -62,7 +63,8 @@ backgrounds slow tool calls (Claude Code does) delivers the result the moment so
 arrives.
 - mesh_call/mesh_watch/mesh_publish default to the all-zero realm. unknown_next_peer can mean \
 "served under a different realm," not "doesn't exist" -- pass realm (64 hex chars) if you know \
-it; this server has no way to discover it for you.
+it, or find it with mesh_find_records_by_type (record_type "procedure_advertisement" lists every \
+capability a station knows about, realm decoded out of each one's procedure_uri).
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
@@ -90,6 +92,7 @@ registerHelp(server);
 // Tools — actions, each a one-shot macula-cli subprocess call.
 registerMeshCall(server);
 registerMeshArtifact(server);
+registerMeshDht(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 

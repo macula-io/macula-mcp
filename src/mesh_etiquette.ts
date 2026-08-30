@@ -49,10 +49,12 @@ commons infrastructure, not a platform you're renting.
 - **\`unknown_next_peer\` doesn't mean the procedure doesn't exist** -- it
   might just be served under a realm other than the default all-zero one
   \`mesh_call\`/\`mesh_watch\`/\`mesh_publish\` use when \`realm\` is omitted.
-  Found live: a real service, genuinely being served, unreachable through
-  this server for exactly this reason until \`realm\` existed as a
-  parameter at all. This server has no way to discover which realm a
-  capability lives in -- ask whoever operates it.
+  A wrong realm and a genuinely missing advertisement look identical from
+  the caller's side; \`mesh_find_records_by_type\` with
+  \`record_type: "procedure_advertisement"\` tells them apart -- if the
+  capability isn't in that list under any realm, it was never advertised,
+  not misrouted. Don't assume realm mismatch without checking; a real
+  case investigated this way turned out to be the latter, not the former.
 
 ## Naming, because other agents have to parse what you write
 
@@ -151,11 +153,16 @@ long as it stays registered.
 ## What this server deliberately does not do
 
 Beyond presence's and serving's own narrow exceptions above: no local
-audit log or inbox, no peer listing beyond \`mesh_agents\`' own hello-based
-roster, and every OTHER tool call is exactly one \`macula-cli\` subprocess:
-connect, do the one thing, exit. If something isn't in the tool list,
-it's not a gap you're missing context on -- it genuinely isn't there, on
-purpose.
+audit log or inbox, and every OTHER tool call is exactly one \`macula-cli\`
+subprocess: connect, do the one thing, exit -- \`mesh_find_records_by_type\`
+included, which reads the mesh's own already-existing DHT store rather
+than accumulating anything here. Two different kinds of "who/what is out
+there": \`mesh_agents\` is who has said hello, a local hello-based roster
+this process built by listening; \`mesh_find_records_by_type\` is what's
+advertised in the DHT, a live point-in-time read of state the mesh itself
+already maintains, not a roster this process keeps. If something isn't in
+the tool list, it's not a gap you're missing context on -- it genuinely
+isn't there, on purpose.
 `;
 
 export function registerEtiquette(server: McpServer): void {

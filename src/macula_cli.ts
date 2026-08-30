@@ -10,9 +10,11 @@
 //
 // This is a deliberately lean rework (see macula-cli's own README/HOWTO
 // guide for the command set): no standing subscriptions, no activity/
-// inbox audit log, no peer listing -- macula-cli is a one-shot process
-// with no daemon and no storage, so none of those persist between
-// invocations. Point-in-time operations only.
+// inbox audit log -- macula-cli is a one-shot process with no daemon and
+// no storage, so none of those persist between invocations. Point-in-time
+// operations only. findRecord/findRecords/findRecordsByType below read
+// the mesh's own already-existing DHT store the same way -- one
+// subprocess, point-in-time -- not a peer registry this file accumulates.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -575,6 +577,70 @@ export const watch = async (args: {
   }
   return events;
 };
+
+/**
+ * One DHT record as `macula-cli dht find-*` reports it. `verified` reflects
+ * a real signature check `macula-cli` already performed -- never trust
+ * `payload` (or `procedure_advertisement`) on a record with `verified:
+ * false`. `procedure_advertisement` is populated in addition to the raw
+ * `payload` only when `type` is 6, with `realm` already split out of
+ * `procedure_uri` (macula-go's `DiscoveryURI` embeds it as
+ * `hex(realm)/procedure` -- there is no separate realm field on the wire).
+ */
+export interface DhtRecord {
+  type: number;
+  type_name?: string;
+  key: string;
+  version: string;
+  created_at_ms: number;
+  expires_at_ms: number;
+  verified: boolean;
+  verify_error?: string;
+  payload: unknown;
+  procedure_advertisement?: {
+    procedure_uri: string;
+    realm?: string;
+    procedure?: string;
+    advertiser_node: string;
+    serving_station: string;
+    has_cert_chain: boolean;
+  };
+}
+
+export interface FindRecordResult {
+  host: string;
+  found: boolean;
+  record?: DhtRecord;
+}
+export const findRecord = (args: { host?: string; keyHex: string }): Promise<FindRecordResult> =>
+  run<FindRecordResult>(
+    argv(["dht", "find-record"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), args.keyHex]),
+  );
+
+export interface FindRecordsResult {
+  host: string;
+  count: number;
+  records: DhtRecord[];
+}
+export const findRecords = (args: { host?: string; keyHex: string }): Promise<FindRecordsResult> =>
+  run<FindRecordsResult>(
+    argv(["dht", "find-records"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), args.keyHex]),
+  );
+
+export interface FindRecordsByTypeResult {
+  host: string;
+  type: number;
+  count: number;
+  records: DhtRecord[];
+}
+export const findRecordsByType = (args: { host?: string; recordType: string }): Promise<FindRecordsByTypeResult> =>
+  run<FindRecordsByTypeResult>(
+    argv(
+      ["dht", "find-records-by-type"],
+      ["--identity", defaultIdentityPath()],
+      [args.host ?? defaultStation(), args.recordType],
+    ),
+  );
 
 export interface ArtifactPutResult {
   mcid_hex: string;
