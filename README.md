@@ -74,6 +74,8 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately, and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
 | `mesh_agents`  | Presence        | A paged list of agents seen via `agent.hello`, sorted most-recently-seen first. Reads a local cache; only reflects agents heard from while this process has been running.                                                                                                         |
 | `mesh_goodbye` | Presence        | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscription started by `mesh_hello`.                                                                                          |
+| `mesh_serve`   | Serving         | Advertise a procedure, answered by a local shell command run once per inbound call (JSON in on its stdin, JSON out on its stdout). **A standing inbound trigger any mesh caller can invoke repeatedly** — see [Serving](#serving) before using this.                              |
+| `mesh_unserve` | Serving         | Stop serving a procedure registered by `mesh_serve`. Also stops this process's own serve-daemon once nothing is registered on it.                                                                                                                                                  |
 
 Every tool takes an optional `host` (`"host[:port]"`) to pick which station
 to connect through; all default to `MACULA_MESH_STATION` (see
@@ -107,24 +109,54 @@ ASCII art, falling back to a small bundled default). Both env vars are
 overridable per call via `mesh_hello`'s own `operator_name`/`message`
 arguments.
 
+### Serving
+
+`mesh_serve`/`mesh_unserve` are the second exception to "one-shot
+subprocess" — and a bigger one than presence. Every other tool here,
+presence included, is something THIS agent initiates. A served procedure
+is a **standing inbound trigger**: once registered, any mesh caller can
+invoke it, repeatedly, running a local shell command on this machine, for
+as long as it stays registered. Requires `macula-cli` >= 0.3.0 (see
+[`-exec`](https://github.com/macula-io/macula-cli#daemon-mode)), which
+added the only registration mode that computes a reply per call instead
+of a fixed one.
+
+The command's stdin is the caller's own JSON payload — never
+shell-interpolated into the command string itself, so a malicious
+caller's payload can't inject shell syntax — and its stdout becomes the
+reply. A non-zero exit, a timeout (`exec_timeout_seconds`, default 10,
+capped at 60), or invalid JSON on stdout all become a normal error reply
+to that caller; verified live that none of the three can affect any
+OTHER procedure the same call has registered, or the daemon itself.
+
+**Never register a command you would not want a stranger able to run
+repeatedly on this machine.** `mesh_unserve` stops accepting calls for a
+procedure immediately, and tears down this process's own serve-daemon
+entirely once nothing is left registered on it — a later `mesh_serve`
+call starts a fresh one. Backed by its own fourth identity
+(`MACULA_MCP_SERVE_IDENTITY`), separate from presence's — see
+[Environment](#environment).
+
 ## Resources
 
 | Resource           | Content                                                                                                                                                                                         |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mesh://identity`  | This macula-mcp server process's own Ed25519 identity (node ID) — minted fresh per process since v0.4.0, not the same as running `macula-cli` by hand.                                          |
+| `mesh://identity`  | This macula-mcp server process's own Ed25519 identity (node ID) — minted fresh per process since v0.4.0, not the same as running `macula-cli` by hand. Reports the "default" identity only, not `mesh_watch`'s, presence's, or serving's own separate ones. |
 | `mesh://etiquette` | The reasoning and receipts behind the mesh-citizenship rules also condensed into this server's MCP `instructions` (wire-format limits, naming norms, what this server deliberately doesn't do). |
 
 ## Prompts
 
-For a HUMAN in the conversation, not the agent — surfaces as a slash command in clients that support MCP prompts (e.g. `/mcp__macula__help` in Claude Code). Five zero-argument prompts rather than one with a topic argument: `@modelcontextprotocol/sdk` 1.30.0 errors on a bare invocation (no `arguments` field at all — the normal way to invoke a plain slash command) of a prompt whose args are all optional, so separate prompts sidestep it.
+For a HUMAN in the conversation, not the agent — surfaces as a slash command in clients that support MCP prompts (e.g. `/mcp__macula__help` in Claude Code). Seven zero-argument prompts rather than one with a topic argument: `@modelcontextprotocol/sdk` 1.30.0 errors on a bare invocation (no `arguments` field at all — the normal way to invoke a plain slash command) of a prompt whose args are all optional, so separate prompts sidestep it.
 
-| Prompt             | Asks the model to explain                                                    |
-| ------------------ | ---------------------------------------------------------------------------- |
-| `help`             | Full quick-start: tool overview, one example each, top gotchas.              |
-| `help_identity`    | How identity works, `mesh_watch`'s separate identity, pinning with env vars. |
-| `help_wire_format` | The no-bool / naming rules, with a valid and invalid example.                |
-| `help_watch`       | What `mesh_watch` is actually for, and the mistake to avoid.                 |
-| `help_install`     | Install, register, verify (`doctor`), what a failure means.                  |
+| Prompt             | Asks the model to explain                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| `help`             | Full quick-start: tool overview, one example each, top gotchas.                          |
+| `help_identity`    | How identity works, each daemon-backed tool's own separate identity, pinning with env vars. |
+| `help_wire_format` | The no-bool / naming rules, with a valid and invalid example.                             |
+| `help_watch`       | What `mesh_watch` is actually for, and the mistake to avoid.                              |
+| `help_presence`    | What `mesh_hello`/`mesh_agents`/`mesh_goodbye` actually do, the SQLite roster.            |
+| `help_serve`       | What `mesh_serve`/`mesh_unserve` actually expose, and the risk to weigh before using them. |
+| `help_install`     | Install, register, verify (`doctor`), what a failure means.                              |
 
 ## Prerequisites
 
@@ -206,12 +238,33 @@ and troubleshooting.
 | `MACULA_MCP_IDENTITY`          | Pin the identity `mesh_call`/`mesh_put`/`mesh_get`/`mesh_publish` use to a fixed path, instead of a fresh one minted per process.                                    | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_WATCH_IDENTITY`    | Same, for `mesh_watch`'s identity (kept separate from every other tool's — see the [guide](guides/HOWTO.md) §2).                                                     | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_PRESENCE_IDENTITY` | Same, for the internal daemon `mesh_hello`/`mesh_agents`/`mesh_goodbye` hold open (a third identity, separate from both of the above for the same collision reason). | fresh temp file per process, deleted on exit |
+| `MACULA_MCP_SERVE_IDENTITY`    | Same, for the internal daemon `mesh_serve`/`mesh_unserve` hold open (a fourth identity, separate from all of the above for the same collision reason).               | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_ROSTER_DB`         | Where `mesh_agents`' SQLite roster lives.                                                                                                                            | `$HOME/.macula-mcp/roster.sqlite3`           |
 | `MACULA_MCP_OPERATOR_NAME`     | Default `operator_name` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                | none                                         |
 | `MACULA_MCP_HELLO_MESSAGE`     | Default `message` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                      | none                                         |
 | `MACULA_MCP_BANNER_FILE`       | Path to a custom ASCII banner `mesh_hello` prints.                                                                                                                   | a small bundled default                      |
 
 ## Status
+
+**On `main`, not yet tagged — mesh_serve/mesh_unserve, real callback-backed serving, 2026-08-30.**
+The second exception to "one-shot `macula-cli` subprocess call," and a
+bigger one than presence: `mesh_serve` registers a procedure against this
+process's own serve-daemon (a fourth identity, separate from presence's),
+answered by a local shell command run once per inbound call — the
+caller's JSON payload on stdin, its stdout the reply. Depends on
+`macula-cli` >= 0.3.0's new `serve -daemon -exec`, the first registration
+mode that computes a reply per call rather than something fixed at
+registration time (`-reply`/`-echo`, the only options before it).
+Verified live against the real demo fleet: genuine per-call computation
+(three different inputs, three different correctly-computed replies, not
+a cached value); three sibling registrations deliberately made to fail
+three different ways (non-zero exit, invalid JSON on stdout, a timeout)
+each correctly answered their own caller with an error while a fourth,
+working registration kept computing correctly throughout, confirming a
+misbehaving handler can't affect any other procedure or the daemon
+itself; presence and serving coexisting simultaneously with distinct
+identities, neither getting the other kicked; and `mesh_unserve`
+correctly tearing the daemon down once nothing is left registered on it.
 
 **v0.5.0 — mesh_hello/mesh_agents/mesh_goodbye, real presence, 2026-08-30.** The first
 tools that aren't a bare one-shot `macula-cli` subprocess call: an
@@ -259,9 +312,11 @@ design** — at the time (`macula-cli` was a one-shot process with no daemon
 and no storage), none of these had an honest equivalent without `macula-mcp`
 itself becoming a stateful daemon, a fork deliberately not taken then (see
 `macula-io/macula-cli`'s own project memory for that tradeoff). `macula-cli`
-gained a real daemon later (v0.2.0) — presence (`mesh_hello`/`mesh_agents`/
-`mesh_goodbye`, see [Presence](#presence)) is this server narrowly taking
-that fork back up for exactly one use, not a reversal of the rework below:
+gained a real daemon later (v0.2.0, then `-exec` in v0.3.0) — presence
+(`mesh_hello`/`mesh_agents`/`mesh_goodbye`, see [Presence](#presence)) and
+serving (`mesh_serve`/`mesh_unserve`, see [Serving](#serving)) are this
+server narrowly taking that fork back up, each for exactly one use, not a
+reversal of the rework below:
 
 - **Standing subscriptions + inbox.** The old `mesh_subscribe`/
   `mesh_unsubscribe`/`mesh_subscriptions`/`mesh_inbox` quartet relied on

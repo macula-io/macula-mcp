@@ -302,6 +302,79 @@ discoverable, not as a connection ritual. The heartbeat interval has a
 10-second floor enforced in code (`interval_seconds` below that is
 clamped up), a guard against hammering the station, not a suggestion.
 
+### `mesh_serve` / `mesh_unserve`
+
+**The second exception to "one-shot subprocess," and a bigger one than
+presence.** Every other tool here, presence included, is something THIS
+agent initiates. `mesh_serve` creates a STANDING INBOUND TRIGGER: once a
+procedure is registered, any mesh caller can invoke the registered shell
+command on this machine, repeatedly, for as long as it stays registered.
+Requires `macula-cli` >= 0.3.0's `serve -daemon -exec` — the only
+registration mode that computes a reply per call rather than something
+fixed at registration time.
+
+`mesh_serve` starts its own serve-daemon on first use (a fourth identity,
+`MACULA_MCP_SERVE_IDENTITY`, separate from default/watch/presence), then
+registers the procedure. The command's stdin is the caller's own JSON
+payload (never shell-interpolated into the command string, so a
+malicious caller's payload can't inject shell syntax); its stdout becomes
+the reply:
+
+```json
+{
+  "procedure": "macula_mcp.live_verify.1788118622367",
+  "registered": true,
+  "serving": ["macula_mcp.live_verify.1788118622367"]
+}
+```
+
+A separate `macula-cli call` process reaching it over the real mesh,
+genuinely computed per call — verified live with three different inputs,
+three different correctly-computed replies, not a cached value:
+
+```json
+{
+  "procedure": "macula_mcp.live_verify.1788118622367",
+  "responded_by": "5748e6a74a2a0c5f673ee15db76ac82ddeeab029f7d5520649bc4a9464e5122c",
+  "payload": { "doubled": 34 },
+  "duration_ms": 53
+}
+```
+
+**A misbehaving handler only fails its own caller.** A non-zero exit, a
+timeout (`exec_timeout_seconds`, default 10, capped at 60), or invalid
+JSON on stdout all become a normal error reply — verified live: three
+sibling registrations deliberately made to fail each of these three ways
+all correctly answered their own caller with an error while a fourth,
+working registration kept computing correctly throughout, and the
+daemon's own status afterward showed all four still registered and
+healthy. None of the three can crash the shared serve loop or affect any
+OTHER procedure this call has registered.
+
+`mesh_unserve` stops accepting calls for a procedure immediately, and
+tears down the serve-daemon entirely once nothing is left registered on
+it — confirmed live: calling the procedure again afterward correctly
+fails with `unknown_next_peer`, not just "eventually stops answering":
+
+```json
+{
+  "procedure": "macula_mcp.live_verify.1788118622367",
+  "unregistered": true,
+  "serving": [],
+  "daemon_stopped": true
+}
+```
+
+Also confirmed live: presence and serving coexisting simultaneously (two
+separate identities, two separate daemons), the served procedure still
+answering correctly the whole time `mesh_hello`'s own heartbeat was
+active, neither daemon getting the other kicked.
+
+**Never register a command you would not want a stranger able to run
+repeatedly on this machine.** The command runs with whatever permissions
+this process has — treat `mesh_serve` as opening a real network-triggered
+local service, because that is exactly what it is.
+
 ---
 
 ## 3. Resources
@@ -338,8 +411,16 @@ to pin it, same reasoning as the other two: it holds a connection open
 for as long as presence is active, and sharing an identity with anything
 else that connects concurrently would get one of them kicked (the
 station's own anti-duplicate-session guard, see §2's `mesh_watch` note).
+
+**A fourth identity backs `mesh_serve`/`mesh_unserve`'s own serve-daemon**
+— `MACULA_MCP_SERVE_IDENTITY` to pin it, same reasoning again, and
+deliberately separate from presence's own third identity too: presence
+and serving are different exposures (a heartbeat/subscription vs. an
+inbound trigger any mesh caller can invoke), worth being able to reason
+about or revoke independently — see §2's `mesh_serve` section.
+
 This resource still only reports the "default" identity above, not
-`mesh_watch`'s or presence's own.
+`mesh_watch`'s, presence's, or serving's own.
 
 ### `mesh://etiquette`
 
@@ -348,11 +429,13 @@ server's MCP `instructions` (surfaced to every client at connect time,
 whether or not a model thinks to look for a resource): no booleans on
 the wire, business verbs not CRUD, IDs in payloads not topic names,
 `mesh_publish`/`mesh_watch` are fire-and-forget not a handshake, presence
-etiquette (don't call `mesh_hello` reflexively, say goodbye), and what
-this server deliberately doesn't do beyond presence's own narrow
-exception (no local audit log, no peer listing beyond `mesh_agents`' own
-roster). Read it once if you want the reasoning and receipts behind each
-rule rather than just the rule.
+etiquette (don't call `mesh_hello` reflexively, say goodbye), serving
+etiquette (never register a command you wouldn't want a stranger able to
+trigger repeatedly, unserve when done), and what this server deliberately
+doesn't do beyond presence's and serving's own narrow exceptions (no
+local audit log, no peer listing beyond `mesh_agents`' own roster). Read
+it once if you want the reasoning and receipts behind each rule rather
+than just the rule.
 
 ---
 
@@ -369,13 +452,14 @@ explanation of it.
 | Prompt | Asks for |
 |---|---|
 | `help` | Full quick-start: tool overview, one example each, top gotchas. |
-| `help_identity` | How identity works, `mesh_watch`/presence's own separate identities, pinning with env vars. |
+| `help_identity` | How identity works, `mesh_watch`/presence/serving's own separate identities, pinning with env vars. |
 | `help_wire_format` | The no-bool / naming rules, with a valid and invalid example. |
 | `help_watch` | What `mesh_watch` is actually for, and the mistake to avoid. |
 | `help_presence` | What `mesh_hello`/`mesh_agents`/`mesh_goodbye` actually do, the SQLite roster, why `operator_name` matters. |
+| `help_serve` | What `mesh_serve`/`mesh_unserve` actually expose, and the risk to weigh before using them. |
 | `help_install` | Install, register, verify (`doctor`), what a failure means. |
 
-**Six separate zero-argument prompts, not one `help` prompt with an
+**Seven separate zero-argument prompts, not one `help` prompt with an
 optional `topic` argument — a real bug found live, not a style choice.**
 `@modelcontextprotocol/sdk` 1.30.0 (the latest at the time) throws
 `Invalid arguments for prompt help: Required` on `getPrompt` when a
@@ -391,8 +475,8 @@ with NO argument schema at all skips that parse path entirely (`if
 (prompt.argsSchema) { ...parse... } else { cb(extra) }`), so zero-arg
 prompts sidestep the bug rather than trigger it. Verified live: calling
 every prompt above via a real MCP `Client`, passing no `arguments` field
-at all (the exact shape that failed before), all six respond correctly —
-re-verified again when `help_presence` was added, same result.
+at all (the exact shape that failed before), all seven respond correctly
+— re-verified again when `help_serve` was added, same result.
 
 ---
 

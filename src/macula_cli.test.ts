@@ -5,6 +5,7 @@ import {
   extractSemver,
   isOlder,
   parseWatchOutput,
+  serveIdentityPath,
   watchIdentityPath,
 } from "./macula_cli.js";
 
@@ -90,6 +91,7 @@ describe("identity paths", () => {
   afterEach(() => {
     delete process.env.MACULA_MCP_IDENTITY;
     delete process.env.MACULA_MCP_WATCH_IDENTITY;
+    delete process.env.MACULA_MCP_SERVE_IDENTITY;
   });
 
   it("mints a stable path across repeated calls in one process", () => {
@@ -108,5 +110,15 @@ describe("identity paths", () => {
   it("MACULA_MCP_WATCH_IDENTITY pins the watch identity to a fixed path", () => {
     process.env.MACULA_MCP_WATCH_IDENTITY = "/tmp/pinned-watch-identity.seed";
     expect(watchIdentityPath()).toBe("/tmp/pinned-watch-identity.seed");
+  });
+
+  it("keeps the serve identity separate from default and watch, so a served daemon survives other calls", () => {
+    expect(serveIdentityPath()).not.toBe(defaultIdentityPath());
+    expect(serveIdentityPath()).not.toBe(watchIdentityPath());
+  });
+
+  it("MACULA_MCP_SERVE_IDENTITY pins the serve identity to a fixed path", () => {
+    process.env.MACULA_MCP_SERVE_IDENTITY = "/tmp/pinned-serve-identity.seed";
+    expect(serveIdentityPath()).toBe("/tmp/pinned-serve-identity.seed");
   });
 });

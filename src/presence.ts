@@ -17,6 +17,16 @@
 // publish-via-daemon method (only call/serve/subscribe), so each
 // heartbeat is an ordinary one-shot `pubsub publish`, exactly like
 // mesh_publish already does.
+//
+// serve.ts is the second module to take this fork, for mesh_serve --
+// it holds its OWN separate daemon (own identity, own socket name),
+// sharing only the generic "spawn a daemon and wait for readiness"
+// mechanics (macula_cli.ts's startDaemon), not the daemon instance
+// itself. Presence and serving are deliberately separate exposures:
+// presence is a heartbeat + read-only subscription, serving accepts
+// inbound calls that run a local command -- conflating the two under
+// one identity would make it harder to reason about (or revoke) either
+// capability independently.
 
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -28,7 +38,7 @@ import {
   parseWatchLine,
   presenceIdentityPath,
   publish,
-  MaculaCliError,
+  startDaemon,
 } from "./macula_cli.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 
@@ -89,7 +99,7 @@ export async function start(args: StartArgs): Promise<StartResult> {
   const { node_id: nodeId } = await identity();
   const socketName = `presence-${process.pid}-${randomBytes(4).toString("hex")}`;
 
-  const daemon = await startDaemon(host, socketName);
+  const daemon = await startDaemon(host, presenceIdentityPath(), socketName);
   const watchers = [
     watchTopic(socketName, HELLO_TOPIC, (evt) => {
       const payload = evt as Record<string, unknown>;
@@ -166,62 +176,6 @@ function stopSync(): void {
   state.daemon.kill();
   for (const w of state.watchers) w.kill();
   state = undefined;
-}
-
-function startDaemon(host: string, socketName: string): Promise<ChildProcessWithoutNullStreams> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(binPath(), [
-      "daemon",
-      "start",
-      "--json",
-      "--identity",
-      presenceIdentityPath(),
-      "-socket-name",
-      socketName,
-      host,
-    ]) as ChildProcessWithoutNullStreams;
-
-    // daemon start --json pretty-prints its readiness envelope across
-    // multiple lines (report.emit's indented encoder -- the SAME shape
-    // every other one-shot --json command uses, unlike pubsub watch's
-    // deliberately single-line-per-event NDJSON). So this can't look
-    // for a first newline the way watchTopic does; it has to keep
-    // accumulating and re-attempt a parse of the WHOLE buffer until one
-    // succeeds, since there's no framing signal cheaper than "is this
-    // valid JSON yet" for a pretty-printed value of unknown length.
-    let buf = "";
-    let settled = false;
-    const onData = (chunk: Buffer) => {
-      buf += chunk.toString("utf8");
-      let parsed: { ok: boolean; error?: { message?: string } };
-      try {
-        parsed = JSON.parse(buf.trim());
-      } catch {
-        return; // not a complete JSON value yet -- wait for more chunks
-      }
-      child.stdout.off("data", onData);
-      settled = true;
-      if (parsed.ok) {
-        child.unref(); // see watchTopic's own comment on why
-        resolve(child);
-      } else {
-        reject(new MaculaCliError(parsed.error?.message ?? "daemon start failed"));
-      }
-    };
-    child.stdout.on("data", onData);
-    child.on("error", (e) => {
-      if (!settled) {
-        settled = true;
-        reject(e);
-      }
-    });
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new MaculaCliError(`daemon start exited before announcing readiness (code ${code})`));
-      }
-    });
-  });
 }
 
 function watchTopic(

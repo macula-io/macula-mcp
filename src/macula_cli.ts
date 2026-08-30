@@ -14,7 +14,7 @@
 // with no daemon and no storage, so none of those persist between
 // invocations. Point-in-time operations only.
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -92,7 +92,7 @@ export function onShutdown(fn: () => void): void {
 const identityDir = join(tmpdir(), "macula-mcp-identities");
 const mintedIdentityPaths = new Set<string>();
 
-function mintIdentityPath(kind: "default" | "watch" | "presence"): string {
+function mintIdentityPath(kind: "default" | "watch" | "presence" | "serve"): string {
   mkdirSync(identityDir, { recursive: true });
   const p = join(identityDir, `${kind}-${process.pid}-${randomBytes(6).toString("hex")}.seed`);
   mintedIdentityPaths.add(p);
@@ -152,6 +152,22 @@ let cachedWatchIdentityPath: string | undefined;
 export function watchIdentityPath(): string {
   if (process.env.MACULA_MCP_WATCH_IDENTITY) return process.env.MACULA_MCP_WATCH_IDENTITY;
   return (cachedWatchIdentityPath ??= mintIdentityPath("watch"));
+}
+
+let cachedServeIdentityPath: string | undefined;
+/**
+ * A FOURTH identity, dedicated to serve.ts's own daemon (mesh_serve's
+ * registered procedures) -- separate from the other three for the same
+ * anti-duplicate-session reason as presenceIdentityPath. Distinct from
+ * presence's own identity too, on purpose: a served procedure is
+ * reachable by ANY mesh caller for as long as it's registered, which is
+ * a materially different exposure than presence's own heartbeat/
+ * subscription pair, and worth being able to reason about (or revoke,
+ * via MACULA_MCP_SERVE_IDENTITY pinning a throwaway path) independently.
+ */
+export function serveIdentityPath(): string {
+  if (process.env.MACULA_MCP_SERVE_IDENTITY) return process.env.MACULA_MCP_SERVE_IDENTITY;
+  return (cachedServeIdentityPath ??= mintIdentityPath("serve"));
 }
 
 export class MaculaCliUnavailable extends Error {}
@@ -231,6 +247,76 @@ function execFile(
 }
 
 /**
+ * Starts a `macula-cli daemon start` child process and resolves once it
+ * reports readiness -- shared between presence.ts and serve.ts, the two
+ * modules that each hold one such daemon open for as long as they need
+ * their own standing capability (subscriptions, or served procedures).
+ * Each caller passes its OWN identity path and socket name; this
+ * function has no opinion on either, matching the existing "identity
+ * per concern" pattern the rest of this file already establishes.
+ */
+export function startDaemon(
+  host: string,
+  identityPath: string,
+  socketName: string,
+): Promise<ChildProcessWithoutNullStreams> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binPath(), [
+      "daemon",
+      "start",
+      "--json",
+      "--identity",
+      identityPath,
+      "-socket-name",
+      socketName,
+      host,
+    ]) as ChildProcessWithoutNullStreams;
+
+    // daemon start --json pretty-prints its readiness envelope across
+    // multiple lines (report.emit's indented encoder -- the SAME shape
+    // every other one-shot --json command uses, unlike pubsub watch's
+    // deliberately single-line-per-event NDJSON). So this can't look
+    // for a first newline the way a line-oriented reader would; it has
+    // to keep accumulating and re-attempt a parse of the WHOLE buffer
+    // until one succeeds, since there's no framing signal cheaper than
+    // "is this valid JSON yet" for a pretty-printed value of unknown
+    // length.
+    let buf = "";
+    let settled = false;
+    const onData = (chunk: Buffer) => {
+      buf += chunk.toString("utf8");
+      let parsed: { ok: boolean; error?: { message?: string } };
+      try {
+        parsed = JSON.parse(buf.trim());
+      } catch {
+        return; // not a complete JSON value yet -- wait for more chunks
+      }
+      child.stdout.off("data", onData);
+      settled = true;
+      if (parsed.ok) {
+        child.unref(); // a held-open daemon child shouldn't keep this process alive on its own
+        resolve(child);
+      } else {
+        reject(new MaculaCliError(parsed.error?.message ?? "daemon start failed"));
+      }
+    };
+    child.stdout.on("data", onData);
+    child.on("error", (e) => {
+      if (!settled) {
+        settled = true;
+        reject(e);
+      }
+    });
+    child.on("exit", (code) => {
+      if (!settled) {
+        settled = true;
+        reject(new MaculaCliError(`daemon start exited before announcing readiness (code ${code})`));
+      }
+    });
+  });
+}
+
+/**
  * The oldest macula-cli release this macula-mcp version is known to work
  * correctly against. macula-mcp shells out to a SEPARATELY installed
  * macula-cli binary (see this file's own top-of-file comment) rather
@@ -248,8 +334,13 @@ function execFile(
  * Bumped to 0.2.0 for presence.ts: mesh_hello/mesh_goodbye/mesh_agents
  * depend on `macula-cli daemon` and `pubsub watch -daemon`/-subscribe,
  * both new in that release -- v0.1.x has no daemon subcommand at all.
+ *
+ * Bumped to 0.3.0 for serve.ts: mesh_serve depends on `serve -daemon
+ * -exec`, new in that release -- v0.2.x's `serve -daemon` can only
+ * answer with a fixed `-reply`/`-echo`, computed once at registration
+ * time, not a real per-call handler.
  */
-export const MIN_MACULA_CLI_VERSION = "0.2.0";
+export const MIN_MACULA_CLI_VERSION = "0.3.0";
 
 export interface CliVersionCheck {
   ok: boolean;
@@ -363,6 +454,41 @@ export const publish = (args: {
       [args.host ?? defaultStation(), args.topic],
     ),
   );
+
+export interface ServeRegisterResult {
+  registered: boolean;
+  procedure: string;
+}
+/** Registers `procedure` with the daemon at socketName -- serve.ts's own daemon, not presence's. */
+export const serveRegister = (args: {
+  socketName: string;
+  procedure: string;
+  execCmd: string;
+  execTimeoutSeconds?: number;
+}): Promise<ServeRegisterResult> => {
+  const flags: string[] = ["-socket-name", args.socketName, "-exec", args.execCmd];
+  if (args.execTimeoutSeconds) flags.push("-exec-timeout", `${Math.max(1, Math.round(args.execTimeoutSeconds))}s`);
+  return run<ServeRegisterResult>(argv(["serve", "-daemon"], flags, [args.procedure]));
+};
+
+export interface ServeUnregisterResult {
+  unregistered: boolean;
+}
+export const serveUnregister = (args: { socketName: string; procedure: string }): Promise<ServeUnregisterResult> =>
+  run<ServeUnregisterResult>(argv(["serve", "-daemon", "-stop"], ["-socket-name", args.socketName], [args.procedure]));
+
+export interface DaemonStatusResult {
+  identity: string;
+  connected_to: string;
+  uptime_seconds: number;
+  serving: string[];
+  subscribed: string[];
+}
+export const daemonStatus = (args: { socketName: string }): Promise<DaemonStatusResult> =>
+  run<DaemonStatusResult>(argv(["daemon", "status"], ["-socket-name", args.socketName], []));
+
+export const daemonStop = (args: { socketName: string }): Promise<{ shutting_down: boolean }> =>
+  run<{ shutting_down: boolean }>(argv(["daemon", "stop"], ["-socket-name", args.socketName], []));
 
 export interface WatchEvent {
   topic: string;

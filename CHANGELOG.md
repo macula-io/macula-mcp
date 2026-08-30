@@ -7,6 +7,20 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+- `mesh_serve` / `mesh_unserve`: advertise a procedure on the mesh,
+  answered by a local shell command run once per inbound call (JSON
+  payload on stdin, JSON reply on stdout). The second exception to
+  "one-shot subprocess" after presence, and a bigger one: a registered
+  procedure is a standing inbound trigger any mesh caller can invoke
+  repeatedly, not a one-shot action this agent initiates. Depends on
+  `macula-cli` >= 0.3.0's `serve -daemon -exec`. Backed by its own
+  fourth identity (`MACULA_MCP_SERVE_IDENTITY`), separate from
+  presence's own daemon and identity.
+- `help_serve` prompt; `mesh://etiquette` extended with serving's own
+  (stronger) norms: never register a command you wouldn't want a
+  stranger able to run repeatedly, unserve when done.
+
 ## [0.5.1] - 2026-08-30
 
 ### Added

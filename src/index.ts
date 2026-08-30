@@ -6,9 +6,10 @@
 // shells out to macula-cli (macula-io/macula-cli), a scriptable CLI built
 // directly on macula-go. macula-mcp owns no mesh logic of its own -- macula-cli
 // does the QUIC handshake/call/publish/watch/content transfer, either as a
-// one-shot subprocess per tool call, or (mesh_hello/mesh_goodbye/mesh_agents
-// only, via presence.ts) as one long-lived `macula-cli daemon` this server
-// manages internally for as long as it runs.
+// one-shot subprocess per tool call, or, for two narrow standing exceptions
+// (presence.ts's mesh_hello/mesh_goodbye/mesh_agents, and serve.ts's
+// mesh_serve/mesh_unserve), as one long-lived `macula-cli daemon` per
+// exception this server manages internally for as long as it needs it.
 //
 //   agent harness  --MCP/stdio-->  macula-mcp  --spawns, parses stdout-->  macula-cli  --QUIC-->  mesh
 //
@@ -20,9 +21,11 @@
 // on top of macula-cli: it had no daemon of its own at the time, so
 // mesh_watch (bounded, synchronous) replaced the old subscribe/unsubscribe/
 // subscriptions/inbox quartet instead. macula-cli gained a real daemon mode
-// later (2026-08-30) -- presence.ts is this server narrowly taking that
-// fork back up, scoped to exactly one use (agent-presence heartbeat +
-// roster), not a wholesale return to the old design.
+// later (2026-08-30) -- presence.ts, and now serve.ts, are this server
+// narrowly taking that fork back up, each scoped to exactly one use
+// (agent-presence heartbeat+roster; served procedures), each with its OWN
+// identity and daemon rather than sharing one, not a wholesale return to
+// the old design.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -37,6 +40,8 @@ import { registerMeshWatch } from "./mesh_watch.js";
 import { registerMeshHello } from "./mesh_hello.js";
 import { registerMeshGoodbye } from "./mesh_goodbye.js";
 import { registerMeshAgents } from "./mesh_agents.js";
+import { registerMeshServe } from "./mesh_serve.js";
+import { registerMeshUnserve } from "./mesh_unserve.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -55,13 +60,16 @@ a response.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
-help_presence, help_install -- if their client supports MCP prompts).
+help_presence, help_serve, help_install -- if their client supports MCP prompts).
 - mesh_hello announces this agent's presence (a periodic heartbeat plus a live roster of other \
 agents heard from) -- call it once if you want to be discoverable, then mesh_agents to see who \
-else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.`;
+else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.
+- mesh_serve registers a procedure other agents can call, answered by a local shell command run \
+per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. Never register a \
+command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.5.1" },
+  { name: "macula-mcp", version: "0.6.0" },
   { instructions: INSTRUCTIONS },
 );
 
@@ -79,13 +87,20 @@ registerMeshArtifact(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 
-// mesh_hello/mesh_goodbye are the one exception to "one-shot": together
-// they manage this process's own standing presence (heartbeat +
+// mesh_hello/mesh_goodbye are one of two exceptions to "one-shot":
+// together they manage this process's own standing presence (heartbeat +
 // subscriptions), see presence.ts's own doc comment for why that's a
 // deliberate, narrow departure from every other tool here.
 registerMeshHello(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);
+
+// mesh_serve/mesh_unserve are the second exception: a standing served
+// procedure, backed by its OWN daemon and identity (see serve.ts).
+// Deliberately separate from presence's daemon -- see presence.ts's own
+// doc comment for why the two are kept apart.
+registerMeshServe(server);
+registerMeshUnserve(server);
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();

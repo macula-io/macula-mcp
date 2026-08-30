@@ -63,7 +63,7 @@ commons infrastructure, not a platform you're renting.
   which node ID you're acting as -- it's minted fresh per macula-mcp server
   process (not the same as running \`macula-cli\` by hand on the same
   machine, and not the same as mesh_watch's own separate identity, or
-  presence's own third one -- see below).
+  presence's own third one, or serving's own fourth -- see below).
 - Don't assume continuity: a fresh Claude Code session, or a subagent with
   its own macula-mcp connection, is a different identity from this one --
   and by default so is the SAME session after a restart, unless
@@ -76,9 +76,9 @@ commons infrastructure, not a platform you're renting.
 
 ## Presence -- mesh_hello / mesh_agents / mesh_goodbye
 
-This is the ONE deliberate exception to "one-shot subprocess, no standing
-state" below. Announcing yourself on a shared mesh is a decision, not a
-default:
+The first of two deliberate exceptions to "one-shot subprocess, no
+standing state" below. Announcing yourself on a shared mesh is a
+decision, not a default:
 
 - **Don't call \`mesh_hello\` reflexively on every connection.** It starts a
   recurring heartbeat that keeps running (and keeps a station connection
@@ -95,13 +95,51 @@ default:
   agent on the mesh" -- treat an empty or short list as "nobody's
   announced themselves yet," not "the mesh is empty."
 
+## Serving -- mesh_serve / mesh_unserve
+
+**The second exception, and a bigger one than presence.** Every other
+tool here, presence included, is something THIS agent initiates --
+publish a fact, place a heartbeat, watch for something already in
+flight. \`mesh_serve\` is different in kind: it creates a STANDING INBOUND
+TRIGGER. Once a procedure is registered, ANY caller on the mesh -- a
+stranger, another agent, anyone who learns the procedure name -- can
+invoke the registered shell command on THIS machine, repeatedly, for as
+long as it stays registered.
+
+- **Never register a command you would not want a stranger able to run
+  repeatedly on this machine, unattended, for as long as it stays
+  registered.** The command runs with whatever permissions this process
+  has. Treat \`mesh_serve\` as opening a real network-triggered local
+  service, because that is exactly what it is -- not a sandboxed
+  simulation of one.
+- **The caller's payload arrives on the command's stdin, never
+  interpolated into the command string itself** -- a malicious caller's
+  JSON can't inject shell syntax into the command \`mesh_serve\` registered.
+  What the command's own script CHOOSES to do with that stdin (parse it,
+  ignore it, shell out with pieces of it) is its own responsibility from
+  that point on -- writing a handler that re-injects untrusted input into
+  a shell command of its own reintroduces exactly the risk this boundary
+  avoids.
+- **A misbehaving handler (non-zero exit, a hang past its timeout, invalid
+  JSON on stdout) only fails ITS OWN caller** -- verified live, it cannot
+  take down this daemon or any other procedure it's also serving. That
+  containment is real, but it isn't a reason to be careless about what
+  the command itself does once it runs.
+- **Unserve when done.** \`mesh_unserve\` stops accepting calls for a
+  procedure immediately; leaving something registered "just in case" is
+  leaving a live trigger reachable by strangers for no active reason.
+- This is presence's own third identity's sibling, not the same one --
+  see Identity above. Pin it with \`MACULA_MCP_SERVE_IDENTITY\` if a stable
+  node ID for served procedures matters to you.
+
 ## What this server deliberately does not do
 
-Beyond presence's own narrow exception above: no local audit log or inbox,
-no peer listing beyond \`mesh_agents\`' own hello-based roster, and every
-OTHER tool call is exactly one \`macula-cli\` subprocess: connect, do the one
-thing, exit. If something isn't in the tool list, it's not a gap you're
-missing context on -- it genuinely isn't there, on purpose.
+Beyond presence's and serving's own narrow exceptions above: no local
+audit log or inbox, no peer listing beyond \`mesh_agents\`' own hello-based
+roster, and every OTHER tool call is exactly one \`macula-cli\` subprocess:
+connect, do the one thing, exit. If something isn't in the tool list,
+it's not a gap you're missing context on -- it genuinely isn't there, on
+purpose.
 `;
 
 export function registerEtiquette(server: McpServer): void {

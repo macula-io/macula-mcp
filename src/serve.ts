@@ -1,0 +1,130 @@
+// Serving: mesh_serve/mesh_unserve manage this process's own registered
+// mesh procedures -- a standing macula-cli daemon (own identity, own
+// socket, see macula_cli.ts's serveIdentityPath) this server starts the
+// first time mesh_serve is called, and tears down again once nothing is
+// registered on it anymore (see unserve below).
+//
+// This is presence.ts's own doc comment's "second module to take the
+// daemon fork" -- see that file for why serving gets its OWN identity
+// and daemon rather than reusing presence's. Depends on macula-cli's
+// `serve -daemon -exec`, new in v0.3.0 (see MIN_MACULA_CLI_VERSION):
+// -reply/-echo (the only registration modes before that) both answer
+// from something already known at registration time, so this module
+// would have nothing genuinely dynamic to offer an agent without it.
+//
+// This is a materially bigger exposure than anything else in this
+// server: every other tool is a one-shot action this server's OWN
+// caller initiated. A served procedure is a standing inbound trigger
+// ANY mesh caller can invoke, repeatedly, running a local shell command
+// on this machine, for as long as it stays registered -- see
+// mesh_serve.ts's own tool description and mesh_etiquette.ts for the
+// operator-facing framing of that risk.
+
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+  daemonStatus,
+  daemonStop,
+  defaultStation,
+  onShutdown,
+  serveIdentityPath,
+  serveRegister,
+  serveUnregister,
+  startDaemon,
+} from "./macula_cli.js";
+
+interface ServeState {
+  host: string;
+  socketName: string;
+  daemon: ChildProcessWithoutNullStreams;
+}
+
+let state: ServeState | undefined;
+
+export function isActive(): boolean {
+  return state !== undefined;
+}
+
+async function ensureDaemon(host: string): Promise<ServeState> {
+  if (state) return state;
+  const socketName = `mcp-serve-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const daemon = await startDaemon(host, serveIdentityPath(), socketName);
+  state = { host, socketName, daemon };
+  onShutdown(stopSync);
+  return state;
+}
+
+/**
+ * Synchronous teardown only (kill the daemon child) -- what onShutdown
+ * registers, same reasoning as presence.ts's own stopSync: a
+ * SIGINT/SIGTERM handler cannot reliably wait on an async unregister
+ * pass over every served procedure first. An abrupt process kill just
+ * drops the daemon's connection; the station's own advertise entries
+ * age out on their own, same as any other disconnect.
+ */
+function stopSync(): void {
+  if (!state) return;
+  state.daemon.kill();
+  state = undefined;
+}
+
+export interface ServeArgs {
+  procedure: string;
+  exec: string;
+  execTimeoutSeconds?: number;
+  host?: string;
+}
+
+export interface ServeResult {
+  procedure: string;
+  registered: boolean;
+  serving: string[];
+}
+
+/** Registers procedure against this process's own serve-daemon, starting it first if needed. */
+export async function serve(args: ServeArgs): Promise<ServeResult> {
+  const host = args.host ?? defaultStation();
+  const s = await ensureDaemon(host);
+  const registerResult = await serveRegister({
+    socketName: s.socketName,
+    procedure: args.procedure,
+    execCmd: args.exec,
+    execTimeoutSeconds: args.execTimeoutSeconds,
+  });
+  const status = await daemonStatus({ socketName: s.socketName });
+  return { procedure: registerResult.procedure, registered: registerResult.registered, serving: status.serving };
+}
+
+export interface UnserveResult {
+  procedure: string;
+  unregistered: boolean;
+  serving: string[];
+  daemon_stopped: boolean;
+}
+
+/**
+ * Unregisters procedure. If nothing else is registered afterward, also
+ * stops the daemon entirely -- no reason to hold a station connection
+ * open once this process has nothing left registered on it. A later
+ * mesh_serve call starts a fresh daemon again, same as the first one.
+ */
+export async function unserve(procedure: string): Promise<UnserveResult> {
+  if (!state) {
+    return { procedure, unregistered: false, serving: [], daemon_stopped: false };
+  }
+  const { socketName } = state;
+  const unregisterResult = await serveUnregister({ socketName, procedure });
+  const status = await daemonStatus({ socketName });
+
+  let daemonStopped = false;
+  if (status.serving.length === 0) {
+    try {
+      await daemonStop({ socketName });
+    } catch {
+      // best effort -- stopSync below tears down the child either way
+    }
+    stopSync();
+    daemonStopped = true;
+  }
+  return { procedure, unregistered: unregisterResult.unregistered, serving: status.serving, daemon_stopped: daemonStopped };
+}

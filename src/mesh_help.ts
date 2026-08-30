@@ -10,7 +10,7 @@
 // what it already has loaded (tool descriptions, instructions,
 // mesh://etiquette), tailored to whichever topic was picked.
 //
-// Six separate zero-argument prompts, not one `help` prompt with an
+// Seven separate zero-argument prompts, not one `help` prompt with an
 // optional `topic` argument -- found live: @modelcontextprotocol/sdk
 // 1.30.0 (the latest at the time) throws "Invalid arguments ... Required"
 // on getPrompt when a prompt's args are ALL optional and the caller
@@ -40,19 +40,21 @@ const TOPICS: HelpTopic[] = [
     ask:
       "Give me a quick, example-driven overview of the Macula mesh tools available in this " +
       "conversation: mesh_call, mesh_put, mesh_get, mesh_publish, mesh_watch, mesh_hello, " +
-      "mesh_agents, mesh_goodbye, plus the mesh://identity and mesh://etiquette resources. Show " +
-      "one realistic example call per tool and the top 3 gotchas to avoid.",
+      "mesh_agents, mesh_goodbye, mesh_serve, mesh_unserve, plus the mesh://identity and " +
+      "mesh://etiquette resources. Show one realistic example call per tool and the top 3 " +
+      "gotchas to avoid -- for mesh_serve specifically, lead with the fact that it opens a real " +
+      "inbound trigger any mesh caller can invoke, not a one-shot action.",
   },
   {
     name: "help_identity",
     description: "Explain how mesh identity works in this conversation (mesh_watch vs. every other tool).",
     ask:
       "Explain how identity works for the Macula mesh tools in this conversation: what " +
-      "mesh://identity shows, why mesh_watch (and separately, presence -- mesh_hello/" +
-      "mesh_agents/mesh_goodbye) each use their own identity distinct from the other tools, " +
-      "and how to pin any of them to a fixed path with MACULA_MCP_IDENTITY / " +
-      "MACULA_MCP_WATCH_IDENTITY / MACULA_MCP_PRESENCE_IDENTITY if a stable node ID across " +
-      "restarts is needed.",
+      "mesh://identity shows, why mesh_watch, presence (mesh_hello/mesh_agents/mesh_goodbye), " +
+      "and serving (mesh_serve/mesh_unserve) each use their own identity distinct from the other " +
+      "tools, and how to pin any of them to a fixed path with MACULA_MCP_IDENTITY / " +
+      "MACULA_MCP_WATCH_IDENTITY / MACULA_MCP_PRESENCE_IDENTITY / MACULA_MCP_SERVE_IDENTITY if a " +
+      "stable node ID across restarts is needed.",
   },
   {
     name: "help_wire_format",
@@ -84,6 +86,21 @@ const TOPICS: HelpTopic[] = [
       "simply stop). Mention operator_name as the stable human-facing label over what's often " +
       "an ephemeral node ID, and that mesh_hello shouldn't be called reflexively -- it's a " +
       "deliberate decision to be discoverable, not a connection side effect.",
+  },
+  {
+    name: "help_serve",
+    description: "Explain mesh_serve/mesh_unserve -- what serving actually exposes and the risk to weigh before using it.",
+    ask:
+      "Explain the serving tools in this conversation: what mesh_serve actually does (advertises a " +
+      "procedure on the mesh, answered by running a local shell command once per inbound call -- " +
+      "the caller's JSON payload arrives on the command's stdin, never shell-interpolated into the " +
+      "command string itself, and the command's stdout becomes the reply), and why this is a " +
+      "materially bigger exposure than every other tool here: it's a STANDING INBOUND TRIGGER any " +
+      "mesh caller can invoke repeatedly, not a one-shot action this agent initiates. Emphasize: " +
+      "never register a command you wouldn't want a stranger able to run repeatedly on this " +
+      "machine, a failing/timing-out handler only fails its own caller (verified live, it can't " +
+      "affect any other procedure or the daemon itself), and mesh_unserve should be called as soon " +
+      "as a procedure no longer needs to be reachable rather than left registered indefinitely.",
   },
   {
     name: "help_install",
