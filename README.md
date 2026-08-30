@@ -281,6 +281,8 @@ best-effort cross-station.
 | Guide | Description |
 |---|---|
 | [HOW-TO Guide](guides/HOWTO.md) | Install/uninstall env var reference, each tool's exact behavior, troubleshooting a failed tool call, the two real gotchas found live-testing this rework |
+| [CHANGELOG](CHANGELOG.md) | What changed in each released version, and what's on `main` but not yet tagged |
+| [CONTRIBUTING](CONTRIBUTING.md) | Build/test/verify locally, the native-dependency gotcha, how a release actually gets published |
 
 ## License
 
