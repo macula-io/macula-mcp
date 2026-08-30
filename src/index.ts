@@ -3,22 +3,26 @@
 // any agent harness (Claude Code, Cursor, Cline, Continue, ...).
 //
 // Topology: thin client. macula-mcp speaks MCP over stdio to the agent, and
-// shells out to macula-cli (macula-io/macula-cli), a one-shot scriptable CLI
-// built directly on macula-go-sdk. macula-mcp owns no mesh logic of its
-// own -- macula-cli does the QUIC handshake/call/publish/watch/content
-// transfer as a subprocess per tool call.
+// shells out to macula-cli (macula-io/macula-cli), a scriptable CLI built
+// directly on macula-go. macula-mcp owns no mesh logic of its own -- macula-cli
+// does the QUIC handshake/call/publish/watch/content transfer, either as a
+// one-shot subprocess per tool call, or (mesh_hello/mesh_goodbye/mesh_agents
+// only, via presence.ts) as one long-lived `macula-cli daemon` this server
+// manages internally for as long as it runs.
 //
 //   agent harness  --MCP/stdio-->  macula-mcp  --spawns, parses stdout-->  macula-cli  --QUIC-->  mesh
 //
 // Reworked 2026-08-29 from a hecate-daemon-backed design (HTTP over a
-// local Unix socket) to this one: hecate-daemon is a leftover of an
-// abandoned local browser/UI plan and is no longer something this server
-// should depend on. This is a deliberately LEAN rework, not a like-for-
-// like swap -- macula-cli is a one-shot process with no daemon and no
-// storage, so standing subscriptions, an activity/inbox audit log, and
-// peer listing don't carry over; mesh_watch (bounded, synchronous)
-// replaces the old subscribe/unsubscribe/subscriptions/inbox quartet.
-// See macula-io/macula-cli's own project memory for the fuller tradeoff.
+// local Unix socket) to a one-shot-subprocess-per-call one: hecate-daemon is
+// a leftover of an abandoned local browser/UI plan and is no longer
+// something this server should depend on. That rework's own doc comment
+// (see mesh_watch.ts) explained why a standing subscription wasn't rebuilt
+// on top of macula-cli: it had no daemon of its own at the time, so
+// mesh_watch (bounded, synchronous) replaced the old subscribe/unsubscribe/
+// subscriptions/inbox quartet instead. macula-cli gained a real daemon mode
+// later (2026-08-30) -- presence.ts is this server narrowly taking that
+// fork back up, scoped to exactly one use (agent-presence heartbeat +
+// roster), not a wholesale return to the old design.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -30,6 +34,9 @@ import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
+import { registerMeshHello } from "./mesh_hello.js";
+import { registerMeshGoodbye } from "./mesh_goodbye.js";
+import { registerMeshAgents } from "./mesh_agents.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -48,10 +55,13 @@ a response.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
-help_install -- if their client supports MCP prompts).`;
+help_install -- if their client supports MCP prompts).
+- mesh_hello announces this agent's presence (a periodic heartbeat plus a live roster of other \
+agents heard from) -- call it once if you want to be discoverable, then mesh_agents to see who \
+else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.4.0" },
+  { name: "macula-mcp", version: "0.5.0" },
   { instructions: INSTRUCTIONS },
 );
 
@@ -68,6 +78,14 @@ registerMeshCall(server);
 registerMeshArtifact(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
+
+// mesh_hello/mesh_goodbye are the one exception to "one-shot": together
+// they manage this process's own standing presence (heartbeat +
+// subscriptions), see presence.ts's own doc comment for why that's a
+// deliberate, narrow departure from every other tool here.
+registerMeshHello(server);
+registerMeshGoodbye(server);
+registerMeshAgents(server);
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();

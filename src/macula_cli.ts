@@ -27,8 +27,25 @@ export function defaultStation(): string {
 }
 
 /** Name/path of the macula-cli binary; override for testing or a non-PATH install. */
-function binPath(): string {
+export function binPath(): string {
   return process.env.MACULA_CLI_BIN ?? "macula-cli";
+}
+
+/**
+ * Cleanup hooks run once, synchronously, before this process actually
+ * exits -- registered here rather than each module adding its own
+ * process.on(SIGINT/SIGTERM) listener, since Node calls every listener
+ * for the same signal in registration order and the FIRST one
+ * registered below already calls process.exit() itself. A second,
+ * independently-registered listener (e.g. presence.ts's own child
+ * process cleanup) racing to run before that exit actually happens is
+ * not something to depend on -- this registry makes the ordering
+ * deterministic instead: everything registered here is guaranteed to
+ * run first, regardless of which module imported this one when.
+ */
+const shutdownHooks: Array<() => void> = [];
+export function onShutdown(fn: () => void): void {
+  shutdownHooks.push(fn);
 }
 
 /**
@@ -75,7 +92,7 @@ function binPath(): string {
 const identityDir = join(tmpdir(), "macula-mcp-identities");
 const mintedIdentityPaths = new Set<string>();
 
-function mintIdentityPath(kind: "default" | "watch"): string {
+function mintIdentityPath(kind: "default" | "watch" | "presence"): string {
   mkdirSync(identityDir, { recursive: true });
   const p = join(identityDir, `${kind}-${process.pid}-${randomBytes(6).toString("hex")}.seed`);
   mintedIdentityPaths.add(p);
@@ -94,8 +111,18 @@ process.on("exit", () => {
 // Node doesn't fire "exit" on a bare SIGINT/SIGTERM unless the process
 // actually exits; without this, Ctrl-C or a client-initiated shutdown
 // would skip the cleanup above and leak a temp identity file per run.
+// shutdownHooks run first and synchronously -- see onShutdown's own doc.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
-  process.on(sig, () => process.exit(0));
+  process.on(sig, () => {
+    for (const fn of shutdownHooks) {
+      try {
+        fn();
+      } catch {
+        // best effort -- a hook failing shouldn't block the others or the exit
+      }
+    }
+    process.exit(0);
+  });
 }
 
 let cachedDefaultIdentityPath: string | undefined;
@@ -103,6 +130,21 @@ let cachedDefaultIdentityPath: string | undefined;
 export function defaultIdentityPath(): string {
   if (process.env.MACULA_MCP_IDENTITY) return process.env.MACULA_MCP_IDENTITY;
   return (cachedDefaultIdentityPath ??= mintIdentityPath("default"));
+}
+
+let cachedPresenceIdentityPath: string | undefined;
+/**
+ * A THIRD identity, dedicated to presence.ts's own daemon (agent.hello/
+ * agent.goodbye subscriptions) -- separate from "default" and "watch"
+ * for the same reason those two are already separate from each other:
+ * two connections sharing one node ID get the second one kicked by the
+ * station (see watchIdentityPath's own doc). The presence daemon holds
+ * a connection open for as long as this process runs, so it must never
+ * share an identity with anything else that might connect concurrently.
+ */
+export function presenceIdentityPath(): string {
+  if (process.env.MACULA_MCP_PRESENCE_IDENTITY) return process.env.MACULA_MCP_PRESENCE_IDENTITY;
+  return (cachedPresenceIdentityPath ??= mintIdentityPath("presence"));
 }
 
 let cachedWatchIdentityPath: string | undefined;
@@ -202,8 +244,12 @@ function execFile(
  * call -- exactly the shape `mesh_publish` uses -- with zero error
  * surfaced anywhere. Bump this constant whenever a macula-cli fix this
  * server's own tools depend on ships in a new release.
+ *
+ * Bumped to 0.2.0 for presence.ts: mesh_hello/mesh_goodbye/mesh_agents
+ * depend on `macula-cli daemon` and `pubsub watch -daemon`/-subscribe,
+ * both new in that release -- v0.1.x has no daemon subcommand at all.
  */
-export const MIN_MACULA_CLI_VERSION = "0.1.3";
+export const MIN_MACULA_CLI_VERSION = "0.2.0";
 
 export interface CliVersionCheck {
   ok: boolean;
@@ -338,25 +384,41 @@ export interface WatchEvent {
  * Exported standalone so this parsing can be unit-tested without
  * spawning a real subprocess.
  */
+/**
+ * Parses ONE line of `pubsub watch --json` output -- the same per-line
+ * shape parseWatchOutput batch-parses after a bounded watch's process
+ * exits, factored out so presence.ts's long-lived subscription (which
+ * never exits under normal operation, so there's no final stdout
+ * string to batch-parse) can apply it incrementally as lines stream
+ * in. Returns null for a blank line or a trailing {"ok":true,...}
+ * envelope (not expected in this format, but skipped rather than
+ * misparsed as an event); throws MaculaCliError on a trailing
+ * {"ok":false,...} failure envelope.
+ */
+export function parseWatchLine(line: string): WatchEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null; // not JSON at all; ignore this line
+  }
+  if (parsed !== null && typeof parsed === "object" && "ok" in parsed) {
+    const envelope = parsed as Envelope<never>;
+    if (envelope.ok === false) {
+      throw new MaculaCliError(envelope.error?.message ?? "pubsub watch failed");
+    }
+    return null;
+  }
+  return parsed as WatchEvent;
+}
+
 export function parseWatchOutput(stdout: string): WatchEvent[] {
   const events: WatchEvent[] = [];
   for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue; // not JSON at all; ignore this line
-    }
-    if (parsed !== null && typeof parsed === "object" && "ok" in parsed) {
-      const envelope = parsed as Envelope<never>;
-      if (envelope.ok === false) {
-        throw new MaculaCliError(envelope.error?.message ?? "pubsub watch failed");
-      }
-      continue; // an {"ok":true,...} envelope line isn't expected here, but skip rather than misparse it as an event
-    }
-    events.push(parsed as WatchEvent);
+    const evt = parseWatchLine(line);
+    if (evt) events.push(evt);
   }
   return events;
 }

@@ -71,10 +71,41 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_get` | Content Sharing | Fetch a content-addressed artifact by MCID hex. |
 | `mesh_publish` | Pub/Sub | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`. |
 | `mesh_watch` | Pub/Sub | Watch a topic for up to `duration_seconds` (max 120) and return whatever arrived. **Blocks for the call's duration** — there's no standing background subscription; call again to keep watching. |
+| `mesh_hello` | Presence | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately, and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
+| `mesh_agents` | Presence | A paged list of agents seen via `agent.hello`, sorted most-recently-seen first. Reads a local cache; only reflects agents heard from while this process has been running. |
+| `mesh_goodbye` | Presence | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscription started by `mesh_hello`. |
 
 Every tool takes an optional `host` (`"host[:port]"`) to pick which station
 to connect through; all default to `MACULA_MESH_STATION` (see
 [Environment](#environment)).
+
+### Presence
+
+`mesh_hello`/`mesh_agents`/`mesh_goodbye` are the one deliberate exception
+to "every tool is a one-shot `macula-cli` subprocess call": together they
+manage this server's own standing presence, backed by one internally-managed
+`macula-cli daemon` (see that repo's own README's Daemon mode section) held
+open for as long as this process runs. This reverses `mesh_watch`'s own
+earlier design note that a standing subscription wasn't built because
+`macula-cli` had no daemon at the time — it does now, and presence is this
+server narrowly taking that fork back up, scoped to exactly this one use.
+
+The roster (`mesh_agents`' data) persists to a local SQLite database (via
+`better-sqlite3`, not kept in memory), so a restart doesn't forget everyone
+seen minutes ago — `$HOME/.macula-mcp/roster.sqlite3` by default, overridable
+with `MACULA_MCP_ROSTER_DB`. Each row carries `last_seen_at`; `mesh_agents`
+prunes entries unseen for 15 minutes on every read, and an explicit
+`agent.goodbye` removes its sender immediately rather than waiting on that
+window. The heartbeat itself is an ordinary one-shot `pubsub publish` on a
+timer, not routed through the daemon — `macula-cli`'s daemon protocol has
+no publish-via-daemon method, only call/serve/subscribe.
+
+Customize what a hello carries with `MACULA_MCP_OPERATOR_NAME` (a
+human-readable name for whoever's behind this agent), `MACULA_MCP_HELLO_MESSAGE`
+(a default greeting/status), and `MACULA_MCP_BANNER_FILE` (a path to custom
+ASCII art, falling back to a small bundled default). Both env vars are
+overridable per call via `mesh_hello`'s own `operator_name`/`message`
+arguments.
 
 ## Resources
 
@@ -166,8 +197,28 @@ and troubleshooting.
 | `MACULA_MESH_STATION` | Default station every tool connects through when a call doesn't override `host`. | `station-de-frankfurt.macula.io:4433` |
 | `MACULA_MCP_IDENTITY` | Pin the identity `mesh_call`/`mesh_put`/`mesh_get`/`mesh_publish` use to a fixed path, instead of a fresh one minted per process. | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_WATCH_IDENTITY` | Same, for `mesh_watch`'s identity (kept separate from every other tool's — see the [guide](guides/HOWTO.md) §2). | fresh temp file per process, deleted on exit |
+| `MACULA_MCP_PRESENCE_IDENTITY` | Same, for the internal daemon `mesh_hello`/`mesh_agents`/`mesh_goodbye` hold open (a third identity, separate from both of the above for the same collision reason). | fresh temp file per process, deleted on exit |
+| `MACULA_MCP_ROSTER_DB` | Where `mesh_agents`' SQLite roster lives. | `$HOME/.macula-mcp/roster.sqlite3` |
+| `MACULA_MCP_OPERATOR_NAME` | Default `operator_name` for `mesh_hello`, when the agent doesn't pass one explicitly. | none |
+| `MACULA_MCP_HELLO_MESSAGE` | Default `message` for `mesh_hello`, when the agent doesn't pass one explicitly. | none |
+| `MACULA_MCP_BANNER_FILE` | Path to a custom ASCII banner `mesh_hello` prints. | a small bundled default |
 
 ## Status
+
+**v0.5.0 — mesh_hello/mesh_agents/mesh_goodbye, real presence, 2026-08-30.** The first
+tools that aren't a bare one-shot `macula-cli` subprocess call: an
+internally-managed `macula-cli daemon` (new in that repo's own v0.2.0, which
+this raises `MIN_MACULA_CLI_VERSION` to) backs a periodic `agent.hello`
+heartbeat and a durable subscription to everyone else's, feeding a
+SQLite-backed roster (`better-sqlite3`, not in-memory — a restart doesn't
+forget who was seen minutes ago). Verified live end to end against the real
+demo fleet: two independent processes each see the other's hello in their
+own roster within one heartbeat, and an explicit `mesh_goodbye` removes its
+sender from the other's roster immediately (confirmed against the wall-clock
+timing of when it was actually sent, not just "eventually disappeared").
+Also fixed in the same pass: a version-string drift where the MCP server
+itself reported `0.4.0` to clients while `package.json` already said
+`0.4.1`.
 
 **v0.4.0 — per-process identity, MCP `instructions`, `doctor`, in-conversation help, 2026-08-29.**
 Re-verified live from inside a real Claude Code session (the actual
@@ -196,16 +247,21 @@ wrong-shape-but-valid-JSON error envelope from a real event, so it needs
 an explicit shape check.
 
 **Dropped in this rework, not carried over from the daemon-backed
-design** — `macula-cli` is a one-shot process with no daemon and no
-storage, so none of these have an honest equivalent without `macula-mcp`
-itself becoming a stateful daemon (a real design fork that was deliberately
-not taken; see `macula-io/macula-cli`'s own project memory for the
-tradeoff):
+design** — at the time (`macula-cli` was a one-shot process with no daemon
+and no storage), none of these had an honest equivalent without `macula-mcp`
+itself becoming a stateful daemon, a fork deliberately not taken then (see
+`macula-io/macula-cli`'s own project memory for that tradeoff). `macula-cli`
+gained a real daemon later (v0.2.0) — presence (`mesh_hello`/`mesh_agents`/
+`mesh_goodbye`, see [Presence](#presence)) is this server narrowly taking
+that fork back up for exactly one use, not a reversal of the rework below:
 - **Standing subscriptions + inbox.** The old `mesh_subscribe`/
   `mesh_unsubscribe`/`mesh_subscriptions`/`mesh_inbox` quartet relied on
   the daemon's own event-sourced background subscription that outlived any
   one call. Replaced by `mesh_watch`, which blocks for a bounded duration
-  and returns what arrived — call it again to keep watching.
+  and returns what arrived — call it again to keep watching. (Presence's
+  own `agent.hello`/`agent.goodbye` subscription is the one exception, and
+  exists for a narrower reason: feeding `mesh_agents`' roster, not a
+  general-purpose standing watch on an arbitrary topic.)
 - **Activity audit log** (`mesh://activity/{realm}`, `fact_id` on every
   write). That was hecate-daemon's own ReckonDB-backed accountability
   trail. Writes still happen for real on the mesh; there's just no local
