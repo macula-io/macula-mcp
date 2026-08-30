@@ -5,42 +5,6 @@ Every flag, default, and gotcha below is read from the actual source
 mesh, not assumed — see the citation or the pasted output in each section
 if you want to verify it yourself.
 
-**Re-verified end-to-end from inside a real Claude Code session, 2026-08-29**
-(not just the built server against a bare MCP `Client`, the actual
-`mcp__macula__*` tools as Claude Code exposes them, registered via the real
-installer against a real `~/.claude.json`): `mesh://identity`, `mesh_put`/
-`mesh_get` round trip (byte-exact), `mesh_call` against an unadvertised
-procedure (clean error, no crash), `mesh_publish`, and `mesh_watch` (works;
-see the concurrency caveat under §2 for how *not* to test it). Two things
-not previously documented came out of this pass — the bool/CBOR gotcha
-under `mesh_publish` and the tool-call-concurrency caveat under
-`mesh_watch`, both below.
-
-**v0.4.0, same day, follow-up round:** every tool but `mesh_watch` was
-found to share ONE identity machine-wide, which fails 5/6 of the time
-under genuine concurrent use (verified: 6 concurrent one-shot calls under
-the shared identity, 1 succeeded; 6 concurrent calls under 6 distinct
-identities, all 6 succeeded) — fixed by minting a fresh identity per
-server process (§2, §3). Also new: the server's MCP `instructions` field
-and a `mesh://etiquette` resource carrying the mesh-citizenship norms
-(§3), five in-conversation help prompts for a human (§4), an interactive
-client picker on install (§1), and a `doctor` command that actually
-spawns the configured entry and talks MCP to it, rather than just
-checking a config file has the right shape (§1).
-
-**v0.5.0, 2026-08-30: `mesh_hello`/`mesh_agents`/`mesh_goodbye` (§2), a
-third identity for presence (§3), a sixth help prompt (§4), and
-`mesh://etiquette`'s own norms extended to cover it.** The first tools
-that aren't a bare one-shot subprocess call — see §2's own section for
-what that means and why it's a deliberate, narrow exception rather than a
-reversal of everything else here. Verified live end to end: two
-independent processes, distinct identities, each seeing the other's
-hello in its own roster within one heartbeat; an `agent.goodbye` removing
-its sender from the OTHER process's roster at the actual moment it was
-sent, not just "eventually"; roster rows surviving across separate
-process runs against the same SQLite file (the actual point of not
-keeping this in memory).
-
 ---
 
 ## 1. Install / uninstall reference
@@ -345,8 +309,9 @@ separate one, see §2, or presence's own THIRD one, below). This is a
 deliberate fix, not a regression: before v0.4.0 every non-watch tool
 shared macula-cli's own persisted default identity across every
 concurrent process on the machine, which verified live to fail 5/6 of
-the time under real concurrent use (§2's history note). One real
-consequence worth knowing: running `macula-cli identity` by hand on the
+the time under real concurrent use (6 concurrent calls under the shared
+identity, 1 succeeded; 6 concurrent calls under 6 distinct identities,
+all 6 succeeded). One real consequence worth knowing: running `macula-cli identity` by hand on the
 same machine now reports a DIFFERENT node ID than this resource — they
 used to match. Pin either identity to a fixed path with
 `MACULA_MCP_IDENTITY` / `MACULA_MCP_WATCH_IDENTITY` if you want a stable
