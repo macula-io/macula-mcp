@@ -382,23 +382,9 @@ re-verified again when `help_presence` was added, same result.
 
 ---
 
-## 5. A note for anyone extending this server
-
-The argv-ordering gotcha bit this repo's own code once, not just users of
-it: `src/macula_cli.ts` originally appended `--json` at the END of the
-argv (after positional host/procedure arguments), which Go's `flag`
-package silently treats as an extra positional rather than a flag — every
-tool call failed with a usage error until this was caught running the
-built server for real against a live `macula-cli`, not just via
-`tsc --noEmit`. Fixed with one `argv()` helper (subcommand words, then
-`--json` + other flags, then positionals, always) that every operation in
-`macula_cli.ts` goes through — if you add a new operation, use it rather
-than building the argv by hand.
-
----
-
-## 6. See also
+## 5. See also
 
 - [`README.md`](../README.md) — what macula-mcp is, architecture, tool/resource tables, status
+- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — building/testing this server itself, and the code conventions to follow when extending it
 - [`macula-io/macula-cli`](https://github.com/macula-io/macula-cli)'s own [HOW-TO guide](https://github.com/macula-io/macula-cli/blob/master/guides/HOWTO.md) — the identity-collision and argv-ordering gotchas were both found and documented there first
 - [`macula-io/macula-station`](https://github.com/macula-io/macula-station)'s `docs/` — real production incidents, useful context for what a tool-call failure might mean station-side

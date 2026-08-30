@@ -54,6 +54,22 @@ upgrading a native dependency, check its own declared `engines.node`
 against what `ci.yml` pins, not just what installs cleanly for you
 locally.
 
+## Code conventions
+
+**Building `macula-cli` argv: always go through `argv()` in `src/macula_cli.ts`.**
+This bit the repo's own code once, not just a hypothetical: an early
+version appended `--json` at the END of the argv, after positional
+host/procedure arguments. Go's `flag` package stops parsing flags at the
+first positional, so that silently misparses `--json` as an extra
+positional instead of a flag — every tool call failed with a usage error,
+and `tsc --noEmit` had no way to catch it since the bug was in argument
+*order*, not shape. Only caught running the built server for real against
+a live `macula-cli` (see "Verify against the real mesh" above). Fixed
+with one `argv()` helper (subcommand words, then `--json` and other
+flags, then positionals, always) that every operation in `macula_cli.ts`
+goes through. If you add a new operation, use it rather than building the
+argv by hand.
+
 ## Commit messages
 
 Plain quoted strings, not backtick-delimited or HEREDOC'd shell — a
