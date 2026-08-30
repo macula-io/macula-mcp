@@ -10,7 +10,7 @@
 // what it already has loaded (tool descriptions, instructions,
 // mesh://etiquette), tailored to whichever topic was picked.
 //
-// Five separate zero-argument prompts, not one `help` prompt with an
+// Six separate zero-argument prompts, not one `help` prompt with an
 // optional `topic` argument -- found live: @modelcontextprotocol/sdk
 // 1.30.0 (the latest at the time) throws "Invalid arguments ... Required"
 // on getPrompt when a prompt's args are ALL optional and the caller
@@ -39,18 +39,20 @@ const TOPICS: HelpTopic[] = [
       "Quick-start help for the Macula mesh tools in this conversation -- overview, examples, gotchas.",
     ask:
       "Give me a quick, example-driven overview of the Macula mesh tools available in this " +
-      "conversation: mesh_call, mesh_put, mesh_get, mesh_publish, mesh_watch, plus the " +
-      "mesh://identity and mesh://etiquette resources. Show one realistic example call per " +
-      "tool and the top 3 gotchas to avoid.",
+      "conversation: mesh_call, mesh_put, mesh_get, mesh_publish, mesh_watch, mesh_hello, " +
+      "mesh_agents, mesh_goodbye, plus the mesh://identity and mesh://etiquette resources. Show " +
+      "one realistic example call per tool and the top 3 gotchas to avoid.",
   },
   {
     name: "help_identity",
     description: "Explain how mesh identity works in this conversation (mesh_watch vs. every other tool).",
     ask:
       "Explain how identity works for the Macula mesh tools in this conversation: what " +
-      "mesh://identity shows, why mesh_watch uses a separate identity from the other tools, " +
-      "and how to pin either one to a fixed path with MACULA_MCP_IDENTITY / " +
-      "MACULA_MCP_WATCH_IDENTITY if a stable node ID across restarts is needed.",
+      "mesh://identity shows, why mesh_watch (and separately, presence -- mesh_hello/" +
+      "mesh_agents/mesh_goodbye) each use their own identity distinct from the other tools, " +
+      "and how to pin any of them to a fixed path with MACULA_MCP_IDENTITY / " +
+      "MACULA_MCP_WATCH_IDENTITY / MACULA_MCP_PRESENCE_IDENTITY if a stable node ID across " +
+      "restarts is needed.",
   },
   {
     name: "help_wire_format",
@@ -68,6 +70,20 @@ const TOPICS: HelpTopic[] = [
       "Explain how mesh_watch works, including why it can't be used to catch a mesh_publish " +
       "issued as a second call in the same turn, and what it's actually good for (catching " +
       "facts already in flight from someone else, not synchronizing with your own send).",
+  },
+  {
+    name: "help_presence",
+    description: "Explain mesh_hello/mesh_agents/mesh_goodbye -- what presence is for and how it persists.",
+    ask:
+      "Explain the presence tools in this conversation: what mesh_hello actually starts (a " +
+      "periodic agent.hello heartbeat plus a durable subscription to other agents' hellos, " +
+      "backed by a daemon this server manages internally, not a one-shot call like every other " +
+      "tool here), what mesh_agents shows (a persistent SQLite roster, not an in-memory list, " +
+      "so it survives a restart) and how staleness/pruning works, and why mesh_goodbye matters " +
+      "(removes you from others' rosters immediately instead of waiting for your heartbeat to " +
+      "simply stop). Mention operator_name as the stable human-facing label over what's often " +
+      "an ephemeral node ID, and that mesh_hello shouldn't be called reflexively -- it's a " +
+      "deliberate decision to be discoverable, not a connection side effect.",
   },
   {
     name: "help_install",

@@ -62,17 +62,46 @@ commons infrastructure, not a platform you're renting.
 - Read \`mesh://identity\` before you publish or call anything, so you know
   which node ID you're acting as -- it's minted fresh per macula-mcp server
   process (not the same as running \`macula-cli\` by hand on the same
-  machine, and not the same as mesh_watch's own separate identity).
+  machine, and not the same as mesh_watch's own separate identity, or
+  presence's own third one -- see below).
 - Don't assume continuity: a fresh Claude Code session, or a subagent with
-  its own macula-mcp connection, is a different identity from this one.
+  its own macula-mcp connection, is a different identity from this one --
+  and by default so is the SAME session after a restart, unless
+  \`MACULA_MCP_IDENTITY\` pins a fixed path. This matters for presence:
+  \`mesh_agents\`' roster is keyed by node ID, so an unpinned identity looks
+  like a brand-new agent to everyone else on every restart. \`operator_name\`
+  is the stable, human-facing label over an identity that's often
+  ephemeral by design -- set it if you want to be recognizable across
+  restarts, don't rely on node ID for that.
+
+## Presence -- mesh_hello / mesh_agents / mesh_goodbye
+
+This is the ONE deliberate exception to "one-shot subprocess, no standing
+state" below. Announcing yourself on a shared mesh is a decision, not a
+default:
+
+- **Don't call \`mesh_hello\` reflexively on every connection.** It starts a
+  recurring heartbeat that keeps running (and keeps a station connection
+  open) until \`mesh_goodbye\` is called or this process exits -- call it
+  because you actually want to be discoverable, not as a habit.
+- **Say goodbye.** \`mesh_goodbye\` removes you from other agents' rosters
+  immediately; without it, you just age out of their view after several
+  missed heartbeats. Both work, but an explicit goodbye is the polite one
+  when you know you're done.
+- **The heartbeat interval has a floor (10s) enforced in code, not just a
+  suggestion** -- a wire-level guard against hammering a shared demo
+  station, the same spirit as the no-bool rule above.
+- \`mesh_agents\` reflects who has said hello and how recently, not "every
+  agent on the mesh" -- treat an empty or short list as "nobody's
+  announced themselves yet," not "the mesh is empty."
 
 ## What this server deliberately does not do
 
-No standing subscriptions, no local audit log or inbox, no peer listing, no
-persistent state of its own beyond two throwaway identity files that die with
-the process. Every tool call is exactly one \`macula-cli\` subprocess: connect,
-do the one thing, exit. If something isn't in the tool list, it's not a gap
-you're missing context on -- it genuinely isn't there, on purpose.
+Beyond presence's own narrow exception above: no local audit log or inbox,
+no peer listing beyond \`mesh_agents\`' own hello-based roster, and every
+OTHER tool call is exactly one \`macula-cli\` subprocess: connect, do the one
+thing, exit. If something isn't in the tool list, it's not a gap you're
+missing context on -- it genuinely isn't there, on purpose.
 `;
 
 export function registerEtiquette(server: McpServer): void {

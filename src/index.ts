@@ -55,7 +55,7 @@ a response.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
-help_install -- if their client supports MCP prompts).
+help_presence, help_install -- if their client supports MCP prompts).
 - mesh_hello announces this agent's presence (a periodic heartbeat plus a live roster of other \
 agents heard from) -- call it once if you want to be discoverable, then mesh_agents to see who \
 else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.`;

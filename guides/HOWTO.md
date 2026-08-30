@@ -28,6 +28,19 @@ client picker on install (§1), and a `doctor` command that actually
 spawns the configured entry and talks MCP to it, rather than just
 checking a config file has the right shape (§1).
 
+**v0.5.0, 2026-08-30: `mesh_hello`/`mesh_agents`/`mesh_goodbye` (§2), a
+third identity for presence (§3), a sixth help prompt (§4), and
+`mesh://etiquette`'s own norms extended to cover it.** The first tools
+that aren't a bare one-shot subprocess call — see §2's own section for
+what that means and why it's a deliberate, narrow exception rather than a
+reversal of everything else here. Verified live end to end: two
+independent processes, distinct identities, each seeing the other's
+hello in its own roster within one heartbeat; an `agent.goodbye` removing
+its sender from the OTHER process's roster at the actual moment it was
+sent, not just "eventually"; roster rows surviving across separate
+process runs against the same SQLite file (the actual point of not
+keeping this in memory).
+
 ---
 
 ## 1. Install / uninstall reference
@@ -219,6 +232,98 @@ Cross-station DHT replication isn't fully shipped (memory:
 `project_inter_station_routing_unshipped`) — same-station put/get is
 reliable, cross-station is best-effort.
 
+### `mesh_hello` / `mesh_agents` / `mesh_goodbye`
+
+**The one exception to "every tool is a one-shot `macula-cli` subprocess."**
+Together these manage this server's own standing presence: an
+`agent.hello` heartbeat plus a durable subscription to everyone else's,
+backed by one `macula-cli daemon` this server starts and manages
+internally the first time `mesh_hello` is called, and keeps running until
+`mesh_goodbye` or process exit. See the [README's own Presence
+section](../README.md#presence) for the architecture; this section is
+about using the three tools.
+
+`mesh_hello` prints a banner and returns the heartbeat it just started:
+
+```json
+{
+  "banner": "...",
+  "node_id": "3a7149cca1c3856fe4cc6f4d80c764b4a8b396792db3fdea5f5138487af652f8",
+  "connected_to": "station-de-frankfurt.macula.io:4433",
+  "interval_seconds": 60,
+  "already_active": false
+}
+```
+
+Calling it again while already active doesn't restart anything — it just
+updates `operator_name`/`message` for future heartbeats and reports
+`"already_active": true`.
+
+`mesh_agents` reads a **local SQLite roster** (`$HOME/.macula-mcp/roster.sqlite3`
+by default), not a live mesh query — it only reflects agents whose hello
+this process has actually heard, sorted most-recently-seen first:
+
+```json
+{
+  "total": 2,
+  "page": 1,
+  "page_size": 20,
+  "agents": [
+    {
+      "node_id": "429b5f75f87054623347f0c0e60eb8e9cba691f2cc5d34d17f383d86a4c9c425",
+      "operator_name": "Operator bob",
+      "message": "hello from bob",
+      "first_seen": "2026-08-30T15:22:24.013Z",
+      "last_seen": "2026-08-30T15:22:33.935Z",
+      "seconds_since_seen": 4,
+      "is_self": false
+    },
+    {
+      "node_id": "258f854dac7facf581c5d2f1a0fccb7dda63acef53fe17b97527b55b7f0a60d5",
+      "operator_name": "Operator alice",
+      "message": "hello from alice",
+      "first_seen": "2026-08-30T15:22:23.918Z",
+      "last_seen": "2026-08-30T15:22:33.929Z",
+      "seconds_since_seen": 4,
+      "is_self": true
+    }
+  ]
+}
+```
+
+Verified live with two genuinely separate processes, distinct identities,
+each seeing the OTHER in its own roster within one heartbeat — this
+isn't a self-referential demo. Entries unseen for 15 minutes are pruned on
+every `mesh_agents` read; an explicit `agent.goodbye` removes its sender
+immediately instead of waiting on that window (confirmed against the
+actual wall-clock time it was sent, not just "eventually gone").
+
+`mesh_goodbye` publishes that departure fact, then stops the heartbeat and
+subscription:
+
+```json
+{ "was_active": true, "said_goodbye": true }
+```
+
+A no-op (`{"was_active": false, "said_goodbye": false}`) if `mesh_hello`
+was never called.
+
+**Node IDs churn; `operator_name` doesn't have to.** Like every other
+tool here, the identity behind presence is a fresh temp file per server
+process by default (see §3) — so without `MACULA_MCP_IDENTITY` pinning a
+fixed path, `mesh_agents`' roster sees a "new" agent on every restart even
+if it's the same person/agent running it. `operator_name` (customizable
+per call, or via `MACULA_MCP_OPERATOR_NAME` as a standing default) is the
+label that stays meaningful across that churn — set it if being
+recognizable across restarts matters to you.
+
+**Don't call `mesh_hello` reflexively.** It starts a real, recurring
+publish loop against a real shared demo station and keeps a connection
+open indefinitely — call it because an agent actually wants to be
+discoverable, not as a connection ritual. The heartbeat interval has a
+10-second floor enforced in code (`interval_seconds` below that is
+clamped up), a guard against hammering the station, not a suggestion.
+
 ---
 
 ## 3. Resources
@@ -236,17 +341,26 @@ reliable, cross-station is best-effort.
 **Since v0.4.0, this is minted fresh per macula-mcp server process, in a
 temp directory, deleted when the process exits** — it is the identity
 `mesh_call`/`mesh_publish`/`mesh_put`/`mesh_get` use (not `mesh_watch`'s
-separate one, see §2). This is a deliberate fix, not a regression:
-before v0.4.0 every non-watch tool shared macula-cli's own persisted
-default identity across every concurrent process on the machine, which
-verified live to fail 5/6 of the time under real concurrent use (§2's
-history note). One real consequence worth knowing: running `macula-cli
-identity` by hand on the same machine now reports a DIFFERENT node ID
-than this resource — they used to match. Pin either identity to a fixed
-path with `MACULA_MCP_IDENTITY` / `MACULA_MCP_WATCH_IDENTITY` if you want
-a stable node ID across restarts, or to restore the old shared-identity
-behavior; a pinned path is never auto-deleted, only a freshly minted one
-is.
+separate one, see §2, or presence's own THIRD one, below). This is a
+deliberate fix, not a regression: before v0.4.0 every non-watch tool
+shared macula-cli's own persisted default identity across every
+concurrent process on the machine, which verified live to fail 5/6 of
+the time under real concurrent use (§2's history note). One real
+consequence worth knowing: running `macula-cli identity` by hand on the
+same machine now reports a DIFFERENT node ID than this resource — they
+used to match. Pin either identity to a fixed path with
+`MACULA_MCP_IDENTITY` / `MACULA_MCP_WATCH_IDENTITY` if you want a stable
+node ID across restarts, or to restore the old shared-identity behavior;
+a pinned path is never auto-deleted, only a freshly minted one is.
+
+**v0.5.0 adds a third identity**, for the daemon presence (`mesh_hello`/
+`mesh_agents`/`mesh_goodbye`) holds open — `MACULA_MCP_PRESENCE_IDENTITY`
+to pin it, same reasoning as the other two: it holds a connection open
+for as long as presence is active, and sharing an identity with anything
+else that connects concurrently would get one of them kicked (the
+station's own anti-duplicate-session guard, see §2's `mesh_watch` note).
+This resource still only reports the "default" identity above, not
+`mesh_watch`'s or presence's own.
 
 ### `mesh://etiquette`
 
@@ -254,10 +368,12 @@ The fuller version of the mesh-citizenship rules also condensed into this
 server's MCP `instructions` (surfaced to every client at connect time,
 whether or not a model thinks to look for a resource): no booleans on
 the wire, business verbs not CRUD, IDs in payloads not topic names,
-`mesh_publish`/`mesh_watch` are fire-and-forget not a handshake, and what
-this server deliberately doesn't do (no standing subscriptions, no local
-audit log, no peer listing). Read it once if you want the reasoning and
-receipts behind each rule rather than just the rule.
+`mesh_publish`/`mesh_watch` are fire-and-forget not a handshake, presence
+etiquette (don't call `mesh_hello` reflexively, say goodbye), and what
+this server deliberately doesn't do beyond presence's own narrow
+exception (no local audit log, no peer listing beyond `mesh_agents`' own
+roster). Read it once if you want the reasoning and receipts behind each
+rule rather than just the rule.
 
 ---
 
@@ -274,12 +390,13 @@ explanation of it.
 | Prompt | Asks for |
 |---|---|
 | `help` | Full quick-start: tool overview, one example each, top gotchas. |
-| `help_identity` | How identity works, `mesh_watch`'s separate identity, pinning with env vars. |
+| `help_identity` | How identity works, `mesh_watch`/presence's own separate identities, pinning with env vars. |
 | `help_wire_format` | The no-bool / naming rules, with a valid and invalid example. |
 | `help_watch` | What `mesh_watch` is actually for, and the mistake to avoid. |
+| `help_presence` | What `mesh_hello`/`mesh_agents`/`mesh_goodbye` actually do, the SQLite roster, why `operator_name` matters. |
 | `help_install` | Install, register, verify (`doctor`), what a failure means. |
 
-**Five separate zero-argument prompts, not one `help` prompt with an
+**Six separate zero-argument prompts, not one `help` prompt with an
 optional `topic` argument — a real bug found live, not a style choice.**
 `@modelcontextprotocol/sdk` 1.30.0 (the latest at the time) throws
 `Invalid arguments for prompt help: Required` on `getPrompt` when a
@@ -292,11 +409,11 @@ the Zod object schema without defaulting a missing field to `{}`, and
 `z.object({...}).parse(undefined)` fails at the top level regardless of
 whether the individual fields inside are optional. A prompt registered
 with NO argument schema at all skips that parse path entirely (`if
-(prompt.argsSchema) { ...parse... } else { cb(extra) }`), so five
-zero-arg prompts sidestep the bug rather than trigger it. Verified live:
-calling every prompt above via a real MCP `Client`, passing no
-`arguments` field at all (the exact shape that failed before), all five
-now respond correctly.
+(prompt.argsSchema) { ...parse... } else { cb(extra) }`), so zero-arg
+prompts sidestep the bug rather than trigger it. Verified live: calling
+every prompt above via a real MCP `Client`, passing no `arguments` field
+at all (the exact shape that failed before), all six respond correctly —
+re-verified again when `help_presence` was added, same result.
 
 ---
 
