@@ -79,7 +79,28 @@ QUIC/DHT wire protocol, not a mock.
 
 Every tool takes an optional `host` (`"host[:port]"`) to pick which station
 to connect through; all default to `MACULA_MESH_STATION` (see
-[Environment](#environment)).
+[Environment](#environment)). `mesh_call`/`mesh_watch`/`mesh_publish` also
+take an optional `realm` (see [Realms](#realms) below).
+
+### Realms
+
+Every call/watch/publish carries a 32-byte realm tag on the wire; all three
+tools default to the all-zero realm (`macula-cli`'s own default) when
+`realm` is omitted. A capability served under its own realm is invisible
+to a caller using the wrong one — `unknown_next_peer` (or, with `-direct`
+resolution, "no direct-dial advertisement in the DHT") doesn't necessarily
+mean the procedure doesn't exist, only that this call didn't carry the
+realm it's actually scoped to. Found live: `hecate_stations.list_stations`
+exists and is genuinely being served, but is unreachable through this
+server without its realm, because nothing here could pass one through at
+all until this was added.
+
+`realm` is 64 lowercase-or-uppercase hex characters (32 bytes). This
+server has no way to discover which realm a given capability lives in —
+that's a mesh-wide DHT query (`macula:find_records_by_type/2` server-side,
+type `procedure_advertisement`), not yet exposed as a `macula-cli`
+subcommand this server could wrap. If you don't already know the realm,
+you have to get it from whoever operates the service.
 
 ### Presence
 

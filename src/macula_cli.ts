@@ -430,10 +430,12 @@ export const call = (args: {
   procedure: string;
   callArgs?: Record<string, unknown>;
   timeoutMs?: number;
+  realm?: string;
 }): Promise<CallResult> => {
   const flags: string[] = ["--identity", defaultIdentityPath()];
   if (args.timeoutMs) flags.push("--timeout", `${Math.max(1, Math.round(args.timeoutMs / 1000))}s`);
   if (args.callArgs !== undefined) flags.push("--args", JSON.stringify(args.callArgs));
+  if (args.realm) flags.push("--realm", args.realm);
   return run<CallResult>(argv(["call"], flags, [args.host ?? defaultStation(), args.procedure]));
 };
 
@@ -446,14 +448,12 @@ export const publish = (args: {
   host?: string;
   topic: string;
   fact: Record<string, unknown>;
-}): Promise<PublishResult> =>
-  run<PublishResult>(
-    argv(
-      ["pubsub", "publish"],
-      ["--identity", defaultIdentityPath(), "--payload", JSON.stringify(args.fact)],
-      [args.host ?? defaultStation(), args.topic],
-    ),
-  );
+  realm?: string;
+}): Promise<PublishResult> => {
+  const flags: string[] = ["--identity", defaultIdentityPath(), "--payload", JSON.stringify(args.fact)];
+  if (args.realm) flags.push("--realm", args.realm);
+  return run<PublishResult>(argv(["pubsub", "publish"], flags, [args.host ?? defaultStation(), args.topic]));
+};
 
 export interface ServeRegisterResult {
   registered: boolean;
@@ -561,9 +561,11 @@ export const watch = async (args: {
   topic: string;
   durationSeconds: number;
   count?: number;
+  realm?: string;
 }): Promise<WatchEvent[]> => {
   const flags = ["--identity", watchIdentityPath(), "--duration", `${Math.max(1, Math.round(args.durationSeconds))}s`];
   if (args.count) flags.push("--count", String(args.count));
+  if (args.realm) flags.push("--realm", args.realm);
   const full = argv(["pubsub", "watch"], flags, [args.host ?? defaultStation(), args.topic]);
 
   const { stdout, stderr, code } = await execFile(binPath(), full);

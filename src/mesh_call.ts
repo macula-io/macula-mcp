@@ -38,10 +38,22 @@ export function registerMeshCall(server: McpServer): void {
         .string()
         .optional()
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
+      realm: z
+        .string()
+        .length(64)
+        .regex(/^[0-9a-fA-F]+$/, "must be hex")
+        .optional()
+        .describe(
+          "32-byte realm as hex (64 chars), the wire-level tag a procedure is scoped to -- distinct from " +
+            "the realm word inside an MRI string. Omit for the default all-zero realm (protocol-internal, " +
+            "most demo-fleet capabilities). A capability served under its own realm is unreachable without " +
+            "the right one here -- unknown_next_peer with the default realm doesn't necessarily mean the " +
+            "procedure doesn't exist.",
+        ),
     },
-    async ({ procedure, args, timeout_ms, host }) => {
+    async ({ procedure, args, timeout_ms, host, realm }) => {
       try {
-        const res = await call({ host, procedure, callArgs: args, timeoutMs: timeout_ms });
+        const res = await call({ host, procedure, callArgs: args, timeoutMs: timeout_ms, realm });
         return jsonContent({ result: res.payload, responded_by: res.responded_by, duration_ms: res.duration_ms });
       } catch (e) {
         return errorContent(describeCliError("mesh_call failed", e));

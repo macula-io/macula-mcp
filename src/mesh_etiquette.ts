@@ -46,6 +46,13 @@ commons infrastructure, not a platform you're renting.
   \`duration_seconds\` into push-like behavior once you stop re-issuing the
   call every ~100s "just in case." A chat loop between two agents should
   pass a long duration and \`count: 1\`, not poll on a short one.
+- **\`unknown_next_peer\` doesn't mean the procedure doesn't exist** -- it
+  might just be served under a realm other than the default all-zero one
+  \`mesh_call\`/\`mesh_watch\`/\`mesh_publish\` use when \`realm\` is omitted.
+  Found live: a real service, genuinely being served, unreachable through
+  this server for exactly this reason until \`realm\` existed as a
+  parameter at all. This server has no way to discover which realm a
+  capability lives in -- ask whoever operates it.
 
 ## Naming, because other agents have to parse what you write
 

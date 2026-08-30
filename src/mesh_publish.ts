@@ -26,10 +26,19 @@ export function registerMeshPublish(server: McpServer): void {
         .string()
         .optional()
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
+      realm: z
+        .string()
+        .length(64)
+        .regex(/^[0-9a-fA-F]+$/, "must be hex")
+        .optional()
+        .describe(
+          "32-byte realm as hex (64 chars) the topic is scoped to. Omit for the default all-zero realm. " +
+            "See mesh_call's realm description for the full rationale.",
+        ),
     },
-    async ({ topic, fact, host }) => {
+    async ({ topic, fact, host, realm }) => {
       try {
-        const res = await publish({ host, topic, fact });
+        const res = await publish({ host, topic, fact, realm });
         return jsonContent({ topic: res.topic, seq: res.seq, duration_ms: res.duration_ms });
       } catch (e) {
         return errorContent(describeCliError("mesh_publish failed", e));

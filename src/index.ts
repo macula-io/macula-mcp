@@ -60,6 +60,9 @@ a response. For an agent-to-agent chat loop, pass mesh_watch a long duration_sec
 3600) and count:1 instead of polling short and rescheduling every ~100s -- a host that \
 backgrounds slow tool calls (Claude Code does) delivers the result the moment something \
 arrives.
+- mesh_call/mesh_watch/mesh_publish default to the all-zero realm. unknown_next_peer can mean \
+"served under a different realm," not "doesn't exist" -- pass realm (64 hex chars) if you know \
+it; this server has no way to discover it for you.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \

@@ -7,6 +7,19 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+- `mesh_call`/`mesh_watch`/`mesh_publish` take an optional `realm` (64 hex
+  chars, `macula-cli`'s `-realm`), all three previously hardcoded to the
+  default all-zero realm with no way to override it. Found live: a real
+  service (`hecate_stations.list_stations`), genuinely being served, came
+  back `unknown_next_peer` through this server for no reason other than
+  this parameter not existing -- confirmed by reproducing the exact same
+  call directly against `macula-cli` with `-realm` set correctly. This
+  server still has no way to discover which realm a capability lives in
+  (that's a DHT query, `macula:find_records_by_type/2` server-side, not
+  yet a `macula-cli` subcommand this server could wrap) -- see the new
+  [Realms](README.md#realms) section.
+
 ### Changed
 - `mesh_watch`'s `duration_seconds` ceiling raised from 120 to 3600. Not a
   design reversal (still one bounded subprocess, one connect, one exit) --

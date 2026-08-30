@@ -63,10 +63,19 @@ export function registerMeshWatch(server: McpServer): void {
         .string()
         .optional()
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
+      realm: z
+        .string()
+        .length(64)
+        .regex(/^[0-9a-fA-F]+$/, "must be hex")
+        .optional()
+        .describe(
+          "32-byte realm as hex (64 chars) the topic is scoped to. Omit for the default all-zero realm. " +
+            "See mesh_call's realm description for the full rationale.",
+        ),
     },
-    async ({ topic, duration_seconds, count, host }) => {
+    async ({ topic, duration_seconds, count, host, realm }) => {
       try {
-        const events = await watch({ host, topic, durationSeconds: duration_seconds, count });
+        const events = await watch({ host, topic, durationSeconds: duration_seconds, count, realm });
         return jsonContent({ topic, event_count: events.length, events });
       } catch (e) {
         return errorContent(describeCliError("mesh_watch failed", e));
