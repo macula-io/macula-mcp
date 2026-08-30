@@ -20,8 +20,8 @@ Continue, and anything else that speaks MCP.
 // .mcp.json (or your harness's MCP config)
 {
   "mcpServers": {
-    "macula": { "command": "macula-mcp" }
-  }
+    "macula": { "command": "macula-mcp" },
+  },
 }
 ```
 
@@ -40,7 +40,7 @@ of its own.
 ```
 ┌───────────────┐   MCP/stdio   ┌────────────┐  spawns, parses stdout  ┌────────────┐   QUIC    ┌──────────────┐
 │ agent harness │ ────────────▶ │ macula-mcp │ ──────────────────────▶ │ macula-cli │ ─────────▶│ Macula mesh  │
-└───────────────┘               └────────────┘                        └────────────┘           └──────────────┘
+└───────────────┘               └────────────┘                         └────────────┘           └──────────────┘
 ```
 
 **Reworked 2026-08-29** from an earlier design that proxied to a local
@@ -64,16 +64,16 @@ QUIC/DHT wire protocol, not a mock.
 
 ## Tools
 
-| Tool | Primitive | What it does |
-|---|---|---|
-| `mesh_call` | RPC | Invoke a capability a peer advertises (build, test, search, deploy) over the mesh. Returns the result + `duration_ms`. |
-| `mesh_put` | Content Sharing | Publish a content-addressed artifact; returns its MCID hex. |
-| `mesh_get` | Content Sharing | Fetch a content-addressed artifact by MCID hex. |
-| `mesh_publish` | Pub/Sub | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`. |
-| `mesh_watch` | Pub/Sub | Watch a topic for up to `duration_seconds` (max 120) and return whatever arrived. **Blocks for the call's duration** — there's no standing background subscription; call again to keep watching. |
-| `mesh_hello` | Presence | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately, and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
-| `mesh_agents` | Presence | A paged list of agents seen via `agent.hello`, sorted most-recently-seen first. Reads a local cache; only reflects agents heard from while this process has been running. |
-| `mesh_goodbye` | Presence | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscription started by `mesh_hello`. |
+| Tool           | Primitive       | What it does                                                                                                                                                                                                                                                                      |
+| -------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mesh_call`    | RPC             | Invoke a capability a peer advertises (build, test, search, deploy) over the mesh. Returns the result + `duration_ms`.                                                                                                                                                            |
+| `mesh_put`     | Content Sharing | Publish a content-addressed artifact; returns its MCID hex.                                                                                                                                                                                                                       |
+| `mesh_get`     | Content Sharing | Fetch a content-addressed artifact by MCID hex.                                                                                                                                                                                                                                   |
+| `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
+| `mesh_watch`   | Pub/Sub         | Watch a topic for up to `duration_seconds` (max 120) and return whatever arrived. **Blocks for the call's duration** — there's no standing background subscription; call again to keep watching.                                                                                  |
+| `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately, and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
+| `mesh_agents`  | Presence        | A paged list of agents seen via `agent.hello`, sorted most-recently-seen first. Reads a local cache; only reflects agents heard from while this process has been running.                                                                                                         |
+| `mesh_goodbye` | Presence        | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscription started by `mesh_hello`.                                                                                          |
 
 Every tool takes an optional `host` (`"host[:port]"`) to pick which station
 to connect through; all default to `MACULA_MESH_STATION` (see
@@ -109,22 +109,22 @@ arguments.
 
 ## Resources
 
-| Resource | Content |
-|---|---|
-| `mesh://identity` | This macula-mcp server process's own Ed25519 identity (node ID) — minted fresh per process since v0.4.0, not the same as running `macula-cli` by hand. |
+| Resource           | Content                                                                                                                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mesh://identity`  | This macula-mcp server process's own Ed25519 identity (node ID) — minted fresh per process since v0.4.0, not the same as running `macula-cli` by hand.                                          |
 | `mesh://etiquette` | The reasoning and receipts behind the mesh-citizenship rules also condensed into this server's MCP `instructions` (wire-format limits, naming norms, what this server deliberately doesn't do). |
 
 ## Prompts
 
 For a HUMAN in the conversation, not the agent — surfaces as a slash command in clients that support MCP prompts (e.g. `/mcp__macula__help` in Claude Code). Five zero-argument prompts rather than one with a topic argument: `@modelcontextprotocol/sdk` 1.30.0 errors on a bare invocation (no `arguments` field at all — the normal way to invoke a plain slash command) of a prompt whose args are all optional, so separate prompts sidestep it.
 
-| Prompt | Asks the model to explain |
-|---|---|
-| `help` | Full quick-start: tool overview, one example each, top gotchas. |
-| `help_identity` | How identity works, `mesh_watch`'s separate identity, pinning with env vars. |
-| `help_wire_format` | The no-bool / naming rules, with a valid and invalid example. |
-| `help_watch` | What `mesh_watch` is actually for, and the mistake to avoid. |
-| `help_install` | Install, register, verify (`doctor`), what a failure means. |
+| Prompt             | Asks the model to explain                                                    |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `help`             | Full quick-start: tool overview, one example each, top gotchas.              |
+| `help_identity`    | How identity works, `mesh_watch`'s separate identity, pinning with env vars. |
+| `help_wire_format` | The no-bool / naming rules, with a valid and invalid example.                |
+| `help_watch`       | What `mesh_watch` is actually for, and the mistake to avoid.                 |
+| `help_install`     | Install, register, verify (`doctor`), what a failure means.                  |
 
 ## Prerequisites
 
@@ -191,17 +191,17 @@ and troubleshooting.
 
 ## Environment
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `MACULA_CLI_BIN` | Override the `macula-cli` binary path/name. | `macula-cli` (resolved via `PATH`) |
-| `MACULA_MESH_STATION` | Default station every tool connects through when a call doesn't override `host`. | `station-de-frankfurt.macula.io:4433` |
-| `MACULA_MCP_IDENTITY` | Pin the identity `mesh_call`/`mesh_put`/`mesh_get`/`mesh_publish` use to a fixed path, instead of a fresh one minted per process. | fresh temp file per process, deleted on exit |
-| `MACULA_MCP_WATCH_IDENTITY` | Same, for `mesh_watch`'s identity (kept separate from every other tool's — see the [guide](guides/HOWTO.md) §2). | fresh temp file per process, deleted on exit |
+| Variable                       | Purpose                                                                                                                                                              | Default                                      |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `MACULA_CLI_BIN`               | Override the `macula-cli` binary path/name.                                                                                                                          | `macula-cli` (resolved via `PATH`)           |
+| `MACULA_MESH_STATION`          | Default station every tool connects through when a call doesn't override `host`.                                                                                     | `station-de-frankfurt.macula.io:4433`        |
+| `MACULA_MCP_IDENTITY`          | Pin the identity `mesh_call`/`mesh_put`/`mesh_get`/`mesh_publish` use to a fixed path, instead of a fresh one minted per process.                                    | fresh temp file per process, deleted on exit |
+| `MACULA_MCP_WATCH_IDENTITY`    | Same, for `mesh_watch`'s identity (kept separate from every other tool's — see the [guide](guides/HOWTO.md) §2).                                                     | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_PRESENCE_IDENTITY` | Same, for the internal daemon `mesh_hello`/`mesh_agents`/`mesh_goodbye` hold open (a third identity, separate from both of the above for the same collision reason). | fresh temp file per process, deleted on exit |
-| `MACULA_MCP_ROSTER_DB` | Where `mesh_agents`' SQLite roster lives. | `$HOME/.macula-mcp/roster.sqlite3` |
-| `MACULA_MCP_OPERATOR_NAME` | Default `operator_name` for `mesh_hello`, when the agent doesn't pass one explicitly. | none |
-| `MACULA_MCP_HELLO_MESSAGE` | Default `message` for `mesh_hello`, when the agent doesn't pass one explicitly. | none |
-| `MACULA_MCP_BANNER_FILE` | Path to a custom ASCII banner `mesh_hello` prints. | a small bundled default |
+| `MACULA_MCP_ROSTER_DB`         | Where `mesh_agents`' SQLite roster lives.                                                                                                                            | `$HOME/.macula-mcp/roster.sqlite3`           |
+| `MACULA_MCP_OPERATOR_NAME`     | Default `operator_name` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                | none                                         |
+| `MACULA_MCP_HELLO_MESSAGE`     | Default `message` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                      | none                                         |
+| `MACULA_MCP_BANNER_FILE`       | Path to a custom ASCII banner `mesh_hello` prints.                                                                                                                   | a small bundled default                      |
 
 ## Status
 
@@ -254,6 +254,7 @@ itself becoming a stateful daemon, a fork deliberately not taken then (see
 gained a real daemon later (v0.2.0) — presence (`mesh_hello`/`mesh_agents`/
 `mesh_goodbye`, see [Presence](#presence)) is this server narrowly taking
 that fork back up for exactly one use, not a reversal of the rework below:
+
 - **Standing subscriptions + inbox.** The old `mesh_subscribe`/
   `mesh_unsubscribe`/`mesh_subscriptions`/`mesh_inbox` quartet relied on
   the daemon's own event-sourced background subscription that outlived any
@@ -278,11 +279,11 @@ best-effort cross-station.
 
 ## Documentation
 
-| Guide | Description |
-|---|---|
+| Guide                           | Description                                                                                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [HOW-TO Guide](guides/HOWTO.md) | Install/uninstall env var reference, each tool's exact behavior, troubleshooting a failed tool call, the two real gotchas found live-testing this rework |
-| [CHANGELOG](CHANGELOG.md) | What changed in each released version, and what's on `main` but not yet tagged |
-| [CONTRIBUTING](CONTRIBUTING.md) | Build/test/verify locally, the native-dependency gotcha, how a release actually gets published |
+| [CHANGELOG](CHANGELOG.md)       | What changed in each released version, and what's on `main` but not yet tagged                                                                           |
+| [CONTRIBUTING](CONTRIBUTING.md) | Build/test/verify locally, the native-dependency gotcha, how a release actually gets published                                                           |
 
 ## License
 
