@@ -7,6 +7,21 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Changed
+- `mesh_watch`'s `duration_seconds` ceiling raised from 120 to 3600. Not a
+  design reversal (still one bounded subprocess, one connect, one exit) --
+  found live running an agent-to-agent chat loop: an MCP host that
+  backgrounds a slow tool call and delivers the result as a notification
+  (Claude Code does) turns a long watch into real low-latency push, but
+  the old 120s cap forced re-issuing the call and rescheduling roughly
+  every 100s, spending most of the wall-clock time on reconnect overhead
+  instead of waiting for the next fact.
+- `mesh_watch`'s tool description, the server's `instructions`, and
+  `mesh://etiquette` now point out that presence heartbeats are ordinary
+  facts on `agent.hello`/`agent.goodbye` -- watchable directly instead of
+  polling `mesh_agents`' cache -- and that a chat loop should pass a long
+  `duration_seconds` + `count: 1` rather than polling short.
+
 ## [0.6.0] - 2026-08-30
 
 ### Added

@@ -56,7 +56,10 @@ station is a public demo fleet, not your sandbox). Before publishing or calling 
 - Put IDs in the payload, never in the topic name.
 - mesh_publish has no ack and mesh_watch only catches what's already in flight -- neither is \
 a way to synchronize with something you're about to send yourself; use mesh_call if you need \
-a response.
+a response. For an agent-to-agent chat loop, pass mesh_watch a long duration_seconds (up to \
+3600) and count:1 instead of polling short and rescheduling every ~100s -- a host that \
+backgrounds slow tool calls (Claude Code does) delivers the result the moment something \
+arrives.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
