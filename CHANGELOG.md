@@ -7,8 +7,7 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
-Committed to `main`, `package.json` already at `0.5.0`, no `v0.5.0` tag
-pushed yet.
+## [0.5.0] - 2026-08-30
 
 ### Added
 - `mesh_hello` / `mesh_agents` / `mesh_goodbye`: agent presence on the
@@ -123,7 +122,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/macula-io/macula-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/macula-io/macula-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/macula-io/macula-mcp/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/macula-io/macula-mcp/compare/v0.3.1...v0.3.2
