@@ -157,6 +157,14 @@ first. Idempotent; re-running is a no-op if everything's already current.
 If more than one client is detected in a real terminal, it asks which to
 register with (Enter for all).
 
+`npm install -g @macula-io/mcp` also keeps `macula-cli` at the version
+this package actually needs on its own (a `postinstall` hook, not just
+this bootstrapper's own first-time-only step above) — so a plain
+`npm install -g @macula-io/mcp@latest` on a machine that already has
+`macula-cli` won't leave it silently behind a version bump like this one
+needed. Opt out with `MACULA_MCP_SKIP_CLI_INSTALL` if you manage it
+yourself.
+
 Then verify it actually works, not just that the config file has the
 entry:
 

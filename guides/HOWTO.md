@@ -21,6 +21,20 @@ Four steps, in order: check Node.js 20+ is present (won't install it for
 you), install `macula-cli` if it isn't already on `PATH`, `npm install -g
 @macula-io/mcp`, then run `macula-mcp-install`.
 
+**Since v0.5.1, `npm install -g @macula-io/mcp` on its own also keeps
+`macula-cli` current** — a `postinstall` hook checks the installed
+version against this package's own required minimum and runs
+`macula-cli`'s `install.sh`/`install.ps1` automatically if it's missing
+*or* below that minimum, not just missing outright (which is all the
+bootstrapper's own step 2 above ever checked). This closes a real gap:
+before v0.5.1, upgrading only the npm package (e.g. `npm install -g
+@macula-io/mcp@latest` on a machine that already had `macula-cli`) left
+a stale `macula-cli` completely undetected until either a presence tool
+call failed with a version error or someone happened to run `doctor`.
+Never runs on this repo's own `npm ci` (see `CONTRIBUTING.md`), and
+never fails the npm install itself if the fetch fails — a warning, not
+a blocker.
+
 If more than one MCP client is detected and you're running in a real
 terminal (not a piped `curl | bash`), `macula-mcp-install` asks which to
 register with -- press Enter to register with all of them, same as
@@ -45,7 +59,7 @@ is the check that would have caught both immediately.
 | Env var | Effect |
 |---|---|
 | `MACULA_MCP_VERSION` | Pin a version (e.g. `0.3.0`) instead of latest. |
-| `MACULA_MCP_SKIP_CLI_INSTALL` | Don't touch `macula-cli` at all — use this if you're managing its version yourself. |
+| `MACULA_MCP_SKIP_CLI_INSTALL` | Don't touch `macula-cli` at all — covers both the full bootstrapper's own step 2 and the `npm install -g` `postinstall` hook (v0.5.1+). Use this if you're managing its version yourself. |
 | `MACULA_MCP_SKIP_CONFIGURE` | Install the package but don't register any MCP client — run `macula-mcp-install` yourself later. |
 
 ```bash

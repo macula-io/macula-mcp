@@ -61,7 +61,7 @@ agents heard from) -- call it once if you want to be discoverable, then mesh_age
 else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.5.0" },
+  { name: "macula-mcp", version: "0.5.1" },
   { instructions: INSTRUCTIONS },
 );
 

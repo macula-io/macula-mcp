@@ -7,6 +7,23 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-30
+
+### Added
+- `npm install -g @macula-io/mcp` now checks the installed `macula-cli`
+  against `MIN_MACULA_CLI_VERSION` via a `postinstall` hook, and runs
+  `macula-cli`'s own `install.sh`/`install.ps1` automatically if it's
+  missing or below that minimum — npm has no way to declare a dependency
+  on a GitHub-Releases-distributed Go binary, so this is the closest
+  equivalent. Found the gap the hard way: 0.5.0 raised the minimum to
+  0.2.0 for presence, and a plain `npm install -g` upgrade on an
+  already-set-up machine had no way to tell you your `macula-cli` had
+  fallen behind — only `doctor`, run separately, caught it. Opt out with
+  `MACULA_MCP_SKIP_CLI_INSTALL`; never runs on this repo's own `npm ci`
+  (gated on `npm_config_global`, so local dev and CI are untouched) and
+  never fails the install itself if the fetch fails (a warning, not a
+  blocker).
+
 ## [0.5.0] - 2026-08-30
 
 ### Added
@@ -122,7 +139,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/macula-io/macula-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/macula-io/macula-mcp/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/macula-io/macula-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/macula-io/macula-mcp/compare/v0.3.2...v0.4.0

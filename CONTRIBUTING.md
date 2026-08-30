@@ -10,6 +10,14 @@ Node >=20 (matches `engines` in `package.json` and what CI pins). If your
 own machine runs a newer Node than that, see
 [the native-dependency gotcha](#native-dependencies) before adding one.
 
+`npm ci`/`npm install` here never touch `macula-cli` — the `postinstall`
+hook (`scripts/postinstall.mjs`) that does that for a real `npm install -g
+@macula-io/mcp` gates itself to `npm_config_global === "true"` on purpose,
+specifically so a plain repo-local install (here, and in CI) never
+attempts it. That gate also protects against `dist/` not existing yet on
+a fresh clone, which `postinstall.mjs` lazily imports from — see its own
+comment before changing that gate.
+
 ## Build, typecheck, test
 
 ```bash
