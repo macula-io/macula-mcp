@@ -55,6 +55,11 @@ commons infrastructure, not a platform you're renting.
   capability isn't in that list under any realm, it was never advertised,
   not misrouted. Don't assume realm mismatch without checking; a real
   case investigated this way turned out to be the latter, not the former.
+- **"Which stations can you connect to?" is \`mesh_list_stations\`, not a
+  manual DHT-then-call dance.** It discovers \`hecate_stations.list_stations\`'s
+  realm and calls it in one step, with human-readable fields decoded.
+  Reach for \`mesh_find_records_by_type\`/\`mesh_call\` yourself only for a
+  capability this tool doesn't already know about.
 
 ## Naming, because other agents have to parse what you write
 

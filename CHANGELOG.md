@@ -8,6 +8,23 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Added
+- `mesh_list_stations`: "which stations can you connect to?" in one call.
+  Composes `mesh_find_records_by_type` (to discover which realm
+  `hecate_stations.list_stations` -- the mesh's canonical station
+  directory -- is currently advertised under) with the actual call, since
+  neither raw DHT records nor a bare `mesh_call` were a single obvious
+  tool for this. Optional `near`/`continent`/`country`/`city` filters,
+  matching the service's own filter API. Human-readable fields
+  (city/continent/country/hostname/kind/version, and each
+  `host_advertised` entry) decoded from the wire's `"0x..."`-hex
+  byte-string encoding back to plain UTF-8; `node_id`/`id`/`_rev` stay
+  hex on purpose (genuinely opaque identifiers). Deliberately specific to
+  the one service known to fill this role, unlike the app-agnostic DHT
+  tools -- see the new [Stations](README.md#stations) section. Verified
+  live end to end against the compiled `dist/`, not just typechecked:
+  discovers the real realm, calls it, returns a correctly nearest-first,
+  fully decoded station list (Frankfurt/Paris/Nuremberg from a Belgium
+  coordinate).
 - `mesh_call`/`mesh_watch`/`mesh_publish` take an optional `realm` (64 hex
   chars, `macula-cli`'s `-realm`), all three previously hardcoded to the
   default all-zero realm with no way to override it -- confirmed by

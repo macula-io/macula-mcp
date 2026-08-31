@@ -36,6 +36,7 @@ import { registerHelp } from "./mesh_help.js";
 import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshDht } from "./mesh_dht.js";
+import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
 import { registerMeshHello } from "./mesh_hello.js";
@@ -65,6 +66,8 @@ arrives.
 "served under a different realm," not "doesn't exist" -- pass realm (64 hex chars) if you know \
 it, or find it with mesh_find_records_by_type (record_type "procedure_advertisement" lists every \
 capability a station knows about, realm decoded out of each one's procedure_uri).
+- "Which stations can you connect to?" is mesh_list_stations, not a manual DHT-then-call dance -- \
+it discovers hecate_stations.list_stations's realm and calls it in one step.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
@@ -93,6 +96,9 @@ registerHelp(server);
 registerMeshCall(server);
 registerMeshArtifact(server);
 registerMeshDht(server);
+// mesh_list_stations is a composition of two macula-cli calls (a DHT
+// lookup, then the discovered call), not one -- see mesh_stations.ts.
+registerMeshListStations(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 
