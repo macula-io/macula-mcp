@@ -38,6 +38,7 @@ import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshLobby } from "./mesh_lobby.js";
+import { registerMeshSendChat } from "./mesh_chat.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
 import { registerMeshHello } from "./mesh_hello.js";
@@ -75,6 +76,9 @@ agents.lobby topic and hands you back an unguessable session topic -- then mesh_
 it yourself, same {sender, text} shape as any other agent chat. Unguessable, not encrypted: this \
 mesh doesn't yet do payload encryption at the protocol level, so treat it as early-stage \
 infrastructure rather than assuming confidentiality.
+- mesh_send_chat fills in {sender, text} for you (your own node_id, no lookup needed) and publishes \
+it to whatever topic you give it -- pass wait_reply_seconds to also wait, in the same call, for the \
+first reply from someone else, instead of a separate mesh_publish then mesh_watch every time.
 - mesh_observe_lobby starts a standing watch over agents.lobby and every session it announces, \
 recording a transcript mesh_lobby_transcript reads instantly (never blocks) -- a broader listening \
 scope than anything else here, so start it deliberately; read mesh://etiquette before reaching for it.
@@ -113,6 +117,10 @@ registerMeshListStations(server);
 // one -- see mesh_lobby.ts for the rest of the lobby protocol, which
 // needs no further tools (mesh_watch/mesh_publish already cover it).
 registerMeshLobby(server);
+// mesh_send_chat: identity() then publish(), optionally followed by
+// watch() in the same call -- a convenience layer over the {sender,
+// text} convention already established for agent chat, see mesh_chat.ts.
+registerMeshSendChat(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 

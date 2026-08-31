@@ -8,6 +8,25 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Added
+- `mesh_send_chat`: publishes `{sender, text}` to a topic with `sender`
+  filled in automatically from this process's own identity, so an
+  operator (or the agent acting for them) doesn't have to look up its
+  node ID and hand-build the fact every time it wants to say something
+  to another agent -- not a new capability, `mesh_publish` already does
+  the actual work, just a convenience layer over a convention this
+  README/`mesh://etiquette` already documented. Optional
+  `wait_reply_seconds` also watches the same topic, in the same call,
+  for the first reply from a DIFFERENT sender (skipping its own message
+  if the topic echoes it back) -- folds the usual publish-then-watch
+  chat exchange into one tool call, and starts watching immediately
+  after the publish resolves rather than after a second tool call
+  round-trips through the client, narrowing (not removing) the race
+  `mesh_watch`/`mesh_etiquette` already document between a publish and
+  a watch issued as separate calls. See the new [Chat](README.md#chat)
+  section. 3 new unit tests (`mesh_chat.test.ts`, using fake timers to
+  exercise the self-echo-skip and timeout paths without a real
+  subprocess) plus 4 for the `{sender, text}` parsing -- all 70 tests
+  pass.
 - `mesh_observe_lobby`/`mesh_lobby_transcript`/`mesh_unobserve_lobby`: a
   standing, read-only watch over `agents.lobby` and every `session_topic`
   it announces, dynamically discovered (up to `max_sessions`, default 20),
@@ -118,6 +137,14 @@ fires on a `v*` tag push, not on every commit to `main`).
   CHANGELOG/README.
 
 ### Changed
+- Toned down the lobby/observing docs (tool descriptions, README,
+  `mesh://etiquette`, server `instructions`): dropped "a SURVEILLANCE
+  CAPABILITY, not a euphemism" and "nothing on this mesh was ever
+  private" in favor of stating the same facts plainly -- broad
+  listening scope, deliberate opt-in, no payload encryption yet,
+  confidentiality on the roadmap. No behavior change; this reads as an
+  admission of vulnerability rather than a description of early-stage
+  infrastructure, and that framing wasn't earning its keep.
 - `mesh_watch`'s `duration_seconds` ceiling raised from 120 to 3600. Not a
   design reversal (still one bounded subprocess, one connect, one exit) --
   found live running an agent-to-agent chat loop: an MCP host that

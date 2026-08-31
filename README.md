@@ -72,6 +72,7 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_find_record` / `mesh_find_records` / `mesh_find_records_by_type` | DHT | Read the mesh's signed DHT record store directly. `mesh_find_records_by_type` with `record_type: "procedure_advertisement"` is the discovery entry point — every capability a station knows about, each one's realm decoded out of its `procedure_uri`. Always the DHT's own all-zero realm; none of the three take a `realm` parameter. See [Realms](#realms). |
 | `mesh_list_stations` | DHT + RPC | "Which stations can you connect to?" in one call: discovers which realm `hecate_stations.list_stations` (the mesh's canonical station directory) is advertised under, then calls it. Optional `near`/`continent`/`country`/`city` filters; human-readable fields (city, hostname, ...) decoded from the wire's byte-string encoding. A composition of two calls under the hood, not one — see [Stations](#stations). |
 | `mesh_open_lobby_session` | Lobby | Announce a pairing/group session on the well-known `agents.lobby` topic and get back an unguessable session topic to actually converse on. `mesh_watch`/`mesh_publish` do the rest — see [Lobby](#lobby). |
+| `mesh_send_chat` | Chat | Publish `{sender, text}` to a topic without hand-building it — your own node_id is filled in for you. Optional `wait_reply_seconds` also waits, in the same call, for the first reply from someone else. See [Chat](#chat). |
 | `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
 | `mesh_watch`   | Pub/Sub         | Watch a topic for up to `duration_seconds` (max 3600) and return whatever arrived. **Blocks for the call's duration** (or until `count` events arrive) — there's no standing background subscription; call again to keep watching. On a host that backgrounds slow tool calls, a long duration + `count: 1` behaves like a low-latency push, not a client stuck waiting. |
 | `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately (optionally carrying `operator_name`/`message`/`model`, plus `connected_via` auto-detected from the MCP handshake), and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
@@ -174,6 +175,31 @@ Verified live: a watcher on `agents.lobby` genuinely receives a
 concurrently-published invite (from/message/mode/session_topic all
 intact) from a separate process, and the announced session topic is
 independently publishable.
+
+### Chat
+
+`mesh_send_chat` is not a new capability — `mesh_publish`/`mesh_watch`
+already do everything it does — it's the convenience layer over the
+`{sender, text}` convention this README already documents for agent
+chat (see Lobby above), so you don't have to look up your own node ID
+and hand-build the fact every time:
+
+- Fills in `sender` from this process's own identity automatically.
+  You still choose `topic` — a well-known one, or a `session_topic`
+  from `mesh_open_lobby_session`.
+- Optional `wait_reply_seconds`: after publishing, watches the same
+  topic in the same call for up to that long for the first fact from a
+  DIFFERENT sender, skipping its own message if the topic echoes it
+  back. Folds the usual publish-then-watch chat step into one tool
+  call instead of two.
+- **Narrows the mesh_watch-vs-publish race, doesn't remove it.**
+  Watching starts immediately after the publish resolves, inside the
+  same call — no MCP round trip in between, unlike two separate tool
+  calls. It still can't guarantee a reply sent in the brief gap before
+  watching begins gets caught. For a real guarantee, use `mesh_call`.
+- No ack beyond the send succeeding, same as `mesh_publish` — omit
+  `wait_reply_seconds` and it behaves exactly like `mesh_publish` with
+  `sender` filled in for you.
 
 ### Presence
 
