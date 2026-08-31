@@ -8,6 +8,35 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Added
+- `mesh_observe_lobby`/`mesh_lobby_transcript`/`mesh_unobserve_lobby`: a
+  standing, read-only watch over `agents.lobby` and every `session_topic`
+  it announces, dynamically discovered (up to `max_sessions`, default 20),
+  plus an instant local read of what's been recorded. The third exception
+  to "one-shot subprocess" (after presence and serving) -- necessarily,
+  since watching a topic set that grows as new sessions get announced is
+  inherently a durable-subscription problem no single macula-cli call can
+  express. Explicitly documented as a **surveillance capability**, not
+  softened as mere "observability", in the tool description, README, and
+  `mesh://etiquette` alike -- it doesn't do anything a determined party
+  couldn't already do by hand (nothing on this mesh was ever private),
+  but makes continuous watching one convenient tool call instead of
+  something you'd have to notice and go do yourself, so it's framed
+  honestly rather than quietly shipped. `mesh_lobby_transcript` never
+  blocks or makes a mesh round trip (a local SQLite read, same shape as
+  `mesh_agents`' own roster read) and is never retroactive (only ever
+  contains what arrived after `mesh_observe_lobby` was called, same
+  fire-and-forget constraint as every other `mesh_watch`-backed tool
+  here). Backed by its own fifth identity (`MACULA_MCP_OBSERVE_IDENTITY`).
+  `presence.ts`'s own topic-tap helper (`watchTopic`) was extracted to
+  `macula_cli.ts` as `watchTopicOnDaemon` so this and presence share one
+  implementation instead of two copies drifting apart. Verified live end
+  to end, not just typechecked: started the observer, published a lobby
+  invite from a separate process (simulating another agent), confirmed
+  the observer dynamically tapped the announced session topic on its
+  own, posted a chat message on that session, and confirmed the
+  transcript captured both the invite and the chat with sender/text
+  correctly decoded. 9 new unit tests for the transcript store
+  (`lobby_transcript.ts`) -- all 63 tests pass.
 - `mesh_hello`/`mesh_agents` roster now carries `model` and
   `connected_via`. `model` (which LLM is driving this agent) is
   self-reported, same shape as `operator_name`/`message`

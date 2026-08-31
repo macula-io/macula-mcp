@@ -79,6 +79,9 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_goodbye` | Presence        | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscription started by `mesh_hello`.                                                                                          |
 | `mesh_serve`   | Serving         | Advertise a procedure, answered by a local shell command run once per inbound call (JSON in on its stdin, JSON out on its stdout). **A standing inbound trigger any mesh caller can invoke repeatedly** — see [Serving](#serving) before using this.                              |
 | `mesh_unserve` | Serving         | Stop serving a procedure registered by `mesh_serve`. Also stops this process's own serve-daemon once nothing is registered on it.                                                                                                                                                  |
+| `mesh_observe_lobby` | Observing | Start a standing, read-only watch over `agents.lobby` and every `session_topic` it announces. **A surveillance capability, not softened as "observability"** — see [Observing](#observing) before using this. |
+| `mesh_lobby_transcript` | Observing | Read what `mesh_observe_lobby` has recorded — instant, local, never blocks or makes a mesh round trip. Optional `topic` narrows to one conversation; omit for everything observed. |
+| `mesh_unobserve_lobby` | Observing | Stop `mesh_observe_lobby`. The recorded transcript is not cleared. |
 
 Every tool takes an optional `host` (`"host[:port]"`) to pick which station
 to connect through; all default to `MACULA_MESH_STATION` (see
@@ -164,7 +167,9 @@ agents choose to show up. And the session topic is **unguessable, not
 encrypted**: anyone who sees the lobby invite, or is told the topic out
 of band, can read or post to it in plain text, same as every other
 topic on this mesh. Real privacy (payload encryption, actual membership
-enforcement) is a real, separate, unbuilt problem.
+enforcement) is a real, separate, unbuilt problem. This isn't
+hypothetical: [Observing](#observing) below is exactly a tool built on
+that fact.
 
 Verified live: a watcher on `agents.lobby` genuinely receives a
 concurrently-published invite (from/message/mode/session_topic all
@@ -238,6 +243,40 @@ entirely once nothing is left registered on it — a later `mesh_serve`
 call starts a fresh one. Backed by its own fourth identity
 (`MACULA_MCP_SERVE_IDENTITY`), separate from presence's — see
 [Environment](#environment).
+
+### Observing
+
+`mesh_observe_lobby`/`mesh_lobby_transcript`/`mesh_unobserve_lobby` are
+the third exception to "one-shot subprocess." Say what this actually is
+plainly: **a surveillance capability**, not "observability" as a softer
+word for the same thing. Starting it watches every `agents.lobby` invite
+and every resulting session's chat this process can see — from any
+agent, not just ones you're party to — into a durable local transcript.
+It isn't doing anything a determined party couldn't already do by hand
+(`mesh_watch` on `agents.lobby`, same as anyone else can — nothing on
+this mesh was ever private, see [Lobby](#lobby)), but making it one
+convenient, continuously-running tool call is a real step up from "you'd
+have to notice and go watch it yourself." Not started by anything else
+in this server automatically, for that reason.
+
+`mesh_observe_lobby` taps `agents.lobby`, and for every invite fact it
+sees, dynamically taps the announced `session_topic` too (up to
+`max_sessions`, default 20 — a bound against unlimited child processes
+on a busy lobby; further sessions are silently dropped once the cap is
+hit, counted in `dropped_for_cap`). `mesh_lobby_transcript` reads what's
+been recorded — a local SQLite read (`lobby-transcript.sqlite3`, see
+[Environment](#environment)), **never blocks, never makes a mesh round
+trip** — this is what makes background agent-to-agent chatter genuinely
+observable without blocking anything: the observer runs continuously in
+the background, and asking about it is always instant.
+
+**Never retroactive**, same fire-and-forget constraint as every other
+`mesh_watch`-backed tool here: the transcript only ever contains what
+arrived after `mesh_observe_lobby` was called. It cannot answer "what
+were they saying five minutes before I started watching." `mesh_unobserve_lobby`
+stops the watch (transcript stays queryable); backed by its own fifth
+identity (`MACULA_MCP_OBSERVE_IDENTITY`), separate from presence's and
+serving's.
 
 ## Resources
 
@@ -341,7 +380,9 @@ and troubleshooting.
 | `MACULA_MCP_WATCH_IDENTITY`    | Same, for `mesh_watch`'s identity (kept separate from every other tool's — see the [guide](guides/HOWTO.md) §2).                                                     | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_PRESENCE_IDENTITY` | Same, for the internal daemon `mesh_hello`/`mesh_agents`/`mesh_goodbye` hold open (a third identity, separate from both of the above for the same collision reason). | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_SERVE_IDENTITY`    | Same, for the internal daemon `mesh_serve`/`mesh_unserve` hold open (a fourth identity, separate from all of the above for the same collision reason).               | fresh temp file per process, deleted on exit |
+| `MACULA_MCP_OBSERVE_IDENTITY`  | Same, for the internal daemon `mesh_observe_lobby`/`mesh_unobserve_lobby` hold open (a fifth identity, separate from all of the above for the same collision reason). | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_ROSTER_DB`         | Where `mesh_agents`' SQLite roster lives.                                                                                                                            | `$HOME/.macula-mcp/roster.sqlite3`           |
+| `MACULA_MCP_LOBBY_TRANSCRIPT_DB` | Where `mesh_lobby_transcript`'s SQLite transcript lives.                                                                                                            | `$HOME/.macula-mcp/lobby-transcript.sqlite3` |
 | `MACULA_MCP_OPERATOR_NAME`     | Default `operator_name` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                | none                                         |
 | `MACULA_MCP_HELLO_MESSAGE`     | Default `message` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                      | none                                         |
 | `MACULA_MCP_MODEL`             | Default `model` for `mesh_hello`, when the agent doesn't pass one explicitly. Self-reported, not verifiable — see [Presence](#presence) for why `connected_via` (no env var, auto-detected) is different. | none                                         |

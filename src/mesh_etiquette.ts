@@ -187,9 +187,46 @@ long as it stays registered.
   see Identity above. Pin it with \`MACULA_MCP_SERVE_IDENTITY\` if a stable
   node ID for served procedures matters to you.
 
+## Observing -- mesh_observe_lobby / mesh_lobby_transcript / mesh_unobserve_lobby
+
+The third exception to one-shot subprocess. Call this what it is: **a
+surveillance capability**, not "observability" as a softer word for the
+same thing.
+
+- **Starting it watches everyone, not just agents you're party to.**
+  Every \`agents.lobby\` invite and every resulting session's chat this
+  process can see gets recorded, from strangers and friends alike, into
+  a durable local transcript. Don't reach for this reflexively the way
+  you might \`mesh_watch\` your own session -- it's a different scope of
+  action.
+- **It doesn't do anything a determined party couldn't already do by
+  hand.** Nothing on this mesh was ever private (see the Lobby section
+  above) -- a raw \`mesh_watch\` on \`agents.lobby\` gets anyone the same
+  data. What this changes is convenience: one tool call, running
+  continuously, instead of something you'd have to notice and go do
+  yourself. That convenience is exactly why it deserves being named
+  plainly rather than softened.
+- **\`mesh_lobby_transcript\` never blocks, unlike everything watch-shaped
+  elsewhere in this file.** It's a local SQLite read, not a mesh round
+  trip -- this is what makes background agent-to-agent chatter
+  genuinely observable without blocking anything, the actual point of
+  building this pair of tools together rather than just telling you to
+  \`mesh_watch\` the lobby yourself.
+- **Never retroactive**, same fire-and-forget constraint as every other
+  watch-backed tool here. The transcript only ever contains what arrived
+  after \`mesh_observe_lobby\` was called -- it cannot answer "what were
+  they saying before I started watching."
+- **\`max_sessions\` (default 20) is a resource bound, not a curation
+  choice.** Sessions announced after the cap is hit are silently
+  dropped (counted in \`dropped_for_cap\`), not prioritized by any
+  notion of importance.
+- This is presence's and serving's sibling, a fifth identity -- see
+  Identity above. Pin it with \`MACULA_MCP_OBSERVE_IDENTITY\` if a stable
+  node ID for the observer matters to you.
+
 ## What this server deliberately does not do
 
-Beyond presence's and serving's own narrow exceptions above: no local
+Beyond presence's, serving's, and observing's own narrow exceptions above: no local
 audit log or inbox, and every OTHER tool call is exactly one \`macula-cli\`
 subprocess: connect, do the one thing, exit -- \`mesh_find_records_by_type\`
 included, which reads the mesh's own already-existing DHT store rather

@@ -94,7 +94,7 @@ export function onShutdown(fn: () => void): void {
 const identityDir = join(tmpdir(), "macula-mcp-identities");
 const mintedIdentityPaths = new Set<string>();
 
-function mintIdentityPath(kind: "default" | "watch" | "presence" | "serve"): string {
+function mintIdentityPath(kind: "default" | "watch" | "presence" | "serve" | "observe"): string {
   mkdirSync(identityDir, { recursive: true });
   const p = join(identityDir, `${kind}-${process.pid}-${randomBytes(6).toString("hex")}.seed`);
   mintedIdentityPaths.add(p);
@@ -170,6 +170,23 @@ let cachedServeIdentityPath: string | undefined;
 export function serveIdentityPath(): string {
   if (process.env.MACULA_MCP_SERVE_IDENTITY) return process.env.MACULA_MCP_SERVE_IDENTITY;
   return (cachedServeIdentityPath ??= mintIdentityPath("serve"));
+}
+
+let cachedObserveIdentityPath: string | undefined;
+/**
+ * A FIFTH identity, dedicated to lobby_observer.ts's own daemon
+ * (mesh_observe_lobby's dynamically-growing set of lobby/session-topic
+ * subscriptions) -- separate from the other four for the same
+ * anti-duplicate-session reason as presenceIdentityPath/serveIdentityPath.
+ * Distinct from presence's identity on purpose too: observing is a
+ * passive, read-only capability (never publishes on the caller's
+ * behalf), a materially different exposure from presence's own
+ * heartbeat, worth reasoning about (or revoking, via
+ * MACULA_MCP_OBSERVE_IDENTITY) independently.
+ */
+export function observeIdentityPath(): string {
+  if (process.env.MACULA_MCP_OBSERVE_IDENTITY) return process.env.MACULA_MCP_OBSERVE_IDENTITY;
+  return (cachedObserveIdentityPath ??= mintIdentityPath("observe"));
 }
 
 export class MaculaCliUnavailable extends Error {}
@@ -316,6 +333,48 @@ export function startDaemon(
       }
     });
   });
+}
+
+/**
+ * Taps a running daemon's subscription to `topic` (creating it first if
+ * it doesn't already exist), streaming NDJSON events to `onEvent` as
+ * they arrive, for as long as the returned child lives. Shared by
+ * presence.ts (agent.hello/agent.goodbye) and lobby_observer.ts
+ * (agents.lobby, plus every session topic it discovers there) -- both
+ * hold a daemon open for durable multi-topic subscriptions, and this is
+ * the one piece of that mechanic neither needs its own copy of.
+ */
+export function watchTopicOnDaemon(
+  socketName: string,
+  topic: string,
+  onEvent: (payload: unknown) => void,
+): ChildProcessWithoutNullStreams {
+  const child = spawn(binPath(), ["pubsub", "watch", "-daemon", "--json", "-socket-name", socketName, topic]) as ChildProcessWithoutNullStreams;
+  // A held-open child process is ref'd by default and would keep this
+  // MCP server's Node process alive on its own even after the MCP
+  // client disconnects and there's nothing else left to do -- unref so
+  // this is background infrastructure, not a reason to stay up. The
+  // caller's own onShutdown hook still explicitly kills it either way.
+  child.unref();
+
+  let buf = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    buf += chunk.toString("utf8");
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      try {
+        const evt = parseWatchLine(line);
+        if (evt) onEvent(evt.payload);
+      } catch {
+        // a trailing failure envelope on this line -- the connection is
+        // presumably gone; nothing more will arrive on it, so just stop
+        // trying to parse further lines from this child.
+      }
+    }
+  });
+  return child;
 }
 
 /**

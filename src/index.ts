@@ -45,6 +45,7 @@ import { registerMeshGoodbye } from "./mesh_goodbye.js";
 import { registerMeshAgents } from "./mesh_agents.js";
 import { registerMeshServe } from "./mesh_serve.js";
 import { registerMeshUnserve } from "./mesh_unserve.js";
+import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -73,6 +74,9 @@ it discovers hecate_stations.list_stations's realm and calls it in one step.
 agents.lobby topic and hands you back an unguessable session topic -- then mesh_watch/mesh_publish \
 it yourself, same {sender, text} shape as any other agent chat. Unguessable, not encrypted: \
 anyone who sees the invite can read the session in plain text.
+- mesh_observe_lobby starts a standing watch over agents.lobby and every session it announces, \
+recording a transcript mesh_lobby_transcript reads instantly (never blocks). This is a \
+surveillance capability, not a euphemism -- read mesh://etiquette before reaching for it.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
@@ -111,10 +115,10 @@ registerMeshLobby(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 
-// mesh_hello/mesh_goodbye are one of two exceptions to "one-shot":
-// together they manage this process's own standing presence (heartbeat +
-// subscriptions), see presence.ts's own doc comment for why that's a
-// deliberate, narrow departure from every other tool here.
+// mesh_hello/mesh_goodbye are the first of three exceptions to
+// "one-shot": together they manage this process's own standing presence
+// (heartbeat + subscriptions), see presence.ts's own doc comment for why
+// that's a deliberate, narrow departure from every other tool here.
 registerMeshHello(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);
@@ -125,6 +129,14 @@ registerMeshAgents(server);
 // doc comment for why the two are kept apart.
 registerMeshServe(server);
 registerMeshUnserve(server);
+
+// mesh_observe_lobby/mesh_lobby_transcript/mesh_unobserve_lobby are the
+// third exception: a standing, read-only watch over agents.lobby and
+// every session it announces, backed by its OWN daemon and identity
+// (see lobby_observer.ts). This one is explicitly a surveillance
+// capability, not softened as mere "observability" -- see its own tool
+// description and mesh_etiquette.ts before reaching for it.
+registerMeshLobbyObserver(server);
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();

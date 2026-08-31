@@ -29,16 +29,15 @@
 // capability independently.
 
 import { randomBytes } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
-  binPath,
   defaultStation,
   identity,
   onShutdown,
-  parseWatchLine,
   presenceIdentityPath,
   publish,
   startDaemon,
+  watchTopicOnDaemon,
 } from "./macula_cli.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 
@@ -108,7 +107,7 @@ export async function start(args: StartArgs): Promise<StartResult> {
 
   const daemon = await startDaemon(host, presenceIdentityPath(), socketName);
   const watchers = [
-    watchTopic(socketName, HELLO_TOPIC, (evt) => {
+    watchTopicOnDaemon(socketName, HELLO_TOPIC, (evt) => {
       const payload = evt as Record<string, unknown>;
       const seenNodeId = typeof payload.node_id === "string" ? payload.node_id : undefined;
       if (!seenNodeId) return;
@@ -121,7 +120,7 @@ export async function start(args: StartArgs): Promise<StartResult> {
         at: new Date().toISOString(),
       });
     }),
-    watchTopic(socketName, GOODBYE_TOPIC, (evt) => {
+    watchTopicOnDaemon(socketName, GOODBYE_TOPIC, (evt) => {
       const payload = evt as Record<string, unknown>;
       if (typeof payload.node_id === "string") removeAgent(payload.node_id);
     }),
@@ -198,45 +197,4 @@ function stopSync(): void {
   state.daemon.kill();
   for (const w of state.watchers) w.kill();
   state = undefined;
-}
-
-function watchTopic(
-  socketName: string,
-  topic: string,
-  onEvent: (payload: unknown) => void,
-): ChildProcessWithoutNullStreams {
-  const child = spawn(binPath(), [
-    "pubsub",
-    "watch",
-    "-daemon",
-    "--json",
-    "-socket-name",
-    socketName,
-    topic,
-  ]) as ChildProcessWithoutNullStreams;
-  // A held-open child process is ref'd by default and would keep this
-  // MCP server's Node process alive on its own even after the MCP
-  // client disconnects and there's nothing else left to do -- unref so
-  // presence is background infrastructure, not a reason to stay up.
-  // onShutdown's stopSync() still explicitly kills it either way.
-  child.unref();
-
-  let buf = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    buf += chunk.toString("utf8");
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      try {
-        const evt = parseWatchLine(line);
-        if (evt) onEvent(evt.payload);
-      } catch {
-        // a trailing failure envelope on this line -- the connection is
-        // presumably gone; nothing more will arrive on it, so just stop
-        // trying to parse further lines from this child.
-      }
-    }
-  });
-  return child;
 }
