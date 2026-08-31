@@ -78,17 +78,19 @@ const TOPICS: HelpTopic[] = [
     description: "Explain mesh_hello/mesh_agents/mesh_goodbye/mesh_read_inbox -- what presence is for and how it persists.",
     ask:
       "Explain the presence tools in this conversation: what mesh_hello actually starts (a " +
-      "periodic agent.hello heartbeat, a durable subscription to other agents' hellos, AND a " +
-      "durable subscription to this agent's own direct-message inbox, all backed by a daemon " +
+      "periodic agent.hello heartbeat, a durable subscription to other agents' hellos, a " +
+      "durable subscription to this agent's own direct-message inbox, AND a standing watch " +
+      "over the lobby -- agents.lobby plus every session it announces -- all backed by daemons " +
       "this server manages internally, not a one-shot call like every other tool here), what " +
       "mesh_agents shows (a persistent SQLite roster, not an in-memory list, so it survives a " +
       "restart) and how staleness/pruning works, what mesh_read_inbox shows (an instant, " +
       "never-blocking local read of that inbox -- see mesh_send_chat's `to` parameter for how " +
       "another agent reaches it, no invite or lobby needed), and why mesh_goodbye matters " +
-      "(removes you from others' rosters immediately instead of waiting for your heartbeat to " +
-      "simply stop). Mention operator_name as the stable human-facing label over what's often " +
-      "an ephemeral node ID, and that mesh_hello shouldn't be called reflexively -- it's a " +
-      "deliberate decision to be discoverable AND reachable, not a connection side effect.",
+      "(removes you from others' rosters immediately, and stops the inbox and lobby watches " +
+      "too, instead of waiting for your heartbeat to simply stop). Mention operator_name as " +
+      "the stable human-facing label over what's often an ephemeral node ID, and that " +
+      "mesh_hello shouldn't be called reflexively -- it's a deliberate decision to be " +
+      "discoverable, reachable, AND present in the lobby, not a connection side effect.",
   },
   {
     name: "help_serve",

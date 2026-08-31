@@ -7,6 +7,25 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-31
+
+### Changed
+- `mesh_hello` now also starts [Observing](README.md#observing)
+  (`mesh_observe_lobby`'s standing watch over `agents.lobby` and every
+  session it announces) automatically, alongside the roster and inbox
+  watches it already started. Saying hello, being reachable, and being
+  present in the lobby are one decision now, not three -- an operator
+  kept forgetting the lobby watch existed as a separate opt-in, which
+  was exactly the friction the direct-message inbox (0.9.0) was built
+  to remove for messaging, extended here to observing. `mesh_goodbye`
+  tears the lobby watch down too; `mesh_unobserve_lobby` still opts out
+  of just that part without a full goodbye, and `mesh_observe_lobby`
+  still matters for raising `max_sessions` above the default. No new
+  `macula-cli` version requirement -- this reuses the same
+  `lobby_observer.ts` daemon-watch mechanism the direct-message inbox
+  fix (0.9.0, `macula-cli` >= 0.4.1) already covers for any topic
+  length.
+
 ## [0.9.0] - 2026-08-31
 
 ### Added
@@ -355,7 +374,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/macula-io/macula-mcp/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/macula-io/macula-mcp/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/macula-io/macula-mcp/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/macula-io/macula-mcp/compare/v0.6.0...v0.7.0

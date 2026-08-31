@@ -2,8 +2,9 @@
 //
 // Publishes one agent.goodbye fact (so anyone else's roster drops this
 // node immediately rather than waiting for its heartbeat to simply go
-// stale), then stops the heartbeat and the durable subscriptions. A
-// no-op if mesh_hello was never called.
+// stale), then stops the heartbeat and every durable subscription
+// mesh_hello started -- roster, inbox, AND the lobby watch (see
+// presence.ts's stop()). A no-op if mesh_hello was never called.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
@@ -13,7 +14,8 @@ export function registerMeshGoodbye(server: McpServer): void {
   server.tool(
     "mesh_goodbye",
     "Leave the mesh deliberately: publishes one agent.goodbye fact, then stops the agent.hello " +
-      "heartbeat and the roster subscription started by mesh_hello. No-op if mesh_hello was never called.",
+      "heartbeat and every subscription mesh_hello started -- roster, direct-message inbox, and the " +
+      "lobby watch. No-op if mesh_hello was never called.",
     {},
     async () => {
       try {

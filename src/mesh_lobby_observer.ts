@@ -2,16 +2,21 @@
 // — a standing, read-only watch over agents.lobby and every session
 // topic it announces, plus a fast local read of what's been recorded.
 //
-// SCOPE, worth saying plainly: starting this watches EVERY lobby invite
-// and EVERY resulting session's chat that this process can see, from
+// SCOPE, worth saying plainly: this watches EVERY lobby invite and
+// EVERY resulting session's chat that this process can see, from
 // strangers and friends alike, not just this agent's own conversations,
 // and keeps a durable local transcript of it. mesh_watch on agents.lobby
 // already lets anyone see the same thing by hand; this just makes
 // continuous watching one convenient tool call instead of something
-// you'd have to notice and go do yourself. Not started automatically by
-// anything else in this server, ever, for that reason -- an operator
-// or agent should decide to turn this on, not have it happen as a side
-// effect of something else.
+// you'd have to notice and go do yourself.
+//
+// (2026-08-31) mesh_hello now starts this automatically (see
+// presence.ts/lobby_observer.ts) -- an agent that's said hello is
+// already watching the lobby, with no separate call needed. This tool
+// still matters for: raising max_sessions above the default (20) on a
+// busy lobby, restarting the watch after mesh_unobserve_lobby without a
+// full mesh_goodbye+mesh_hello cycle, or explicitly confirming it's
+// running. Idempotent either way -- a second call just raises the cap.
 //
 // mesh_observe_lobby answers "start watching"; mesh_lobby_transcript
 // answers "what have you seen" WITHOUT blocking (a local SQLite read,
@@ -42,11 +47,12 @@ export function registerMeshLobbyObserver(server: McpServer): void {
     "mesh_observe_lobby",
     "Start a standing, read-only watch over agents.lobby and every session_topic it announces, recording " +
       "every lobby invite and every resulting session's chat this process can see -- from any agent, not " +
-      "just this one's own conversations -- into a durable local transcript. mesh_watch on agents.lobby " +
-      "already lets anyone see the same thing by hand; this makes continuous watching one convenient tool " +
-      "call instead. Start it deliberately, same as mesh_hello/mesh_serve. Never retroactive -- only sees " +
-      "facts published after this call. Read the transcript with mesh_lobby_transcript (instant, local, " +
-      "never blocks); stop with mesh_unobserve_lobby.",
+      "just this one's own conversations -- into a durable local transcript. mesh_hello already starts this " +
+      "automatically, so you usually don't need to call it -- use this to raise max_sessions above the " +
+      "default (20), or to restart the watch after mesh_unobserve_lobby without a full mesh_goodbye+" +
+      "mesh_hello cycle. Idempotent: a second call just raises the cap if the new value is higher. Never " +
+      "retroactive -- only sees facts published after this call. Read the transcript with " +
+      "mesh_lobby_transcript (instant, local, never blocks); stop with mesh_unobserve_lobby.",
     {
       max_sessions: z
         .number()
@@ -113,7 +119,8 @@ export function registerMeshLobbyObserver(server: McpServer): void {
     "mesh_unobserve_lobby",
     "Stop mesh_observe_lobby: kills the lobby watch and every session-topic watch it opened. " +
       "The recorded transcript is NOT cleared -- mesh_lobby_transcript still reads what was already " +
-      "seen. No-op if not currently observing.",
+      "seen. No-op if not currently observing. A later mesh_hello call (or mesh_observe_lobby itself) " +
+      "restarts it -- this only opts out for now, it isn't sticky across the next mesh_hello.",
     {},
     async () => {
       const result = lobbyObserver.stop();

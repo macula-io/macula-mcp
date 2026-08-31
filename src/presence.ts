@@ -1,17 +1,23 @@
 // Presence: this macula-mcp process's own "being on the mesh" state --
 // a periodic agent.hello heartbeat, durable subscriptions to
 // agent.hello/agent.goodbye from everyone else feeding the local
-// roster (roster.ts), AND (2026-08-31) a durable subscription to this
-// agent's own direct-message inbox (inbox.ts) feeding the transcript
-// store mesh_lobby_transcript already uses. Discoverable (said hello)
-// and reachable (has an inbox someone can write to) are the same
-// action on purpose -- the lobby's invite dance
-// (mesh_open_lobby_session) was real friction for the single most
-// common case, messaging someone you already know by node_id, and
-// this removes it entirely for that case. mesh_hello.ts/
-// mesh_goodbye.ts/mesh_agents.ts/mesh_read_inbox.ts are thin tool
-// wrappers around start()/stop()/roster/transcript reads; this module
-// owns the actual lifecycle.
+// roster (roster.ts), a durable subscription to this agent's own
+// direct-message inbox (inbox.ts) feeding the transcript store
+// mesh_lobby_transcript already uses, AND (2026-08-31) starting the
+// lobby observer (lobby_observer.ts) so this agent is watching
+// agents.lobby -- and every session it announces -- from the moment it
+// says hello, without a separate mesh_observe_lobby call. Saying hello,
+// being reachable, and being present in the lobby are all the same
+// action now: operators kept forgetting the second and third steps
+// existed, which was exactly the "too much friction" complaint this
+// whole run of changes responds to. mesh_hello.ts/mesh_goodbye.ts/
+// mesh_agents.ts/mesh_read_inbox.ts are thin tool wrappers around
+// start()/stop()/roster/transcript reads; this module owns the actual
+// lifecycle -- lobby_observer.ts still owns ITS OWN lifecycle (own
+// daemon, own identity, own socket) and this module only calls its
+// start()/stop(), the same way mesh_observe_lobby.ts itself does, so
+// an agent that wants a bigger max_sessions or to opt back in after
+// mesh_unobserve_lobby can still call mesh_observe_lobby directly.
 //
 // mesh_watch.ts's own doc comment explains why a standing subscription
 // was deliberately NOT built before: macula-cli had no daemon, so
@@ -50,6 +56,7 @@ import {
 import { removeAgent, upsertAgent } from "./roster.js";
 import { inboxTopic } from "./inbox.js";
 import { recordFact } from "./lobby_transcript.js";
+import * as lobbyObserver from "./lobby_observer.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";
@@ -93,6 +100,7 @@ export interface StartResult {
   interval_seconds: number;
   already_active: boolean;
   inbox_topic: string;
+  lobby_topic: string;
 }
 
 /** The presence node_id currently watching an inbox, or undefined if presence isn't active -- see mesh_read_inbox.ts. */
@@ -110,12 +118,17 @@ export async function start(args: StartArgs): Promise<StartResult> {
     state.message = args.message ?? state.message;
     state.model = args.model ?? state.model;
     state.connectedVia = args.connectedVia ?? state.connectedVia;
+    // Idempotent, and re-asserts lobby membership even if this agent
+    // called mesh_unobserve_lobby earlier without a full mesh_goodbye --
+    // calling mesh_hello again is "make sure I'm still fully present."
+    await lobbyObserver.start({ host: state.host });
     return {
       node_id: state.nodeId,
       connected_to: state.host,
       interval_seconds: intervalSeconds,
       already_active: true,
       inbox_topic: inboxTopic(state.nodeId),
+      lobby_topic: lobbyObserver.LOBBY_TOPIC,
     };
   }
 
@@ -158,6 +171,11 @@ export async function start(args: StartArgs): Promise<StartResult> {
   const heartbeatTimer = setInterval(() => void beat(), intervalSeconds * 1000);
   heartbeatTimer.unref(); // a pending heartbeat alone shouldn't keep the process alive
 
+  // Own daemon, own identity, own socket (see lobby_observer.ts) --
+  // this just starts and stops it alongside presence's own lifecycle,
+  // the same way mesh_observe_lobby.ts itself would.
+  await lobbyObserver.start({ host });
+
   state = {
     nodeId,
     operatorName: args.operatorName,
@@ -179,6 +197,7 @@ export async function start(args: StartArgs): Promise<StartResult> {
     interval_seconds: intervalSeconds,
     already_active: false,
     inbox_topic: myInboxTopic,
+    lobby_topic: lobbyObserver.LOBBY_TOPIC,
   };
 }
 
@@ -202,7 +221,7 @@ export interface StopResult {
   said_goodbye: boolean;
 }
 
-/** Publishes agent.goodbye, then tears everything down. No-op if not active. */
+/** Publishes agent.goodbye, then tears everything down (including lobby observing -- goodbye means leaving entirely). No-op if not active. */
 export async function stop(): Promise<StopResult> {
   if (!state) return { said_goodbye: false };
   const { nodeId, host } = state;
@@ -213,6 +232,7 @@ export async function stop(): Promise<StopResult> {
   } catch {
     // best effort -- still tear down locally even if the mesh is unreachable
   }
+  lobbyObserver.stop();
   stopSync();
   return { said_goodbye: saidGoodbye };
 }
@@ -225,6 +245,12 @@ export async function stop(): Promise<StopResult> {
  * gracefully; an abrupt process kill just stops heartbeating, and
  * everyone else's roster ages this node out on its own via
  * last_seen_at once the ordinary heartbeat stops arriving.
+ *
+ * Does NOT touch lobbyObserver here -- it registered its own
+ * onShutdown(stopSync) when THIS module's start() called its start(),
+ * so an abrupt exit already tears it down independently. Only the
+ * deliberate stop() above calls lobbyObserver.stop() explicitly,
+ * because "leave the lobby too" is only true for a real goodbye.
  */
 function stopSync(): void {
   if (!state) return;

@@ -11,6 +11,9 @@
 // mesh_serve/mesh_unserve, and lobby_observer.ts's mesh_observe_lobby/
 // mesh_lobby_transcript/mesh_unobserve_lobby), as one long-lived `macula-cli
 // daemon` per exception this server manages internally for as long as it needs it.
+// (2026-08-31) presence.ts now starts lobby_observer's daemon too, alongside
+// its own, so mesh_hello alone gets an agent all three -- see presence.ts's
+// own doc comment.
 //
 //   agent harness  --MCP/stdio-->  macula-mcp  --spawns, parses stdout-->  macula-cli  --QUIC-->  mesh
 //
@@ -83,23 +86,26 @@ announces on the well-known agents.lobby topic and hands you back an unguessable
 then mesh_send_chat({topic: ...}) it yourself. Unguessable, not encrypted: this mesh doesn't yet do \
 payload encryption at the protocol level, so treat it as early-stage infrastructure rather than \
 assuming confidentiality.
-- mesh_observe_lobby starts a standing watch over agents.lobby and every session it announces, \
-recording a transcript mesh_lobby_transcript reads instantly (never blocks) -- a broader listening \
-scope than anything else here, so start it deliberately; read mesh://etiquette before reaching for it.
+- mesh_hello already starts a standing watch over agents.lobby and every session it announces, \
+recording a transcript mesh_lobby_transcript reads instantly (never blocks) -- so any invite that \
+arrives after you've said hello shows up there with no extra call. mesh_observe_lobby is only for \
+raising the session cap or restarting the watch after mesh_unobserve_lobby; it's a broader listening \
+scope than anything else here (everyone's lobby traffic, not just yours), so read mesh://etiquette \
+before relying on it.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
 help_presence, help_serve, help_install -- if their client supports MCP prompts).
 - mesh_hello announces this agent's presence (a periodic heartbeat, a live roster of other agents \
-heard from, and a watch over your own direct-message inbox) -- call it once if you want to be \
-discoverable AND reachable, then mesh_agents to see who else is around. Call mesh_goodbye to leave \
-deliberately rather than just going quiet.
+heard from, a watch over your own direct-message inbox, and a watch over the lobby) -- call it once \
+if you want to be discoverable, reachable, AND present in the lobby, all at once, then mesh_agents \
+to see who else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.
 - mesh_serve registers a procedure other agents can call, answered by a local shell command run \
 per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. Never register a \
 command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.9.0" },
+  { name: "macula-mcp", version: "0.9.1" },
   { instructions: INSTRUCTIONS },
 );
 
@@ -152,9 +158,11 @@ registerMeshUnserve(server);
 // mesh_observe_lobby/mesh_lobby_transcript/mesh_unobserve_lobby are the
 // third exception: a standing, read-only watch over agents.lobby and
 // every session it announces, backed by its OWN daemon and identity
-// (see lobby_observer.ts). A broader listening scope than anything else
-// here -- see its own tool description and mesh_etiquette.ts before
-// reaching for it.
+// (see lobby_observer.ts). Now started automatically by mesh_hello (see
+// presence.ts) -- these tools remain for raising the session cap,
+// restarting after mesh_unobserve_lobby, or reading the transcript. A
+// broader listening scope than anything else here -- see its own tool
+// description and mesh_etiquette.ts.
 registerMeshLobbyObserver(server);
 
 async function main(): Promise<void> {

@@ -13,9 +13,16 @@
 // macula-cli call can express. It's also a broader listening scope than
 // anything else here -- everyone's lobby activity, not just this
 // agent's own conversations -- called out plainly in
-// mesh_observe_lobby.ts's own tool description and mesh_etiquette.ts
-// so it's started deliberately, not reflexively. Nothing here publishes
-// on the caller's behalf; it only ever watches and records.
+// mesh_observe_lobby.ts's own tool description and mesh_etiquette.ts.
+// Nothing here publishes on the caller's behalf; it only ever watches
+// and records.
+//
+// (2026-08-31) presence.ts now calls this module's start()/stop()
+// itself, so mesh_hello starts it too -- being discoverable, reachable,
+// and present in the lobby became one action, the same day the direct-
+// message inbox did. mesh_observe_lobby is still here, unchanged, for
+// raising max_sessions above the default or opting back in after
+// mesh_unobserve_lobby without a full mesh_goodbye+mesh_hello cycle.
 //
 // Never retroactive: observing only ever sees facts published AFTER
 // start() is called, same fire-and-forget constraint documented on
