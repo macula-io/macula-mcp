@@ -15,13 +15,13 @@ fires on a `v*` tag push, not on every commit to `main`).
   to "one-shot subprocess" (after presence and serving) -- necessarily,
   since watching a topic set that grows as new sessions get announced is
   inherently a durable-subscription problem no single macula-cli call can
-  express. Explicitly documented as a **surveillance capability**, not
-  softened as mere "observability", in the tool description, README, and
-  `mesh://etiquette` alike -- it doesn't do anything a determined party
-  couldn't already do by hand (nothing on this mesh was ever private),
-  but makes continuous watching one convenient tool call instead of
-  something you'd have to notice and go do yourself, so it's framed
-  honestly rather than quietly shipped. `mesh_lobby_transcript` never
+  express. Documented plainly in the tool description, README, and
+  `mesh://etiquette` alike as a broad listening scope -- everyone's lobby
+  activity, not just this agent's own conversations -- and something
+  `mesh_watch` already lets anyone do by hand; this just makes continuous
+  watching one convenient tool call instead of something you'd have to
+  notice and go do yourself, started deliberately rather than as a side
+  effect of anything else. `mesh_lobby_transcript` never
   blocks or makes a mesh round trip (a local SQLite read, same shape as
   `mesh_agents`' own roster read) and is never retroactive (only ever
   contains what arrived after `mesh_observe_lobby` was called, same

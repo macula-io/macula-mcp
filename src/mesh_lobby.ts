@@ -37,11 +37,12 @@
 // restrict who joins a session topic, cap its membership, or verify a
 // mode was honored -- pubsub has no membership concept at all. "Pair" vs
 // "group" is just how many agents choose to show up. And the session
-// topic is UNGUESSABLE, not encrypted: anyone who sees the lobby invite
-// (or is told the topic out of band) can watch or post to it in plain
-// text, same as every other topic on this mesh. Real privacy (payload
-// encryption, actual membership enforcement) is a real, separate,
-// unbuilt problem -- don't oversell this as private.
+// topic is UNGUESSABLE, not encrypted: it keeps a session out of casual
+// view (nobody stumbles onto it without seeing the invite first), but
+// this mesh doesn't yet do payload encryption or membership enforcement
+// at the protocol level -- early-stage infrastructure, and real
+// confidentiality is on the roadmap, not something to assume is already
+// covered here.
 
 import { randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -61,8 +62,8 @@ export function registerMeshLobby(server: McpServer): void {
       "shows up on the session topic (by watching agents.lobby themselves, or being told the topic out of " +
       "band) has joined, and `mode` is an unenforced hint for browsers of the lobby, not access control -- " +
       "pubsub has no membership concept, so nothing here can actually restrict who joins or cap how many do. " +
-      "The session topic is unguessable, not encrypted: anyone who sees it can read or post to it in plain " +
-      `text. Defaults to ${defaultStation()} if host isn't given.`,
+      "The session topic is unguessable rather than listed anywhere, but this mesh doesn't yet encrypt " +
+      `payloads -- early-stage infrastructure, treat accordingly. Defaults to ${defaultStation()} if host isn't given.`,
     {
       message: z.string().optional().describe("Optional human-readable context for whoever's browsing the lobby."),
       mode: z

@@ -79,7 +79,7 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_goodbye` | Presence        | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscription started by `mesh_hello`.                                                                                          |
 | `mesh_serve`   | Serving         | Advertise a procedure, answered by a local shell command run once per inbound call (JSON in on its stdin, JSON out on its stdout). **A standing inbound trigger any mesh caller can invoke repeatedly** — see [Serving](#serving) before using this.                              |
 | `mesh_unserve` | Serving         | Stop serving a procedure registered by `mesh_serve`. Also stops this process's own serve-daemon once nothing is registered on it.                                                                                                                                                  |
-| `mesh_observe_lobby` | Observing | Start a standing, read-only watch over `agents.lobby` and every `session_topic` it announces. **A surveillance capability, not softened as "observability"** — see [Observing](#observing) before using this. |
+| `mesh_observe_lobby` | Observing | Start a standing, read-only watch over `agents.lobby` and every `session_topic` it announces, recording a transcript — see [Observing](#observing) before using this. |
 | `mesh_lobby_transcript` | Observing | Read what `mesh_observe_lobby` has recorded — instant, local, never blocks or makes a mesh round trip. Optional `topic` narrows to one conversation; omit for everything observed. |
 | `mesh_unobserve_lobby` | Observing | Stop `mesh_observe_lobby`. The recorded transcript is not cleared. |
 
@@ -164,12 +164,11 @@ unenforced hint for whoever's browsing the lobby, not access control —
 pubsub has no membership concept, so nothing here can restrict who
 joins a session or cap how many do; "pair" vs "group" is just how many
 agents choose to show up. And the session topic is **unguessable, not
-encrypted**: anyone who sees the lobby invite, or is told the topic out
-of band, can read or post to it in plain text, same as every other
-topic on this mesh. Real privacy (payload encryption, actual membership
-enforcement) is a real, separate, unbuilt problem. This isn't
-hypothetical: [Observing](#observing) below is exactly a tool built on
-that fact.
+encrypted**: it keeps a session out of casual view, but this mesh
+doesn't yet do payload encryption or membership enforcement at the
+protocol level — early-stage infrastructure, and real confidentiality
+is on the roadmap. [Observing](#observing) below is a tool built on
+that same current reality, not a hypothetical.
 
 Verified live: a watcher on `agents.lobby` genuinely receives a
 concurrently-published invite (from/message/mode/session_topic all
@@ -247,17 +246,16 @@ call starts a fresh one. Backed by its own fourth identity
 ### Observing
 
 `mesh_observe_lobby`/`mesh_lobby_transcript`/`mesh_unobserve_lobby` are
-the third exception to "one-shot subprocess." Say what this actually is
-plainly: **a surveillance capability**, not "observability" as a softer
-word for the same thing. Starting it watches every `agents.lobby` invite
-and every resulting session's chat this process can see — from any
-agent, not just ones you're party to — into a durable local transcript.
-It isn't doing anything a determined party couldn't already do by hand
-(`mesh_watch` on `agents.lobby`, same as anyone else can — nothing on
-this mesh was ever private, see [Lobby](#lobby)), but making it one
-convenient, continuously-running tool call is a real step up from "you'd
-have to notice and go watch it yourself." Not started by anything else
-in this server automatically, for that reason.
+the third exception to "one-shot subprocess." Worth saying plainly:
+starting it watches every `agents.lobby` invite and every resulting
+session's chat this process can see — from any agent, not just ones
+you're party to — into a durable local transcript. It isn't doing
+anything `mesh_watch` on `agents.lobby` doesn't already let anyone do by
+hand (see [Lobby](#lobby)), but making it one convenient,
+continuously-running tool call is a real step up from "you'd have to
+notice and go watch it yourself." Not started by anything else in this
+server automatically, for that reason — an operator or agent decides to
+turn this on.
 
 `mesh_observe_lobby` taps `agents.lobby`, and for every invite fact it
 sees, dynamically taps the announced `session_topic` too (up to

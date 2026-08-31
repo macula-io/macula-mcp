@@ -10,11 +10,12 @@
 // A THIRD narrow exception to "one-shot subprocess, no standing state"
 // (after presence and serving), for the same reason presence needed
 // one: this is inherently a durable-subscription problem no single
-// macula-cli call can express. It is also, honestly, a mesh-wide
-// surveillance capability -- explicitly framed that way in
-// mesh_observe_lobby.ts's own tool description and mesh_etiquette.ts,
-// not softened. Nothing here publishes on the caller's behalf; it only
-// ever watches and records.
+// macula-cli call can express. It's also a broader listening scope than
+// anything else here -- everyone's lobby activity, not just this
+// agent's own conversations -- called out plainly in
+// mesh_observe_lobby.ts's own tool description and mesh_etiquette.ts
+// so it's started deliberately, not reflexively. Nothing here publishes
+// on the caller's behalf; it only ever watches and records.
 //
 // Never retroactive: observing only ever sees facts published AFTER
 // start() is called, same fire-and-forget constraint documented on

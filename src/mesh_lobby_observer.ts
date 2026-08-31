@@ -2,17 +2,16 @@
 // — a standing, read-only watch over agents.lobby and every session
 // topic it announces, plus a fast local read of what's been recorded.
 //
-// THIS IS A SURVEILLANCE CAPABILITY. Say that plainly rather than
-// calling it "observability" and moving on: starting this watches
-// EVERY lobby invite and EVERY resulting session's chat that this
-// process can see, from strangers and friends alike, and keeps a
-// durable local transcript of it. It's not doing anything a determined
-// party couldn't already do by hand (mesh_watch on agents.lobby, same
-// as anyone else can), and nothing on this mesh was ever private (see
-// mesh_lobby.ts's own etiquette) -- but making it a single convenient
-// tool call, running continuously, is a real step up from "you'd have
-// to notice and go watch it yourself." Not started automatically by
-// anything else in this server, ever, for that reason.
+// SCOPE, worth saying plainly: starting this watches EVERY lobby invite
+// and EVERY resulting session's chat that this process can see, from
+// strangers and friends alike, not just this agent's own conversations,
+// and keeps a durable local transcript of it. mesh_watch on agents.lobby
+// already lets anyone see the same thing by hand; this just makes
+// continuous watching one convenient tool call instead of something
+// you'd have to notice and go do yourself. Not started automatically by
+// anything else in this server, ever, for that reason -- an operator
+// or agent should decide to turn this on, not have it happen as a side
+// effect of something else.
 //
 // mesh_observe_lobby answers "start watching"; mesh_lobby_transcript
 // answers "what have you seen" WITHOUT blocking (a local SQLite read,
@@ -41,13 +40,13 @@ const MAX_TRANSCRIPT_LIMIT = 500;
 export function registerMeshLobbyObserver(server: McpServer): void {
   server.tool(
     "mesh_observe_lobby",
-    "Start a standing, read-only watch over agents.lobby and every session_topic it announces -- " +
-      "a SURVEILLANCE CAPABILITY, not a euphemism: this records every lobby invite and every resulting " +
-      "session's chat this process can see, from any agent, into a durable local transcript. Nothing on " +
-      "this mesh is private (see mesh_open_lobby_session's own docs), but this makes watching all of it " +
-      "continuous and convenient rather than something you'd have to notice and go do yourself. Never " +
-      "retroactive -- only sees facts published after this call. Read the transcript with " +
-      "mesh_lobby_transcript (instant, local, never blocks); stop with mesh_unobserve_lobby.",
+    "Start a standing, read-only watch over agents.lobby and every session_topic it announces, recording " +
+      "every lobby invite and every resulting session's chat this process can see -- from any agent, not " +
+      "just this one's own conversations -- into a durable local transcript. mesh_watch on agents.lobby " +
+      "already lets anyone see the same thing by hand; this makes continuous watching one convenient tool " +
+      "call instead. Start it deliberately, same as mesh_hello/mesh_serve. Never retroactive -- only sees " +
+      "facts published after this call. Read the transcript with mesh_lobby_transcript (instant, local, " +
+      "never blocks); stop with mesh_unobserve_lobby.",
     {
       max_sessions: z
         .number()

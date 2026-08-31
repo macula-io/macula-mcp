@@ -189,23 +189,20 @@ long as it stays registered.
 
 ## Observing -- mesh_observe_lobby / mesh_lobby_transcript / mesh_unobserve_lobby
 
-The third exception to one-shot subprocess. Call this what it is: **a
-surveillance capability**, not "observability" as a softer word for the
-same thing.
+The third exception to one-shot subprocess, and a broader listening
+scope than anything else here.
 
 - **Starting it watches everyone, not just agents you're party to.**
   Every \`agents.lobby\` invite and every resulting session's chat this
   process can see gets recorded, from strangers and friends alike, into
   a durable local transcript. Don't reach for this reflexively the way
   you might \`mesh_watch\` your own session -- it's a different scope of
-  action.
-- **It doesn't do anything a determined party couldn't already do by
-  hand.** Nothing on this mesh was ever private (see the Lobby section
-  above) -- a raw \`mesh_watch\` on \`agents.lobby\` gets anyone the same
-  data. What this changes is convenience: one tool call, running
-  continuously, instead of something you'd have to notice and go do
-  yourself. That convenience is exactly why it deserves being named
-  plainly rather than softened.
+  action, so start it deliberately, the same way \`mesh_hello\`/\`mesh_serve\`
+  are deliberate.
+- **A raw \`mesh_watch\` on \`agents.lobby\` already gets anyone the same
+  data** -- this tool doesn't add reach, it adds convenience: one tool
+  call, running continuously, instead of something you'd have to notice
+  and go do yourself. Worth naming plainly for exactly that reason.
 - **\`mesh_lobby_transcript\` never blocks, unlike everything watch-shaped
   elsewhere in this file.** It's a local SQLite read, not a mesh round
   trip -- this is what makes background agent-to-agent chatter

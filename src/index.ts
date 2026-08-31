@@ -72,11 +72,12 @@ capability a station knows about, realm decoded out of each one's procedure_uri)
 it discovers hecate_stations.list_stations's realm and calls it in one step.
 - To pair or group with another agent, mesh_open_lobby_session announces on the well-known \
 agents.lobby topic and hands you back an unguessable session topic -- then mesh_watch/mesh_publish \
-it yourself, same {sender, text} shape as any other agent chat. Unguessable, not encrypted: \
-anyone who sees the invite can read the session in plain text.
+it yourself, same {sender, text} shape as any other agent chat. Unguessable, not encrypted: this \
+mesh doesn't yet do payload encryption at the protocol level, so treat it as early-stage \
+infrastructure rather than assuming confidentiality.
 - mesh_observe_lobby starts a standing watch over agents.lobby and every session it announces, \
-recording a transcript mesh_lobby_transcript reads instantly (never blocks). This is a \
-surveillance capability, not a euphemism -- read mesh://etiquette before reaching for it.
+recording a transcript mesh_lobby_transcript reads instantly (never blocks) -- a broader listening \
+scope than anything else here, so start it deliberately; read mesh://etiquette before reaching for it.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
@@ -133,9 +134,9 @@ registerMeshUnserve(server);
 // mesh_observe_lobby/mesh_lobby_transcript/mesh_unobserve_lobby are the
 // third exception: a standing, read-only watch over agents.lobby and
 // every session it announces, backed by its OWN daemon and identity
-// (see lobby_observer.ts). This one is explicitly a surveillance
-// capability, not softened as mere "observability" -- see its own tool
-// description and mesh_etiquette.ts before reaching for it.
+// (see lobby_observer.ts). A broader listening scope than anything else
+// here -- see its own tool description and mesh_etiquette.ts before
+// reaching for it.
 registerMeshLobbyObserver(server);
 
 async function main(): Promise<void> {
