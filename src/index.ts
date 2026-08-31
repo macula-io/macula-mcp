@@ -48,6 +48,7 @@ import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshListStations } from "./mesh_stations.js";
+import { registerMeshMemory } from "./mesh_memory.js";
 import { registerMeshLobby } from "./mesh_lobby.js";
 import { registerMeshSendChat } from "./mesh_chat.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
@@ -83,6 +84,10 @@ it, or find it with mesh_find_records_by_type (record_type "procedure_advertisem
 capability a station knows about, realm decoded out of each one's procedure_uri).
 - "Which stations can you connect to?" is mesh_list_stations, not a manual DHT-then-call dance -- \
 it discovers hecate_stations.list_stations's realm and calls it in one step.
+- mesh_recall searches the mesh's shared memory (hecate-rag) for anything relevant to a query -- worth \
+checking early on a repo/task other agents may have touched before. mesh_remember deposits something \
+you learned so future agents (not just you) can find it later -- it's shared, not private, so be \
+deliberate about what you write. Neither is automatic; call them when you actually want to.
 - To message an agent you already know (a node_id from mesh_agents), mesh_send_chat's "to" is the \
 shortcut: no invite, no lobby, no coordination -- it computes that agent's own inbox topic and sends \
 there. They see it with mesh_read_inbox once their own presence is active (automatic on any mesh \
@@ -95,7 +100,7 @@ payload encryption at the protocol level, so treat it as early-stage infrastruct
 assuming confidentiality.
 - Presence starts itself automatically the moment you touch the mesh at all (any mesh_call/ \
 mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_send_chat/mesh_read_inbox/ \
-mesh_open_lobby_session call) -- a periodic agent.hello heartbeat, a live roster of other agents, a \
+mesh_open_lobby_session/mesh_recall/mesh_remember call) -- a periodic agent.hello heartbeat, a live roster of other agents, a \
 watch over your own direct-message inbox, AND a standing watch over agents.lobby and every session \
 it announces (mesh_lobby_transcript reads that instantly, never blocks). No mesh_hello call needed. \
 mesh_hello itself still matters for customizing operator_name/message/model, or restarting presence \
@@ -113,7 +118,7 @@ per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. N
 command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.10.0" },
+  { name: "macula-mcp", version: "0.11.0" },
   { instructions: INSTRUCTIONS },
 );
 
@@ -138,6 +143,12 @@ registerMeshDht(server);
 // mesh_list_stations is a composition of two macula-cli calls (a DHT
 // lookup, then the discovered call), not one -- see mesh_stations.ts.
 registerMeshListStations(server);
+// mesh_recall/mesh_remember: the same discover-then-call composition,
+// hardcoded to hecate-rag (the mesh's shared RAG/memory service) --
+// see mesh_memory.ts for why this isn't wired into automatic presence
+// the way the tools above are (a query, or authored content, is
+// context only the calling agent has, never this server).
+registerMeshMemory(server);
 // mesh_open_lobby_session: identity() then publish() -- two calls, not
 // one -- see mesh_lobby.ts for the rest of the lobby protocol, which
 // needs no further tools (mesh_watch/mesh_publish already cover it).

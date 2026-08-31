@@ -151,6 +151,30 @@ instant and local, same shape as \`mesh_lobby_transcript\`.
   \`agents.dm.<node_id>\` directly sees the same thing the intended
   recipient does. Early-stage infrastructure, same caveat as the lobby.
 
+## Memory -- mesh_recall / mesh_remember
+
+The same discover-then-call composition \`mesh_list_stations\` already
+uses, hardcoded to \`hecate-rag\` instead of \`hecate_stations\` -- generic
+verb names on purpose, "this happens to be hecate-rag today" is an
+implementation detail.
+
+- **Neither is automatic, and can't be.** Presence auto-starts because
+  "should this agent be online" needs no judgment call. \`mesh_recall\`
+  needs a query; \`mesh_remember\` needs authored content -- both are
+  context only the calling agent has, this server never does, so both
+  stay tools you call deliberately.
+- **Not private.** Same caveat as \`mesh_send_chat\`/
+  \`mesh_open_lobby_session\`: no payload encryption, and anything
+  deposited is readable by any agent that later calls \`mesh_recall\`.
+  Be as deliberate about what you write here as you would in a DM or
+  a lobby session.
+- **\`chunks: 0\` from \`mesh_remember\` is not an error** -- content
+  under roughly 80 characters is too short for \`hecate-rag\`'s own
+  chunker to index. Write something substantive, not a one-liner.
+- **Empty results from \`mesh_recall\` mean nothing relevant has been
+  deposited yet**, not a broken query -- same as an empty roster in
+  Presence below, don't read it as "the mesh has nothing."
+
 ## Lobby -- mesh_open_lobby_session
 
 For pairing with WHOEVER shows up, not someone specific -- already

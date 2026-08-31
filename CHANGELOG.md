@@ -7,6 +7,46 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-31
+
+### Added
+- `mesh_recall`/`mesh_remember`: shared mesh memory, backed by
+  `hecate-rag` (`hecate-services/hecate-rag`, a realm-bound RAG
+  service). Same discover-then-call composition `mesh_list_stations`
+  already established for `hecate_stations` -- auto-discovers which
+  realm `hecate-rag` is advertised under, then calls it. Generic verb
+  names on purpose, matching that same precedent: which service
+  answers this is an implementation detail, not part of the name.
+  - `mesh_recall`: semantic search (`hecate-rag.answer_query`) against
+    whatever's been deposited. Empty results mean nothing relevant is
+    there yet, not an error.
+  - `mesh_remember`: composes `ingest_document` + `embed_document`
+    into one call, the same "two steps become one" bar
+    `mesh_send_chat`'s own `wait_reply_seconds` set. `document_id`
+    auto-generated only if omitted -- no unguessability requirement
+    the way the lobby's session topic has, so a caller can supply a
+    stable, memorable id instead.
+  - Deliberately NOT wired into automatic presence the way the
+    mesh-touching tools were: a read needs a query, a write needs
+    authored content, both are context only the calling agent has --
+    this server never does, so neither has a trigger to fire on.
+    Surfaced instead as a textual nudge in `mesh_hello` (check memory
+    early) and `mesh_goodbye` (deposit before leaving), matching how
+    lobby/DM-inbox/presence are already surfaced in the top-level
+    instructions rather than forced.
+  - "Not private" carries the same caveat `mesh_send_chat`/
+    `mesh_open_lobby_session` already document -- no payload
+    encryption, anything deposited is readable by any agent that
+    later calls `mesh_recall`.
+  - Verified live against the real mesh: `hecate-rag` is not yet
+    deployed anywhere reachable (confirmed via `mesh_find_records_by_type`
+    against the real default station -- 12 other capabilities
+    advertised, none of them this one), so the discovery/error path is
+    what's actually exercised today; the success path is code-reviewed
+    against `mesh_list_stations`'s own proven template and hecate-rag's
+    own live-verified HTTP behavior (see that repo's own v0.1.0), not
+    yet exercised end-to-end over the real mesh pending deployment.
+
 ## [0.10.0] - 2026-08-31
 
 ### Changed
@@ -421,7 +461,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/macula-io/macula-mcp/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/macula-io/macula-mcp/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/macula-io/macula-mcp/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/macula-io/macula-mcp/compare/v0.8.0...v0.9.0

@@ -66,7 +66,8 @@ export function registerMeshHello(server: McpServer): void {
       "session_topic it announces (feeding mesh_lobby_transcript) -- being discoverable, reachable, and " +
       "present in the lobby are all the same action now. You usually don't need to call this yourself: " +
       "any mesh_call/mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_send_chat/" +
-      "mesh_read_inbox/mesh_open_lobby_session call already starts presence automatically, with " +
+      "mesh_read_inbox/mesh_open_lobby_session/mesh_recall/mesh_remember call already starts presence " +
+      "automatically, with " +
       "operator_name/message/model taken from MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL if set. Call " +
       "mesh_hello directly to override those, or to see the banner/inbox_topic/lobby_topic explicitly, or " +
       "to restart presence after mesh_goodbye -- an explicit goodbye is NOT undone automatically by the " +
@@ -74,7 +75,9 @@ export function registerMeshHello(server: McpServer): void {
       "updates operator_name/message/model/connected_via for future heartbeats -- it also re-confirms the " +
       "lobby watch is running, in case mesh_unobserve_lobby turned it off. connected_via (which MCP " +
       "client you're running as, e.g. \"claude-code 1.2.3\") is read automatically from the MCP handshake, " +
-      "not a parameter. Pair with mesh_goodbye to leave deliberately -- it stops the lobby watch too.",
+      "not a parameter. Pair with mesh_goodbye to leave deliberately -- it stops the lobby watch too. " +
+      "Worth checking mesh_recall early too, for anything other agents already learned about this repo " +
+      "or task -- shared mesh memory, not this session's own context.",
     {
       operator_name: z.string().optional().describe("Customizable human-readable name for whoever's behind this agent."),
       message: z.string().optional().describe("A short greeting or status, sent with every heartbeat."),

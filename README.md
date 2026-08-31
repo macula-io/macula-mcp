@@ -73,6 +73,8 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_get`     | Content Sharing | Fetch a content-addressed artifact by MCID hex.                                                                                                                                                                                                                                   |
 | `mesh_find_record` / `mesh_find_records` / `mesh_find_records_by_type` | DHT | Read the mesh's signed DHT record store directly. `mesh_find_records_by_type` with `record_type: "procedure_advertisement"` is the discovery entry point — every capability a station knows about, each one's realm decoded out of its `procedure_uri`. Always the DHT's own all-zero realm; none of the three take a `realm` parameter. See [Realms](#realms). |
 | `mesh_list_stations` | DHT + RPC | "Which stations can you connect to?" in one call: discovers which realm `hecate_stations.list_stations` (the mesh's canonical station directory) is advertised under, then calls it. Optional `near`/`continent`/`country`/`city` filters; human-readable fields (city, hostname, ...) decoded from the wire's byte-string encoding. A composition of two calls under the hood, not one — see [Stations](#stations). |
+| `mesh_recall`  | DHT + RPC       | Query the mesh's shared memory (`hecate-rag`) for anything relevant to `query_text` — semantic retrieval. Auto-discovers `hecate-rag`'s realm, same composition as `mesh_list_stations`. Empty results mean nothing relevant is there yet, not an error. See [Memory](#memory). |
+| `mesh_remember` | DHT + RPC      | Deposit something worth remembering into `hecate-rag` so it's searchable via `mesh_recall` later, by any agent. Composes `ingest_document` + `embed_document` into one call. Shared, not private — see [Memory](#memory). |
 | `mesh_open_lobby_session` | Lobby | Announce a pairing/group session on the well-known `agents.lobby` topic and get back an unguessable session topic to actually converse on. `mesh_watch`/`mesh_publish` do the rest — see [Lobby](#lobby). |
 | `mesh_send_chat` | Chat | Publish `{sender, text}` without hand-building it — your own node_id is filled in for you. Pass `to` (a node_id) for the direct-message shortcut (no invite, no lobby — see [Direct Messages](#direct-messages)), or `topic` to name one yourself. Optional `wait_reply_seconds` also waits, in the same call, for the first reply from someone else. See [Chat](#chat). |
 | `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
@@ -160,6 +162,39 @@ entry, are decoded from the wire's `"0x..."`-hex byte-string encoding back
 to plain UTF-8 text — a wire-encoding characteristic of how that service's
 own RPC reply gets built, not something this server changes upstream.
 `node_id`/`id`/`_rev` are genuinely opaque identifiers and stay hex.
+
+### Memory
+
+`mesh_recall`/`mesh_remember` are the same discover-then-call composition
+as `mesh_list_stations`, hardcoded to `hecate-rag` (a realm-bound RAG
+service, `hecate-services/hecate-rag`) instead of `hecate_stations` — same
+narrow, deliberate trade-off: if a second memory/RAG service ever exists,
+these would need to pick one. Generic verb names on purpose — "this
+happens to be `hecate-rag` today" is an implementation detail, the same
+way `mesh_list_stations` hides which service answers it.
+
+**Neither is wired into automatic presence the way most tools here are.**
+Presence's auto-start works because "should this agent be online" has one
+unconditional answer the moment it touches the mesh at all. Memory has no
+such trigger on either side: `mesh_recall` needs a *query* (context only
+the calling agent has), and `mesh_remember` needs *authored content* (this
+server sees tool args and results, never the model's own reasoning or the
+human's messages — it cannot decide what's worth remembering on its own).
+Both stay tools an agent calls deliberately.
+
+`mesh_remember` composes two real calls (`ingest_document` then
+`embed_document`) into one, the same "two steps become one" bar
+`mesh_send_chat`'s own `wait_reply_seconds` already set. `document_id` is
+only auto-generated when omitted — unlike the lobby's session topic, a
+document id has no unguessability requirement, so supply your own stable
+one (e.g. `"session-2026-08-31-topic"`) if you want it memorable rather
+than random. Content under roughly 80 characters produces `chunks: 0` —
+too short for `hecate-rag`'s own chunker to index, not an error.
+
+**Not private.** Same caveat `mesh_send_chat`/`mesh_open_lobby_session`
+already carry: this mesh doesn't encrypt payloads, and anything deposited
+via `mesh_remember` is readable by any agent that later calls
+`mesh_recall` — be deliberate about what you write.
 
 ### Lobby
 

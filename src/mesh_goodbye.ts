@@ -24,7 +24,8 @@ export function registerMeshGoodbye(server: McpServer): void {
       "heartbeat and every subscription presence started -- roster, direct-message inbox, and the " +
       "lobby watch. Stays honored: presence is now automatic on any mesh tool use, but the next " +
       "one won't silently restart it after an explicit goodbye -- only mesh_hello does. No-op if " +
-      "presence was never active.",
+      "presence was never active. If you learned something in this session worth other agents " +
+      "knowing later, consider mesh_remember before calling this.",
     {},
     async () => {
       try {
