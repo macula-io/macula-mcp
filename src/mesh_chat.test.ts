@@ -1,10 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WatchEvent } from "./macula_cli.js";
-import { asChatReply } from "./mesh_chat.js";
+import { asChatReply, MeshSendChatUsageError, resolveTargetTopic } from "./mesh_chat.js";
 
 function evt(payload: unknown): WatchEvent {
   return { topic: "t", publisher: "pub", seq: 1, payload, delivered_via: "direct", received_at: "2026-08-31T00:00:00Z" };
 }
+
+describe("resolveTargetTopic", () => {
+  const NODE_ID = "a".repeat(64);
+
+  it("resolves `to` to that node's inbox topic", () => {
+    expect(resolveTargetTopic({ to: NODE_ID })).toBe(`agents.dm.${NODE_ID}`);
+  });
+
+  it("resolves `topic` to itself, unchanged", () => {
+    expect(resolveTargetTopic({ topic: "agents.chat_message_sent" })).toBe("agents.chat_message_sent");
+  });
+
+  it("rejects neither being given", () => {
+    expect(() => resolveTargetTopic({})).toThrow(MeshSendChatUsageError);
+  });
+
+  it("rejects both being given", () => {
+    expect(() => resolveTargetTopic({ to: NODE_ID, topic: "agents.chat_message_sent" })).toThrow(MeshSendChatUsageError);
+  });
+});
 
 describe("asChatReply", () => {
   it("parses the standard {sender, text} shape", () => {

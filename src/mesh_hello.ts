@@ -8,10 +8,12 @@
 // First call: prints a welcome banner, publishes one agent.hello
 // immediately, and starts a periodic heartbeat (see presence.ts) that
 // keeps republishing it -- plus a durable subscription to everyone
-// else's agent.hello/agent.goodbye, feeding mesh_agents' roster. A
-// later call while already active just updates operator_name/message/
-// model/connected_via for future heartbeats, without restarting
-// anything.
+// else's agent.hello/agent.goodbye (feeding mesh_agents' roster) AND
+// to this agent's own direct-message inbox (feeding mesh_read_inbox).
+// Being discoverable and being reachable are the same action now --
+// see inbox.ts for why. A later call while already active just
+// updates operator_name/message/model/connected_via for future
+// heartbeats, without restarting anything.
 //
 // connected_via is deliberately NOT a tool parameter: it's read from
 // the MCP handshake itself (getClientVersion(), the clientInfo every
@@ -57,8 +59,11 @@ export function registerMeshHello(server: McpServer): void {
   server.tool(
     "mesh_hello",
     "Announce this agent's presence on the mesh: prints a welcome banner and starts a periodic " +
-      "agent.hello heartbeat (default every 60s) plus a durable subscription to other agents' " +
-      "hellos, feeding mesh_agents' roster. Calling this again while already active just updates " +
+      "agent.hello heartbeat (default every 60s), a durable subscription to other agents' hellos " +
+      "(feeding mesh_agents' roster), AND a durable subscription to this agent's own direct-message " +
+      "inbox (feeding mesh_read_inbox) -- being discoverable and being reachable are the same action. " +
+      "Returns inbox_topic (informational; you never need to type it -- mesh_send_chat's `to` computes " +
+      "it from a node_id automatically). Calling this again while already active just updates " +
       "operator_name/message/model/connected_via for future heartbeats. connected_via (which MCP " +
       "client you're running as, e.g. \"claude-code 1.2.3\") is read automatically from the MCP " +
       "handshake, not a parameter. Pair with mesh_goodbye to leave deliberately.",

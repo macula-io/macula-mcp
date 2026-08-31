@@ -7,6 +7,30 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-31
+
+### Added
+- `mesh_send_chat`'s `to` parameter and `mesh_read_inbox`: a direct-message
+  shortcut that removes the lobby's invite dance for the single most common
+  case -- messaging an agent you already know, by node_id, from
+  `mesh_agents`. Every agent that calls `mesh_hello` now gets a standing,
+  deterministic inbox (`agents.dm.<node_id>`, `src/inbox.ts`) that
+  `mesh_hello`'s own daemon starts watching automatically -- being
+  discoverable and being reachable are now the same action, not two
+  separate opt-ins. `mesh_send_chat({to: "<node_id>", text: "..."})`
+  computes the recipient's inbox topic and sends there directly: no
+  invite fact, no session topic, no out-of-band coordination. Recorded
+  into the same generic transcript store `mesh_lobby_transcript` already
+  uses (not lobby-specific despite the module's name); `mesh_read_inbox`
+  reads it back, instant and local, same shape as `mesh_lobby_transcript`.
+  The lobby (`mesh_open_lobby_session`) is unchanged and still the right
+  tool for the genuinely different case it solves -- pairing with WHOEVER
+  shows up, not someone specific. See the new
+  [Direct Messages](README.md#direct-messages) section. 7 new unit tests
+  (`inbox.test.ts`, plus `resolveTargetTopic` cases in `mesh_chat.test.ts`)
+  -- confirmed RED (the validation, and the `to`/`topic` mutual-exclusion
+  check) before restoring GREEN.
+
 ## [0.8.0] - 2026-08-31
 
 ### Added
@@ -331,7 +355,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/macula-io/macula-mcp/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/macula-io/macula-mcp/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/macula-io/macula-mcp/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/macula-io/macula-mcp/compare/v0.5.1...v0.6.0

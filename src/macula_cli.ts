@@ -407,8 +407,19 @@ export function watchTopicOnDaemon(
  * has no `dht` subcommand at all, so mesh_list_stations (which uses
  * findRecordsByType to discover hecate_stations.list_stations's realm)
  * has nothing to shell out to on an older binary.
+ *
+ * Bumped to 0.4.1 for presence.ts's inbox watch (mesh_read_inbox, see
+ * inbox.ts): a real bug in every macula-cli release up to and
+ * including 0.4.0 silently dropped a `pubsub watch -daemon` tap for
+ * ANY topic 74+ bytes long (`agents.dm.<64-hex node_id>` always is)
+ * within microseconds of starting, no error, nothing ever arriving --
+ * found live building this feature, root-caused, and fixed upstream
+ * (macula-cli's own `watchForDisconnect`, see that repo's CHANGELOG/
+ * README Daemon-mode section). Every OLDER daemon-tapped topic here
+ * (agent.hello, agent.goodbye) happened to stay under the boundary,
+ * which is exactly why this went unnoticed until now.
  */
-export const MIN_MACULA_CLI_VERSION = "0.4.0";
+export const MIN_MACULA_CLI_VERSION = "0.4.1";
 
 export interface CliVersionCheck {
   ok: boolean;

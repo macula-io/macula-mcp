@@ -36,8 +36,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { defaultStation, identity, publish, watch, type WatchEvent } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { inboxTopic } from "./inbox.js";
 
 const MAX_WAIT_SECONDS = 3600;
+
+export class MeshSendChatUsageError extends Error {}
+
+/**
+ * Exactly one of `to`/`topic` must be given; resolves to the actual
+ * topic to publish/watch on. Exported standalone so this validation
+ * can be unit-tested without spawning a subprocess.
+ */
+export function resolveTargetTopic(args: { to?: string; topic?: string }): string {
+  if ((args.to === undefined) === (args.topic === undefined)) {
+    throw new MeshSendChatUsageError("pass exactly one of `to` (a node_id) or `topic`, not both and not neither.");
+  }
+  return args.to !== undefined ? inboxTopic(args.to) : args.topic!;
+}
 
 export interface ChatReply {
   sender?: string;
@@ -104,19 +119,33 @@ export function registerMeshSendChat(server: McpServer): void {
   server.tool(
     "mesh_send_chat",
     "Send a chat message to another agent without hand-crafting the fact yourself: publishes " +
-      '{sender: <your node_id>, text} to `topic` (your node_id filled in automatically, same ' +
-      "identity mesh_publish/mesh_call use). Pass a well-known topic (e.g. agents.chat_message_sent) " +
-      "or a session_topic from mesh_open_lobby_session -- this tool doesn't pick one for you, since " +
-      "that's context you already have. Pass wait_reply_seconds to also wait, in this same call, for " +
-      "the first reply from a DIFFERENT sender (skipping your own message if the topic echoes it " +
-      "back) -- folds the usual publish-then-watch chat step into one call instead of two, and starts " +
-      "watching immediately after the publish resolves rather than after a second, separate tool call " +
-      "round-trips through the client, closing most of the race mesh_watch has against a fresh " +
-      "publish. Still no delivery guarantee (PUBLISH has no ack, and a reply sent in the narrow gap " +
-      "before watching starts can still be missed) -- use mesh_call instead if you need one. Omit " +
-      `wait_reply_seconds to just send and return immediately, like mesh_publish. Defaults to ${defaultStation()} if host isn't given.`,
+      '{sender: <your node_id>, text} (your node_id filled in automatically, same identity ' +
+      "mesh_publish/mesh_call use). Pass EXACTLY ONE of `to` or `topic`. `to` (a node_id from " +
+      "mesh_agents) is the direct-message shortcut: no invite, no lobby, no coordination beyond " +
+      "already knowing who you want to reach -- it computes that agent's own inbox topic and sends " +
+      "there; they read it with mesh_read_inbox if they've called mesh_hello (which starts watching " +
+      "it automatically). `topic` sends on any topic you name yourself instead -- a well-known one " +
+      "(e.g. agents.chat_message_sent) or a session_topic from mesh_open_lobby_session, for the " +
+      "different case that tool solves (pairing with WHOEVER shows up, not someone specific). Pass " +
+      "wait_reply_seconds to also wait, in this same call, for the first reply from a DIFFERENT sender " +
+      "(skipping your own message if the topic echoes it back) -- folds the usual publish-then-watch " +
+      "chat step into one call, and starts watching immediately after the publish resolves rather than " +
+      "after a second, separate tool call round-trips through the client, closing most of the race " +
+      "mesh_watch has against a fresh publish. Still no delivery guarantee (PUBLISH has no ack, and a " +
+      "reply sent in the narrow gap before watching starts can still be missed) -- use mesh_call " +
+      `instead if you need one. Omit wait_reply_seconds to just send and return immediately, like ` +
+      `mesh_publish. Defaults to ${defaultStation()} if host isn't given.`,
     {
-      topic: z.string().describe("Topic to send on (e.g. 'agents.chat_message_sent', or a lobby session_topic)."),
+      to: z
+        .string()
+        .length(64)
+        .regex(/^[0-9a-fA-F]+$/, "must be hex")
+        .optional()
+        .describe("Recipient's node_id (from mesh_agents) -- the direct-message shortcut. Exactly one of `to`/`topic`."),
+      topic: z
+        .string()
+        .optional()
+        .describe("Topic to send on yourself (e.g. 'agents.chat_message_sent', or a lobby session_topic). Exactly one of `to`/`topic`."),
       text: z.string().describe("The message text."),
       wait_reply_seconds: z
         .number()
@@ -138,9 +167,15 @@ export function registerMeshSendChat(server: McpServer): void {
             "See mesh_call's realm description for the full rationale.",
         ),
     },
-    async ({ topic, text, wait_reply_seconds, host, realm }) => {
+    async ({ to, topic, text, wait_reply_seconds, host, realm }) => {
+      let targetTopic: string;
       try {
-        const result = await sendChat({ host, topic, text, waitReplySeconds: wait_reply_seconds, realm });
+        targetTopic = resolveTargetTopic({ to, topic });
+      } catch (e) {
+        return errorContent(e instanceof Error ? e.message : String(e));
+      }
+      try {
+        const result = await sendChat({ host, topic: targetTopic, text, waitReplySeconds: wait_reply_seconds, realm });
         return jsonContent(result);
       } catch (e) {
         return errorContent(describeCliError("mesh_send_chat failed", e));

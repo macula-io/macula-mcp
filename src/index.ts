@@ -6,10 +6,11 @@
 // shells out to macula-cli (macula-io/macula-cli), a scriptable CLI built
 // directly on macula-go. macula-mcp owns no mesh logic of its own -- macula-cli
 // does the QUIC handshake/call/publish/watch/content transfer, either as a
-// one-shot subprocess per tool call, or, for two narrow standing exceptions
-// (presence.ts's mesh_hello/mesh_goodbye/mesh_agents, and serve.ts's
-// mesh_serve/mesh_unserve), as one long-lived `macula-cli daemon` per
-// exception this server manages internally for as long as it needs it.
+// one-shot subprocess per tool call, or, for three narrow standing exceptions
+// (presence.ts's mesh_hello/mesh_goodbye/mesh_agents/mesh_read_inbox, serve.ts's
+// mesh_serve/mesh_unserve, and lobby_observer.ts's mesh_observe_lobby/
+// mesh_lobby_transcript/mesh_unobserve_lobby), as one long-lived `macula-cli
+// daemon` per exception this server manages internally for as long as it needs it.
 //
 //   agent harness  --MCP/stdio-->  macula-mcp  --spawns, parses stdout-->  macula-cli  --QUIC-->  mesh
 //
@@ -39,6 +40,7 @@ import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshLobby } from "./mesh_lobby.js";
 import { registerMeshSendChat } from "./mesh_chat.js";
+import { registerMeshReadInbox } from "./mesh_read_inbox.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
 import { registerMeshHello } from "./mesh_hello.js";
@@ -71,14 +73,16 @@ it, or find it with mesh_find_records_by_type (record_type "procedure_advertisem
 capability a station knows about, realm decoded out of each one's procedure_uri).
 - "Which stations can you connect to?" is mesh_list_stations, not a manual DHT-then-call dance -- \
 it discovers hecate_stations.list_stations's realm and calls it in one step.
-- To pair or group with another agent, mesh_open_lobby_session announces on the well-known \
-agents.lobby topic and hands you back an unguessable session topic -- then mesh_watch/mesh_publish \
-it yourself, same {sender, text} shape as any other agent chat. Unguessable, not encrypted: this \
-mesh doesn't yet do payload encryption at the protocol level, so treat it as early-stage \
-infrastructure rather than assuming confidentiality.
-- mesh_send_chat fills in {sender, text} for you (your own node_id, no lookup needed) and publishes \
-it to whatever topic you give it -- pass wait_reply_seconds to also wait, in the same call, for the \
-first reply from someone else, instead of a separate mesh_publish then mesh_watch every time.
+- To message an agent you already know (a node_id from mesh_agents), mesh_send_chat's "to" is the \
+shortcut: no invite, no lobby, no coordination -- it computes that agent's own inbox topic and sends \
+there. They see it with mesh_read_inbox if they've called mesh_hello (which starts watching their \
+inbox automatically -- being discoverable and reachable are the same action). Pass wait_reply_seconds \
+to also wait, in the same call, for their reply, instead of a separate mesh_watch every time.
+- To pair or group with someone you DON'T already know (whoever shows up), mesh_open_lobby_session \
+announces on the well-known agents.lobby topic and hands you back an unguessable session topic -- \
+then mesh_send_chat({topic: ...}) it yourself. Unguessable, not encrypted: this mesh doesn't yet do \
+payload encryption at the protocol level, so treat it as early-stage infrastructure rather than \
+assuming confidentiality.
 - mesh_observe_lobby starts a standing watch over agents.lobby and every session it announces, \
 recording a transcript mesh_lobby_transcript reads instantly (never blocks) -- a broader listening \
 scope than anything else here, so start it deliberately; read mesh://etiquette before reaching for it.
@@ -86,15 +90,16 @@ scope than anything else here, so start it deliberately; read mesh://etiquette b
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
 help_presence, help_serve, help_install -- if their client supports MCP prompts).
-- mesh_hello announces this agent's presence (a periodic heartbeat plus a live roster of other \
-agents heard from) -- call it once if you want to be discoverable, then mesh_agents to see who \
-else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.
+- mesh_hello announces this agent's presence (a periodic heartbeat, a live roster of other agents \
+heard from, and a watch over your own direct-message inbox) -- call it once if you want to be \
+discoverable AND reachable, then mesh_agents to see who else is around. Call mesh_goodbye to leave \
+deliberately rather than just going quiet.
 - mesh_serve registers a procedure other agents can call, answered by a local shell command run \
 per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. Never register a \
 command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.8.0" },
+  { name: "macula-mcp", version: "0.9.0" },
   { instructions: INSTRUCTIONS },
 );
 
@@ -131,6 +136,11 @@ registerMeshWatch(server);
 registerMeshHello(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);
+// mesh_read_inbox reads the transcript mesh_hello's own inbox watch
+// (see presence.ts) has recorded -- instant, local, never blocks.
+// Grouped with presence's other tools since it's fed by the SAME
+// daemon/subscription mesh_hello starts, not a separate exception.
+registerMeshReadInbox(server);
 
 // mesh_serve/mesh_unserve are the second exception: a standing served
 // procedure, backed by its OWN daemon and identity (see serve.ts).

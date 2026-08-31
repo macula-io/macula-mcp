@@ -1,8 +1,16 @@
 // Presence: this macula-mcp process's own "being on the mesh" state --
-// a periodic agent.hello heartbeat, and durable subscriptions to
-// agent.hello/agent.goodbye from everyone else, feeding the local
-// roster (roster.ts). mesh_hello.ts/mesh_goodbye.ts/mesh_agents.ts are
-// thin tool wrappers around start()/stop()/roster reads; this module
+// a periodic agent.hello heartbeat, durable subscriptions to
+// agent.hello/agent.goodbye from everyone else feeding the local
+// roster (roster.ts), AND (2026-08-31) a durable subscription to this
+// agent's own direct-message inbox (inbox.ts) feeding the transcript
+// store mesh_lobby_transcript already uses. Discoverable (said hello)
+// and reachable (has an inbox someone can write to) are the same
+// action on purpose -- the lobby's invite dance
+// (mesh_open_lobby_session) was real friction for the single most
+// common case, messaging someone you already know by node_id, and
+// this removes it entirely for that case. mesh_hello.ts/
+// mesh_goodbye.ts/mesh_agents.ts/mesh_read_inbox.ts are thin tool
+// wrappers around start()/stop()/roster/transcript reads; this module
 // owns the actual lifecycle.
 //
 // mesh_watch.ts's own doc comment explains why a standing subscription
@@ -40,6 +48,8 @@ import {
   watchTopicOnDaemon,
 } from "./macula_cli.js";
 import { removeAgent, upsertAgent } from "./roster.js";
+import { inboxTopic } from "./inbox.js";
+import { recordFact } from "./lobby_transcript.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";
@@ -82,6 +92,12 @@ export interface StartResult {
   connected_to: string;
   interval_seconds: number;
   already_active: boolean;
+  inbox_topic: string;
+}
+
+/** The presence node_id currently watching an inbox, or undefined if presence isn't active -- see mesh_read_inbox.ts. */
+export function currentNodeId(): string | undefined {
+  return state?.nodeId;
 }
 
 /** Idempotent: a second call just updates operatorName/message/model/connectedVia for future heartbeats. */
@@ -99,11 +115,13 @@ export async function start(args: StartArgs): Promise<StartResult> {
       connected_to: state.host,
       interval_seconds: intervalSeconds,
       already_active: true,
+      inbox_topic: inboxTopic(state.nodeId),
     };
   }
 
   const { node_id: nodeId } = await identity();
   const socketName = `presence-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const myInboxTopic = inboxTopic(nodeId);
 
   const daemon = await startDaemon(host, presenceIdentityPath(), socketName);
   const watchers = [
@@ -123,6 +141,17 @@ export async function start(args: StartArgs): Promise<StartResult> {
     watchTopicOnDaemon(socketName, GOODBYE_TOPIC, (evt) => {
       const payload = evt as Record<string, unknown>;
       if (typeof payload.node_id === "string") removeAgent(payload.node_id);
+    }),
+    // The direct-message inbox (see inbox.ts): mesh_hello starting this
+    // watch automatically is the whole point -- being discoverable
+    // (saying hello) and being reachable (having an inbox someone can
+    // write to) are the same action now, not two separate opt-ins.
+    // Recorded into the SAME transcript store mesh_lobby_transcript
+    // already uses (a generic {topic, sender, text} log, not lobby-
+    // specific despite the module's name) -- read back via
+    // mesh_read_inbox.
+    watchTopicOnDaemon(socketName, myInboxTopic, (payload) => {
+      recordFact({ topic: myInboxTopic, payload, at: new Date().toISOString() });
     }),
   ];
 
@@ -144,7 +173,13 @@ export async function start(args: StartArgs): Promise<StartResult> {
   onShutdown(stopSync);
 
   await beat(); // announce immediately rather than waiting a full interval
-  return { node_id: nodeId, connected_to: host, interval_seconds: intervalSeconds, already_active: false };
+  return {
+    node_id: nodeId,
+    connected_to: host,
+    interval_seconds: intervalSeconds,
+    already_active: false,
+    inbox_topic: myInboxTopic,
+  };
 }
 
 async function beat(): Promise<void> {
