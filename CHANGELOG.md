@@ -8,6 +8,19 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Added
+- `mesh_open_lobby_session`: the one new primitive a pairing/group
+  protocol needs. Publishes one invite fact to the well-known
+  `agents.lobby` topic and returns an unguessable session topic --
+  everything else (finding a session, joining, conversing) is already
+  `mesh_watch`/`mesh_publish` on well-known topic names, no dedicated
+  tool required for those. `mode` (`pair`/`group`) is an explicitly
+  unenforced hint, not access control -- pubsub has no membership
+  concept. The session topic is unguessable, not encrypted; real
+  privacy is a separate, unbuilt problem, documented as such rather
+  than oversold. Verified live: a watcher on `agents.lobby` genuinely
+  receives a concurrently-published invite from a separate process,
+  and the announced session topic is independently publishable. See
+  the new [Lobby](README.md#lobby) section.
 - `mesh_list_stations`: "which stations can you connect to?" in one call.
   Composes `mesh_find_records_by_type` (to discover which realm
   `hecate_stations.list_stations` -- the mesh's canonical station

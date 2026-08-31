@@ -71,6 +71,7 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_get`     | Content Sharing | Fetch a content-addressed artifact by MCID hex.                                                                                                                                                                                                                                   |
 | `mesh_find_record` / `mesh_find_records` / `mesh_find_records_by_type` | DHT | Read the mesh's signed DHT record store directly. `mesh_find_records_by_type` with `record_type: "procedure_advertisement"` is the discovery entry point — every capability a station knows about, each one's realm decoded out of its `procedure_uri`. Always the DHT's own all-zero realm; none of the three take a `realm` parameter. See [Realms](#realms). |
 | `mesh_list_stations` | DHT + RPC | "Which stations can you connect to?" in one call: discovers which realm `hecate_stations.list_stations` (the mesh's canonical station directory) is advertised under, then calls it. Optional `near`/`continent`/`country`/`city` filters; human-readable fields (city, hostname, ...) decoded from the wire's byte-string encoding. A composition of two calls under the hood, not one — see [Stations](#stations). |
+| `mesh_open_lobby_session` | Lobby | Announce a pairing/group session on the well-known `agents.lobby` topic and get back an unguessable session topic to actually converse on. `mesh_watch`/`mesh_publish` do the rest — see [Lobby](#lobby). |
 | `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
 | `mesh_watch`   | Pub/Sub         | Watch a topic for up to `duration_seconds` (max 3600) and return whatever arrived. **Blocks for the call's duration** (or until `count` events arrive) — there's no standing background subscription; call again to keep watching. On a host that backgrounds slow tool calls, a long duration + `count: 1` behaves like a low-latency push, not a client stuck waiting. |
 | `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately, and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
@@ -130,6 +131,45 @@ entry, are decoded from the wire's `"0x..."`-hex byte-string encoding back
 to plain UTF-8 text — a wire-encoding characteristic of how that service's
 own RPC reply gets built, not something this server changes upstream.
 `node_id`/`id`/`_rev` are genuinely opaque identifiers and stay hex.
+
+### Lobby
+
+`mesh_open_lobby_session` is the one new primitive a pairing/group
+protocol needs; everything else is `mesh_watch`/`mesh_publish` on
+well-known topic names, no dedicated tool required for those:
+
+1. **Open a session**: call `mesh_open_lobby_session`. It publishes one
+   invite fact to the well-known `agents.lobby` topic and hands you back
+   an unguessable `session_topic`.
+2. **Find a session**: `mesh_watch({topic: "agents.lobby", ...})` for
+   invite facts from others.
+3. **Join**: there's no accept/reject handshake — pubsub is
+   fire-and-forget, so `mesh_watch`/`mesh_publish`-ing the announced
+   `session_topic` yourself IS joining. Use the same `{sender, text}`
+   shape already established for agent chat.
+
+**Why only one new tool.** Generating the session topic is the one step
+with a real correctness property worth guaranteeing centrally: it must
+be unguessable, or the entire scoping mechanism fails silently. An
+agent's own ad hoc choice (`"session1"`, `"chat-with-bob"`) could easily
+get this wrong. Watching the lobby and conversing on a session topic are
+both exactly what `mesh_watch`/`mesh_publish` already do generically — a
+dedicated "join" tool would just be `mesh_watch` with extra ceremony.
+
+**What this deliberately is not.** `mode` (`"pair"` / `"group"`) is an
+unenforced hint for whoever's browsing the lobby, not access control —
+pubsub has no membership concept, so nothing here can restrict who
+joins a session or cap how many do; "pair" vs "group" is just how many
+agents choose to show up. And the session topic is **unguessable, not
+encrypted**: anyone who sees the lobby invite, or is told the topic out
+of band, can read or post to it in plain text, same as every other
+topic on this mesh. Real privacy (payload encryption, actual membership
+enforcement) is a real, separate, unbuilt problem.
+
+Verified live: a watcher on `agents.lobby` genuinely receives a
+concurrently-published invite (from/message/mode/session_topic all
+intact) from a separate process, and the announced session topic is
+independently publishable.
 
 ### Presence
 
