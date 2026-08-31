@@ -49,6 +49,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { defaultStation, identity, publish } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { ensurePresence } from "./presence.js";
 
 export const LOBBY_TOPIC = "agents.lobby";
 
@@ -76,6 +77,7 @@ export function registerMeshLobby(server: McpServer): void {
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
     async ({ message, mode, host }) => {
+      ensurePresence(server);
       try {
         const { node_id } = await identity();
         const session_topic = `agents.session.${randomBytes(16).toString("hex")}`;

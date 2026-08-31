@@ -3,14 +3,10 @@
 // agent.hello/agent.goodbye from everyone else feeding the local
 // roster (roster.ts), a durable subscription to this agent's own
 // direct-message inbox (inbox.ts) feeding the transcript store
-// mesh_lobby_transcript already uses, AND (2026-08-31) starting the
-// lobby observer (lobby_observer.ts) so this agent is watching
-// agents.lobby -- and every session it announces -- from the moment it
-// says hello, without a separate mesh_observe_lobby call. Saying hello,
-// being reachable, and being present in the lobby are all the same
-// action now: operators kept forgetting the second and third steps
-// existed, which was exactly the "too much friction" complaint this
-// whole run of changes responds to. mesh_hello.ts/mesh_goodbye.ts/
+// mesh_lobby_transcript already uses, AND starting the lobby observer
+// (lobby_observer.ts) so this agent is watching agents.lobby -- and
+// every session it announces -- from the moment it's present, without
+// a separate mesh_observe_lobby call. mesh_hello.ts/mesh_goodbye.ts/
 // mesh_agents.ts/mesh_read_inbox.ts are thin tool wrappers around
 // start()/stop()/roster/transcript reads; this module owns the actual
 // lifecycle -- lobby_observer.ts still owns ITS OWN lifecycle (own
@@ -18,6 +14,32 @@
 // start()/stop(), the same way mesh_observe_lobby.ts itself does, so
 // an agent that wants a bigger max_sessions or to opt back in after
 // mesh_unobserve_lobby can still call mesh_observe_lobby directly.
+//
+// (2026-08-31, later the same day) ensurePresence(): every genuinely
+// mesh-touching tool (mesh_call, mesh_publish, mesh_watch,
+// mesh_list_stations, mesh_dht, mesh_artifact, mesh_send_chat,
+// mesh_read_inbox, mesh_open_lobby_session) now calls this at its own
+// entry point. Asked directly, twice: first "the agent-to-agent
+// protocol is too clumsy and operator-intensive... should establish
+// itself without much user friction" (-> the inbox/lobby bundling
+// above), then, after a fresh session correctly reported it hadn't
+// said hello because nothing had asked it to yet: "make mesh_hello
+// fire itself the first time an agent touches the mesh... frictionless
+// and occasionally automatic." This is that second, larger reversal --
+// touching the mesh AT ALL now makes an agent present on it, not just
+// calling mesh_hello. mesh_hello.ts's own OLD reasoning ("broadcasting
+// onto a real shared mesh... should be something an agent decides to
+// do, not a side effect of merely connecting") is deliberately
+// overridden here, on record, not silently dropped -- the user weighed
+// that exact tradeoff (every fresh session that so much as lists
+// stations now broadcasts agent.hello onto macula.io's public demo
+// fleet, unprompted) and chose frictionless over quiet-by-default.
+// mesh_hello itself still exists, for the same reason mesh_observe_lobby
+// still does after presence started bundling it in: customizing
+// operator_name/message/model, or restarting after an explicit goodbye
+// (see explicitlyLeft below -- ensurePresence() deliberately does NOT
+// undo a real mesh_goodbye on the very next mesh tool call; only an
+// explicit mesh_hello does).
 //
 // mesh_watch.ts's own doc comment explains why a standing subscription
 // was deliberately NOT built before: macula-cli had no daemon, so
@@ -44,6 +66,7 @@
 
 import { randomBytes } from "node:crypto";
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   defaultStation,
   identity,
@@ -80,8 +103,54 @@ interface PresenceState {
 
 let state: PresenceState | undefined;
 
+/**
+ * True once mesh_goodbye has actually run, cleared the moment start()
+ * runs again for any reason (explicit mesh_hello, or a later
+ * ensurePresence() -- see its own doc comment for why it does NOT
+ * clear this itself). Exists so a deliberate goodbye stays honored
+ * instead of being silently undone by the very next mesh tool call.
+ */
+let explicitlyLeft = false;
+
+/** A fresh start() already in flight, if any -- see start()'s own doc comment for the race it closes. */
+let starting: Promise<StartResult> | undefined;
+
 export function isActive(): boolean {
   return state !== undefined;
+}
+
+/** "name version" from the MCP handshake's clientInfo, or undefined if the client hasn't sent one yet. Shared by mesh_hello.ts and ensurePresence(). */
+export function connectedViaLabel(server: McpServer): string | undefined {
+  const info = server.server.getClientVersion();
+  if (!info?.name) return undefined;
+  return info.version ? `${info.name} ${info.version}` : info.name;
+}
+
+/**
+ * Fire-and-forget: makes this process presence-active using
+ * environment-derived defaults, if it isn't already -- called at the
+ * top of every genuinely mesh-touching tool (see this module's own top
+ * comment). Deliberately does NOT await or block the caller: presence
+ * startup (spawns a daemon, waits for it, publishes a hello, starts
+ * the lobby watch) can take real time, and the tool call that
+ * triggered it shouldn't wait on it -- it kicks off in the background
+ * and the roster/inbox/lobby watches land moments later. Errors are
+ * logged, never thrown -- a failed background presence start must
+ * never fail the mesh call that happened to trigger it.
+ *
+ * No-op if already active, already starting, or the agent explicitly
+ * said goodbye and hasn't called mesh_hello since.
+ */
+export function ensurePresence(server: McpServer): void {
+  if (state || explicitlyLeft || starting) return;
+  void start({
+    operatorName: process.env.MACULA_MCP_OPERATOR_NAME,
+    message: process.env.MACULA_MCP_HELLO_MESSAGE,
+    model: process.env.MACULA_MCP_MODEL,
+    connectedVia: connectedViaLabel(server),
+  }).catch((e) => {
+    console.error("ensurePresence: background presence start failed:", e instanceof Error ? e.message : String(e));
+  });
 }
 
 export interface StartArgs {
@@ -108,8 +177,36 @@ export function currentNodeId(): string | undefined {
   return state?.nodeId;
 }
 
-/** Idempotent: a second call just updates operatorName/message/model/connectedVia for future heartbeats. */
-export async function start(args: StartArgs): Promise<StartResult> {
+/**
+ * Idempotent: a second call just updates operatorName/message/model/
+ * connectedVia for future heartbeats. Also clears explicitlyLeft --
+ * any successful start, auto or explicit, means "not explicitly left"
+ * going forward.
+ *
+ * Guards against a real race ensurePresence() introduced: several
+ * mesh-touching tools can each call it around the same moment (nothing
+ * in MCP guarantees tool calls are strictly serialized), and the
+ * fresh-start path below has several `await` points before `state` is
+ * actually set -- without this guard, two concurrent callers would
+ * both see `state === undefined`, both spawn their own daemon, and
+ * whichever finished last would silently overwrite the other's
+ * PresenceState, leaking the first daemon as an untracked orphan
+ * process. `starting` makes every concurrent caller (this one
+ * included, not just ensurePresence()) await the SAME in-flight
+ * fresh-start instead.
+ */
+export function start(args: StartArgs): Promise<StartResult> {
+  if (starting) return starting.then(() => start(args));
+  if (state) return doStart(args);
+  const p = doStart(args).finally(() => {
+    starting = undefined;
+  });
+  starting = p;
+  return p;
+}
+
+async function doStart(args: StartArgs): Promise<StartResult> {
+  explicitlyLeft = false;
   const host = args.host ?? defaultStation();
   const intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, args.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
 
@@ -221,7 +318,7 @@ export interface StopResult {
   said_goodbye: boolean;
 }
 
-/** Publishes agent.goodbye, then tears everything down (including lobby observing -- goodbye means leaving entirely). No-op if not active. */
+/** Publishes agent.goodbye, then tears everything down (including lobby observing -- goodbye means leaving entirely), and marks explicitlyLeft so ensurePresence() won't silently restart it. No-op if not active. */
 export async function stop(): Promise<StopResult> {
   if (!state) return { said_goodbye: false };
   const { nodeId, host } = state;
@@ -234,6 +331,11 @@ export async function stop(): Promise<StopResult> {
   }
   lobbyObserver.stop();
   stopSync();
+  // Set AFTER stopSync(), which itself only clears `state` -- a
+  // deliberate goodbye must stay honored by ensurePresence() until an
+  // explicit mesh_hello, not get silently undone by the very next
+  // mesh tool call (see this module's own top comment and start()'s).
+  explicitlyLeft = true;
   return { said_goodbye: saidGoodbye };
 }
 

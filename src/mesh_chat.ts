@@ -37,6 +37,7 @@ import { z } from "zod";
 import { defaultStation, identity, publish, watch, type WatchEvent } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { inboxTopic } from "./inbox.js";
+import { ensurePresence } from "./presence.js";
 
 const MAX_WAIT_SECONDS = 3600;
 
@@ -168,6 +169,7 @@ export function registerMeshSendChat(server: McpServer): void {
         ),
     },
     async ({ to, topic, text, wait_reply_seconds, host, realm }) => {
+      ensurePresence(server);
       let targetTopic: string;
       try {
         targetTopic = resolveTargetTopic({ to, topic });

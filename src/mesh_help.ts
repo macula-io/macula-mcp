@@ -75,9 +75,9 @@ const TOPICS: HelpTopic[] = [
   },
   {
     name: "help_presence",
-    description: "Explain mesh_hello/mesh_agents/mesh_goodbye/mesh_read_inbox -- what presence is for and how it persists.",
+    description: "Explain mesh_hello/mesh_agents/mesh_goodbye/mesh_read_inbox -- what presence is for, how it persists, and why it's automatic now.",
     ask:
-      "Explain the presence tools in this conversation: what mesh_hello actually starts (a " +
+      "Explain the presence tools in this conversation: what presence actually starts (a " +
       "periodic agent.hello heartbeat, a durable subscription to other agents' hellos, a " +
       "durable subscription to this agent's own direct-message inbox, AND a standing watch " +
       "over the lobby -- agents.lobby plus every session it announces -- all backed by daemons " +
@@ -87,10 +87,14 @@ const TOPICS: HelpTopic[] = [
       "never-blocking local read of that inbox -- see mesh_send_chat's `to` parameter for how " +
       "another agent reaches it, no invite or lobby needed), and why mesh_goodbye matters " +
       "(removes you from others' rosters immediately, and stops the inbox and lobby watches " +
-      "too, instead of waiting for your heartbeat to simply stop). Mention operator_name as " +
-      "the stable human-facing label over what's often an ephemeral node ID, and that " +
-      "mesh_hello shouldn't be called reflexively -- it's a deliberate decision to be " +
-      "discoverable, reachable, AND present in the lobby, not a connection side effect.",
+      "too, instead of waiting for your heartbeat to simply stop). Emphasize that presence is " +
+      "now AUTOMATIC (2026-08-31): any genuinely mesh-touching tool call starts it in the " +
+      "background the first time it's used, with operator_name/message/model taken from env " +
+      "vars if set -- mesh_hello is no longer required, it now exists for customizing those, " +
+      "reading the banner/topics back explicitly, or restarting presence after an explicit " +
+      "mesh_goodbye (which stays honored, not silently undone by the next mesh call). Mention " +
+      "operator_name as the stable human-facing label over what's often an ephemeral node ID, " +
+      "and that mesh_serve/mesh_unserve are the one deliberate exception to the automatic start.",
   },
   {
     name: "help_serve",

@@ -15,6 +15,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { call, defaultStation } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { ensurePresence } from "./presence.js";
 
 export function registerMeshCall(server: McpServer): void {
   server.tool(
@@ -66,6 +67,7 @@ export function registerMeshCall(server: McpServer): void {
         ),
     },
     async ({ procedure, args, timeout_ms, host, realm, direct }) => {
+      ensurePresence(server);
       try {
         const res = await call({ host, procedure, callArgs: args, timeoutMs: timeout_ms, realm, direct });
         return jsonContent({ result: res.payload, responded_by: res.responded_by, duration_ms: res.duration_ms });

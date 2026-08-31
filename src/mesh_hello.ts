@@ -1,9 +1,15 @@
 // Tool: mesh_hello — announce this agent's presence on the mesh.
 //
-// Deliberately explicit rather than automatic on every macula-mcp
-// startup: broadcasting onto a real shared mesh (the default station
-// is macula.io's public demo fleet, not a sandbox) should be something
-// an agent decides to do, not a side effect of merely connecting.
+// (2026-08-31) No longer the only way presence starts: any genuinely
+// mesh-touching tool now calls presence.ensurePresence() at its own
+// entry point, so touching the mesh at all makes an agent present on
+// it -- see presence.ts's own top comment for the full reasoning and
+// the tradeoff that was deliberately accepted. This tool still matters
+// for: customizing operator_name/message/model (ensurePresence() only
+// has env-var defaults to work with), reading the welcome banner and
+// inbox_topic/lobby_topic back explicitly, and restarting presence
+// after an explicit mesh_goodbye (ensurePresence() deliberately won't
+// do that on its own -- see presence.ts's explicitlyLeft).
 //
 // First call: prints a welcome banner, publishes one agent.hello
 // immediately, and starts a periodic heartbeat (see presence.ts) that
@@ -50,13 +56,6 @@ function banner(): string {
   }
 }
 
-/** "name version" from the MCP handshake's clientInfo, or undefined if the client hasn't sent one (or hasn't connected yet). */
-function connectedViaLabel(server: McpServer): string | undefined {
-  const info = server.server.getClientVersion();
-  if (!info?.name) return undefined;
-  return info.version ? `${info.name} ${info.version}` : info.name;
-}
-
 export function registerMeshHello(server: McpServer): void {
   server.tool(
     "mesh_hello",
@@ -65,13 +64,17 @@ export function registerMeshHello(server: McpServer): void {
       "(feeding mesh_agents' roster), a durable subscription to this agent's own direct-message inbox " +
       "(feeding mesh_read_inbox), AND a standing watch over the lobby -- agents.lobby plus every " +
       "session_topic it announces (feeding mesh_lobby_transcript) -- being discoverable, reachable, and " +
-      "present in the lobby are all the same action now. Returns inbox_topic (informational; you never " +
-      "need to type it -- mesh_send_chat's `to` computes it from a node_id automatically) and lobby_topic " +
-      "(informational). Calling this again while already active just updates operator_name/message/model/" +
-      "connected_via for future heartbeats -- it also re-confirms the lobby watch is running, in case " +
-      "mesh_unobserve_lobby turned it off. connected_via (which MCP client you're running as, e.g. " +
-      "\"claude-code 1.2.3\") is read automatically from the MCP handshake, not a parameter. Pair with " +
-      "mesh_goodbye to leave deliberately -- it stops the lobby watch too.",
+      "present in the lobby are all the same action now. You usually don't need to call this yourself: " +
+      "any mesh_call/mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_send_chat/" +
+      "mesh_read_inbox/mesh_open_lobby_session call already starts presence automatically, with " +
+      "operator_name/message/model taken from MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL if set. Call " +
+      "mesh_hello directly to override those, or to see the banner/inbox_topic/lobby_topic explicitly, or " +
+      "to restart presence after mesh_goodbye -- an explicit goodbye is NOT undone automatically by the " +
+      "next mesh tool call, only by calling this again. Calling this again while already active just " +
+      "updates operator_name/message/model/connected_via for future heartbeats -- it also re-confirms the " +
+      "lobby watch is running, in case mesh_unobserve_lobby turned it off. connected_via (which MCP " +
+      "client you're running as, e.g. \"claude-code 1.2.3\") is read automatically from the MCP handshake, " +
+      "not a parameter. Pair with mesh_goodbye to leave deliberately -- it stops the lobby watch too.",
     {
       operator_name: z.string().optional().describe("Customizable human-readable name for whoever's behind this agent."),
       message: z.string().optional().describe("A short greeting or status, sent with every heartbeat."),
@@ -104,7 +107,7 @@ export function registerMeshHello(server: McpServer): void {
           operatorName: operator_name ?? process.env.MACULA_MCP_OPERATOR_NAME,
           message: message ?? process.env.MACULA_MCP_HELLO_MESSAGE,
           model: model ?? process.env.MACULA_MCP_MODEL,
-          connectedVia: connectedViaLabel(server),
+          connectedVia: presence.connectedViaLabel(server),
           intervalSeconds: interval_seconds,
         });
         return jsonContent({ banner: banner(), ...result });

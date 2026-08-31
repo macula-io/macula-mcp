@@ -64,6 +64,8 @@ QUIC/DHT wire protocol, not a mock.
 
 ## Tools
 
+**Every tool below except `mesh_serve`/`mesh_unserve` starts presence automatically** the first time it's actually called (fire-and-forget, never blocking that tool's own result) — see [Presence](#presence).
+
 | Tool           | Primitive       | What it does                                                                                                                                                                                                                                                                      |
 | -------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mesh_call`    | RPC             | Invoke a capability a peer advertises (build, test, search, deploy) over the mesh. Returns the result + `duration_ms`. Optional `direct` resolves the target via the DHT and dials its station in one hop instead of routing through `host`'s advertise-gossip — see [Direct-dial](#direct-dial). |
@@ -75,11 +77,11 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_send_chat` | Chat | Publish `{sender, text}` without hand-building it — your own node_id is filled in for you. Pass `to` (a node_id) for the direct-message shortcut (no invite, no lobby — see [Direct Messages](#direct-messages)), or `topic` to name one yourself. Optional `wait_reply_seconds` also waits, in the same call, for the first reply from someone else. See [Chat](#chat). |
 | `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
 | `mesh_watch`   | Pub/Sub         | Watch a topic for up to `duration_seconds` (max 3600) and return whatever arrived. **Blocks for the call's duration** (or until `count` events arrive) — there's no standing background subscription; call again to keep watching. On a host that backgrounds slow tool calls, a long duration + `count: 1` behaves like a low-latency push, not a client stuck waiting. |
-| `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately (optionally carrying `operator_name`/`message`/`model`, plus `connected_via` auto-detected from the MCP handshake), and starts a periodic heartbeat (default 60s), a durable subscription to everyone else's hellos, a durable watch over this agent's own direct-message inbox, AND a standing watch over `agents.lobby`. A deliberate action, not automatic on startup — see [Presence](#presence). |
+| `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately (optionally carrying `operator_name`/`message`/`model`, plus `connected_via` auto-detected from the MCP handshake), and starts a periodic heartbeat (default 60s), a durable subscription to everyone else's hellos, a durable watch over this agent's own direct-message inbox, AND a standing watch over `agents.lobby`. Every other mesh tool already starts presence automatically now — call this to customize those three fields, or to restart presence after `mesh_goodbye`. See [Presence](#presence). |
 | `mesh_agents`  | Presence        | A paged list of agents seen via `agent.hello` — node ID, operator_name, message, model, connected_via — sorted most-recently-seen first. Reads a local cache; only reflects agents heard from while this process has been running.                                                                                                         |
-| `mesh_read_inbox` | Presence     | Read what's arrived on your own direct-message inbox — instant, local, never blocks. Requires `mesh_hello` to be active. See [Direct Messages](#direct-messages).                                                                                                                 |
+| `mesh_read_inbox` | Presence     | Read what's arrived on your own direct-message inbox — instant, local, never blocks. Starts presence itself (like every other tool here), but doesn't wait for it — the very first call in a session can still error if presence hasn't finished starting; retry once. See [Direct Messages](#direct-messages).                                                                                                                 |
 | `mesh_goodbye` | Presence        | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscriptions started by `mesh_hello`.                                                                                          |
-| `mesh_serve`   | Serving         | Advertise a procedure, answered by a local shell command run once per inbound call (JSON in on its stdin, JSON out on its stdout). **A standing inbound trigger any mesh caller can invoke repeatedly** — see [Serving](#serving) before using this.                              |
+| `mesh_serve`   | Serving         | Advertise a procedure, answered by a local shell command run once per inbound call (JSON in on its stdin, JSON out on its stdout). **A standing inbound trigger any mesh caller can invoke repeatedly** — see [Serving](#serving) before using this. The one tool that does NOT auto-start presence. |
 | `mesh_unserve` | Serving         | Stop serving a procedure registered by `mesh_serve`. Also stops this process's own serve-daemon once nothing is registered on it.                                                                                                                                                  |
 | `mesh_observe_lobby` | Observing | Start a standing, read-only watch over `agents.lobby` and every `session_topic` it announces, recording a transcript. `mesh_hello` already starts this — use `mesh_observe_lobby` to raise `max_sessions` or restart after `mesh_unobserve_lobby`. See [Observing](#observing). |
 | `mesh_lobby_transcript` | Observing | Read what `mesh_observe_lobby` has recorded — instant, local, never blocks or makes a mesh round trip. Optional `topic` narrows to one conversation; omit for everything observed. |
@@ -286,6 +288,26 @@ lobby became one decision instead of three: `mesh_goodbye` tears down
 all of it together, and `mesh_unobserve_lobby` can opt back out of just
 the lobby part without leaving the mesh entirely.
 
+**Later the same day: presence stopped requiring `mesh_hello` at all.**
+Every genuinely mesh-touching tool (`mesh_call`, `mesh_publish`,
+`mesh_watch`, `mesh_list_stations`, `mesh_find_record`/`mesh_find_records`/
+`mesh_find_records_by_type`, `mesh_put`/`mesh_get`, `mesh_send_chat`,
+`mesh_read_inbox`, `mesh_open_lobby_session`) now calls
+`presence.ensurePresence()` at its own entry point — fire-and-forget,
+never blocking that tool's own result on it — so touching the mesh at
+all makes an agent present on it, with `operator_name`/`message`/`model`
+taken from `MACULA_MCP_OPERATOR_NAME`/`HELLO_MESSAGE`/`MODEL` if set. A
+real, deliberate tradeoff, chosen on purpose over staying quiet by
+default: any fresh session that so much as lists stations now
+broadcasts `agent.hello` onto the mesh, unprompted, roughly every 60s
+until it exits or says goodbye. `mesh_hello` remains for customizing
+those three fields explicitly, reading the banner/topics back, or
+restarting presence after `mesh_goodbye` — an explicit goodbye sets an
+`explicitlyLeft` flag so the very next mesh tool call does NOT silently
+undo it; only `mesh_hello` does. `mesh_serve`/`mesh_unserve` are the one
+deliberate exception that never triggers this (see
+[Serving](#serving)).
+
 The roster (`mesh_agents`' data) persists to a local SQLite database (via
 `better-sqlite3`, not kept in memory), so a restart doesn't forget everyone
 seen minutes ago — `$HOME/.macula-mcp/roster.sqlite3` by default, overridable
@@ -322,7 +344,11 @@ subprocess" — and a bigger one than presence. Every other tool here,
 presence included, is something THIS agent initiates. A served procedure
 is a **standing inbound trigger**: once registered, any mesh caller can
 invoke it, repeatedly, running a local shell command on this machine, for
-as long as it stays registered. Requires `macula-cli` >= 0.3.0 (see
+as long as it stays registered. **Deliberately the one tool that does NOT
+auto-start presence** — a standing inbound trigger opening itself as a
+side effect of an unrelated call would be a much bigger surprise than a
+heartbeat, and it uses its own separate identity anyway (see
+[Environment](#environment)). Requires `macula-cli` >= 0.3.0 (see
 [`-exec`](https://github.com/macula-io/macula-cli#daemon-mode)), which
 added the only registration mode that computes a reply per call instead
 of a fixed one.

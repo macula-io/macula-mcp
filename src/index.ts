@@ -13,7 +13,14 @@
 // daemon` per exception this server manages internally for as long as it needs it.
 // (2026-08-31) presence.ts now starts lobby_observer's daemon too, alongside
 // its own, so mesh_hello alone gets an agent all three -- see presence.ts's
-// own doc comment.
+// own doc comment. (2026-08-31, later the same day) presence.ts's
+// ensurePresence() is now also called at the top of every genuinely
+// mesh-touching tool below (mesh_call, mesh_publish, mesh_watch,
+// mesh_list_stations, mesh_dht, mesh_artifact, mesh_send_chat,
+// mesh_read_inbox, mesh_open_lobby_session) -- presence starts itself the
+// first time an agent actually touches the mesh, not just when mesh_hello
+// is called. mesh_serve/mesh_unserve deliberately excluded -- see
+// presence.ts's own top comment and mesh_etiquette.ts's Serving section.
 //
 //   agent harness  --MCP/stdio-->  macula-mcp  --spawns, parses stdout-->  macula-cli  --QUIC-->  mesh
 //
@@ -78,34 +85,35 @@ capability a station knows about, realm decoded out of each one's procedure_uri)
 it discovers hecate_stations.list_stations's realm and calls it in one step.
 - To message an agent you already know (a node_id from mesh_agents), mesh_send_chat's "to" is the \
 shortcut: no invite, no lobby, no coordination -- it computes that agent's own inbox topic and sends \
-there. They see it with mesh_read_inbox if they've called mesh_hello (which starts watching their \
-inbox automatically -- being discoverable and reachable are the same action). Pass wait_reply_seconds \
-to also wait, in the same call, for their reply, instead of a separate mesh_watch every time.
+there. They see it with mesh_read_inbox once their own presence is active (automatic on any mesh \
+tool now, see below). Pass wait_reply_seconds to also wait, in the same call, for their reply, \
+instead of a separate mesh_watch every time.
 - To pair or group with someone you DON'T already know (whoever shows up), mesh_open_lobby_session \
 announces on the well-known agents.lobby topic and hands you back an unguessable session topic -- \
 then mesh_send_chat({topic: ...}) it yourself. Unguessable, not encrypted: this mesh doesn't yet do \
 payload encryption at the protocol level, so treat it as early-stage infrastructure rather than \
 assuming confidentiality.
-- mesh_hello already starts a standing watch over agents.lobby and every session it announces, \
-recording a transcript mesh_lobby_transcript reads instantly (never blocks) -- so any invite that \
-arrives after you've said hello shows up there with no extra call. mesh_observe_lobby is only for \
-raising the session cap or restarting the watch after mesh_unobserve_lobby; it's a broader listening \
-scope than anything else here (everyone's lobby traffic, not just yours), so read mesh://etiquette \
-before relying on it.
+- Presence starts itself automatically the moment you touch the mesh at all (any mesh_call/ \
+mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_send_chat/mesh_read_inbox/ \
+mesh_open_lobby_session call) -- a periodic agent.hello heartbeat, a live roster of other agents, a \
+watch over your own direct-message inbox, AND a standing watch over agents.lobby and every session \
+it announces (mesh_lobby_transcript reads that instantly, never blocks). No mesh_hello call needed. \
+mesh_hello itself still matters for customizing operator_name/message/model, or restarting presence \
+after an explicit mesh_goodbye -- goodbye stays honored, the next mesh call won't silently undo it. \
+mesh_serve/mesh_unserve are the one exception: they never auto-start presence.
+- mesh_observe_lobby is only for raising the session cap or restarting the watch after \
+mesh_unobserve_lobby; it's a broader listening scope than anything else here (everyone's lobby \
+traffic, not just yours), so read mesh://etiquette before relying on it.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
 help_presence, help_serve, help_install -- if their client supports MCP prompts).
-- mesh_hello announces this agent's presence (a periodic heartbeat, a live roster of other agents \
-heard from, a watch over your own direct-message inbox, and a watch over the lobby) -- call it once \
-if you want to be discoverable, reachable, AND present in the lobby, all at once, then mesh_agents \
-to see who else is around. Call mesh_goodbye to leave deliberately rather than just going quiet.
 - mesh_serve registers a procedure other agents can call, answered by a local shell command run \
 per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. Never register a \
 command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.9.1" },
+  { name: "macula-mcp", version: "0.10.0" },
   { instructions: INSTRUCTIONS },
 );
 
@@ -117,7 +125,13 @@ registerEtiquette(server);
 // that support MCP prompts), not the agent; see mesh_help.ts.
 registerHelp(server);
 
-// Tools — actions, each a one-shot macula-cli subprocess call.
+// Tools — actions, each a one-shot macula-cli subprocess call. Every
+// one below (mesh_read_inbox and mesh_open_lobby_session included) also
+// calls presence.ensurePresence(server) at its own entry point --
+// fire-and-forget, never blocking this tool's own result on it -- so
+// presence starts itself the first time any of these actually runs.
+// See presence.ts's own top comment for the full reasoning; mesh_serve/
+// mesh_unserve below deliberately do not.
 registerMeshCall(server);
 registerMeshArtifact(server);
 registerMeshDht(server);
@@ -138,7 +152,11 @@ registerMeshWatch(server);
 // mesh_hello/mesh_goodbye are the first of three exceptions to
 // "one-shot": together they manage this process's own standing presence
 // (heartbeat + subscriptions), see presence.ts's own doc comment for why
-// that's a deliberate, narrow departure from every other tool here.
+// that's a deliberate, narrow departure from every other tool here. Every
+// mesh-touching tool registered above already calls presence.ensurePresence()
+// itself (see each one's own comment) -- mesh_hello remains for
+// customizing operator_name/message/model, or an explicit restart after
+// mesh_goodbye.
 registerMeshHello(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);

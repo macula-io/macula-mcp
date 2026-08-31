@@ -7,6 +7,53 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-31
+
+### Changed
+- **Presence no longer requires `mesh_hello`.** Every genuinely
+  mesh-touching tool (`mesh_call`, `mesh_publish`, `mesh_watch`,
+  `mesh_list_stations`, `mesh_find_record`/`mesh_find_records`/
+  `mesh_find_records_by_type`, `mesh_put`/`mesh_get`, `mesh_send_chat`,
+  `mesh_read_inbox`, `mesh_open_lobby_session`) now calls
+  `presence.ensurePresence()` at its own entry point -- fire-and-forget,
+  never blocking that tool's own result on it -- so presence (roster
+  heartbeat, direct-message inbox watch, and lobby watch, per 0.9.x)
+  starts itself the first time an agent actually touches the mesh, with
+  `operator_name`/`message`/`model` taken from `MACULA_MCP_OPERATOR_NAME`/
+  `HELLO_MESSAGE`/`MODEL` if set.
+
+  Prompted by a fresh session correctly reporting it hadn't said hello
+  because nothing had told it to yet, followed by: "make mesh_hello fire
+  itself the first time an agent touches the mesh... frictionless and
+  occasionally automatic." A deliberate, named tradeoff, not an
+  oversight: any fresh session that so much as lists stations now
+  broadcasts `agent.hello` onto `macula.io`'s public demo fleet,
+  unprompted, roughly every 60s until it exits or says goodbye.
+
+  `mesh_hello` remains for customizing those three fields explicitly,
+  reading the banner/`inbox_topic`/`lobby_topic` back, or restarting
+  presence after `mesh_goodbye` -- a new `explicitlyLeft` flag means an
+  explicit goodbye stays honored: the very next mesh tool call does NOT
+  silently undo it, only another `mesh_hello` does.
+  `mesh_serve`/`mesh_unserve` are the one deliberate exception that
+  never triggers this, since a standing inbound trigger opening itself
+  as a side effect of an unrelated call would be a much bigger surprise
+  than a heartbeat, and it uses its own separate identity regardless.
+
+  A new `starting` guard in `presence.ts`'s `start()` closes a real race
+  this introduces: with many more call sites now able to trigger a fresh
+  presence start around the same moment (nothing in MCP guarantees tool
+  calls are strictly serialized), concurrent callers previously could
+  each spawn their own daemon and silently leak all but the last one as
+  an orphaned process. Verified live: 8 concurrent `ensurePresence()`
+  calls fired in the same tick produce exactly one daemon, not eight.
+
+  Verified live end-to-end: a tool call that isn't `mesh_hello` starts
+  presence in the background (confirmed active ~500ms later); an
+  explicit `mesh_goodbye` followed immediately by another mesh tool call
+  does NOT silently restart presence (confirmed inactive 4s later); an
+  explicit `mesh_hello` after goodbye still works.
+
 ## [0.9.1] - 2026-08-31
 
 ### Changed
@@ -374,7 +421,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/macula-io/macula-mcp/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/macula-io/macula-mcp/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/macula-io/macula-mcp/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/macula-io/macula-mcp/compare/v0.7.0...v0.8.0

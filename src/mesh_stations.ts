@@ -40,6 +40,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { call, defaultStation, findRecordsByType } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { ensurePresence } from "./presence.js";
 
 const LIST_STATIONS_PROCEDURE = "hecate_stations.list_stations";
 const TEXT_FIELDS = ["city", "continent", "country", "hostname", "kind", "version"];
@@ -94,6 +95,7 @@ export function registerMeshListStations(server: McpServer): void {
         ),
     },
     async ({ near, continent, country, city, host }) => {
+      ensurePresence(server);
       try {
         const discovered = await findRecordsByType({ host, recordType: "procedure_advertisement" });
         const match = discovered.records.find(

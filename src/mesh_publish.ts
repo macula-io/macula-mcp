@@ -12,6 +12,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { defaultStation, publish } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { ensurePresence } from "./presence.js";
 
 export function registerMeshPublish(server: McpServer): void {
   server.tool(
@@ -37,6 +38,7 @@ export function registerMeshPublish(server: McpServer): void {
         ),
     },
     async ({ topic, fact, host, realm }) => {
+      ensurePresence(server);
       try {
         const res = await publish({ host, topic, fact, realm });
         return jsonContent({ topic: res.topic, seq: res.seq, duration_ms: res.duration_ms });

@@ -24,6 +24,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { artifactGet, artifactPut, defaultStation } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { ensurePresence } from "./presence.js";
 
 export function registerMeshArtifact(server: McpServer): void {
   server.tool(
@@ -38,6 +39,7 @@ export function registerMeshArtifact(server: McpServer): void {
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
     async ({ content, host }) => {
+      ensurePresence(server);
       try {
         const res = await artifactPut({ host, contentBase64: content });
         return jsonContent({ mcid_hex: res.mcid_hex, size_bytes: res.size_bytes });
@@ -63,6 +65,7 @@ export function registerMeshArtifact(server: McpServer): void {
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
     async ({ mcid_hex, host }) => {
+      ensurePresence(server);
       try {
         const res = await artifactGet({ host, mcidHex: mcid_hex });
         return jsonContent({ content: res.content, size_bytes: res.size_bytes });

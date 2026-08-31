@@ -28,6 +28,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { defaultStation, findRecord, findRecords, findRecordsByType } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { ensurePresence } from "./presence.js";
 
 const KEY_DESCRIPTION =
   "32-byte DHT storage key as hex (64 chars) -- e.g. from ProcedureKey(procedure_uri) " +
@@ -47,6 +48,7 @@ export function registerMeshDht(server: McpServer): void {
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
     async ({ key_hex, host }) => {
+      ensurePresence(server);
       try {
         const res = await findRecord({ host, keyHex: key_hex });
         return jsonContent({ host: res.host, found: res.found, record: res.record });
@@ -69,6 +71,7 @@ export function registerMeshDht(server: McpServer): void {
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
     async ({ key_hex, host }) => {
+      ensurePresence(server);
       try {
         const res = await findRecords({ host, keyHex: key_hex });
         return jsonContent({ host: res.host, count: res.count, records: res.records });
@@ -98,6 +101,7 @@ export function registerMeshDht(server: McpServer): void {
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
     async ({ record_type, host }) => {
+      ensurePresence(server);
       try {
         const res = await findRecordsByType({ host, recordType: record_type });
         return jsonContent({ host: res.host, type: res.type, count: res.count, records: res.records });

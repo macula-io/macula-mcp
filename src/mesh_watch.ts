@@ -31,7 +31,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { defaultStation, watch } from "./macula_cli.js";
-import { HELLO_TOPIC, GOODBYE_TOPIC } from "./presence.js";
+import { HELLO_TOPIC, GOODBYE_TOPIC, ensurePresence } from "./presence.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 
 const MAX_DURATION_SECONDS = 3600;
@@ -74,6 +74,7 @@ export function registerMeshWatch(server: McpServer): void {
         ),
     },
     async ({ topic, duration_seconds, count, host, realm }) => {
+      ensurePresence(server);
       try {
         const events = await watch({ host, topic, durationSeconds: duration_seconds, count, realm });
         return jsonContent({ topic, event_count: events.length, events });
