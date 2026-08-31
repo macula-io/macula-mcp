@@ -499,11 +499,13 @@ export const call = (args: {
   callArgs?: Record<string, unknown>;
   timeoutMs?: number;
   realm?: string;
+  direct?: boolean;
 }): Promise<CallResult> => {
   const flags: string[] = ["--identity", defaultIdentityPath()];
   if (args.timeoutMs) flags.push("--timeout", `${Math.max(1, Math.round(args.timeoutMs / 1000))}s`);
   if (args.callArgs !== undefined) flags.push("--args", JSON.stringify(args.callArgs));
   if (args.realm) flags.push("--realm", args.realm);
+  if (args.direct) flags.push("--direct");
   return run<CallResult>(argv(["call"], flags, [args.host ?? defaultStation(), args.procedure]));
 };
 

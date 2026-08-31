@@ -50,10 +50,24 @@ export function registerMeshCall(server: McpServer): void {
             "the right one here -- unknown_next_peer with the default realm doesn't necessarily mean the " +
             "procedure doesn't exist.",
         ),
+      direct: z
+        .boolean()
+        .optional()
+        .describe(
+          "Resolve the procedure's DHT direct-dial advertisement and call its serving station directly, " +
+            "in one hop, instead of routing through <host>'s own advertise-gossip routes. host is then used " +
+            "only to query the DHT, not to carry the call. Ordinary (non-direct) calls depend on inter-" +
+            "station gossip having already propagated a route from host to the actual server -- on a large " +
+            "or recently-changed mesh that isn't always true yet, and the call can fail (often as " +
+            "temporary_relay_failure) even though the target is live and reachable. direct-dial sidesteps " +
+            "that gap, at the cost of failing outright if the provider only advertised the plain way " +
+            "(\"procedure has no direct-dial advertisement\"). Prefer this whenever a plain call fails " +
+            "against a target you otherwise know is up.",
+        ),
     },
-    async ({ procedure, args, timeout_ms, host, realm }) => {
+    async ({ procedure, args, timeout_ms, host, realm, direct }) => {
       try {
-        const res = await call({ host, procedure, callArgs: args, timeoutMs: timeout_ms, realm });
+        const res = await call({ host, procedure, callArgs: args, timeoutMs: timeout_ms, realm, direct });
         return jsonContent({ result: res.payload, responded_by: res.responded_by, duration_ms: res.duration_ms });
       } catch (e) {
         return errorContent(describeCliError("mesh_call failed", e));

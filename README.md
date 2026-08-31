@@ -66,7 +66,7 @@ QUIC/DHT wire protocol, not a mock.
 
 | Tool           | Primitive       | What it does                                                                                                                                                                                                                                                                      |
 | -------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mesh_call`    | RPC             | Invoke a capability a peer advertises (build, test, search, deploy) over the mesh. Returns the result + `duration_ms`.                                                                                                                                                            |
+| `mesh_call`    | RPC             | Invoke a capability a peer advertises (build, test, search, deploy) over the mesh. Returns the result + `duration_ms`. Optional `direct` resolves the target via the DHT and dials its station in one hop instead of routing through `host`'s advertise-gossip — see [Direct-dial](#direct-dial). |
 | `mesh_put`     | Content Sharing | Publish a content-addressed artifact; returns its MCID hex.                                                                                                                                                                                                                       |
 | `mesh_get`     | Content Sharing | Fetch a content-addressed artifact by MCID hex.                                                                                                                                                                                                                                   |
 | `mesh_find_record` / `mesh_find_records` / `mesh_find_records_by_type` | DHT | Read the mesh's signed DHT record store directly. `mesh_find_records_by_type` with `record_type: "procedure_advertisement"` is the discovery entry point — every capability a station knows about, each one's realm decoded out of its `procedure_uri`. Always the DHT's own all-zero realm; none of the three take a `realm` parameter. See [Realms](#realms). |
@@ -87,7 +87,29 @@ QUIC/DHT wire protocol, not a mock.
 Every tool takes an optional `host` (`"host[:port]"`) to pick which station
 to connect through; all default to `MACULA_MESH_STATION` (see
 [Environment](#environment)). `mesh_call`/`mesh_watch`/`mesh_publish` also
-take an optional `realm` (see [Realms](#realms) below).
+take an optional `realm` (see [Realms](#realms) below). `mesh_call` also
+takes an optional `direct` (see [Direct-dial](#direct-dial) below).
+
+### Direct-dial
+
+Ordinary `mesh_call` depends on inter-station advertise-gossip having
+already propagated a route between `host` and the station actually serving
+the procedure — on a large mesh, or one that changed recently (a service
+just deployed, an advertisement just republished), that isn't always true
+yet, and the call can fail — often as `temporary_relay_failure` — even
+though the target is live and reachable. Set `direct: true` to sidestep
+this: `host` is then used only to query the DHT for the procedure's
+*direct-dial* advertisement (published separately by a provider via
+`AdvertiseDirect`/`advertiseDirect`, not every provider does), and the
+actual call dials the resolved serving station in a separate, one-hop
+connection — no dependency on gossip having reached `host` at all.
+
+Trade-off: it fails outright (`"procedure has no direct-dial
+advertisement"`) if the provider only advertised the plain way, so it
+isn't strictly better in every case — reach for it when a plain call fails
+against a target you otherwise know is up (a fresh DHT `procedure_advertisement`
+record, per [`mesh_find_records_by_type`](#tools)), not as the default for
+every call.
 
 ### Realms
 

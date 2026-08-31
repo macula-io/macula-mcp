@@ -7,6 +7,22 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-31
+
+### Added
+- `mesh_call`: optional `direct` parameter resolves the target procedure's
+  DHT direct-dial advertisement and calls its serving station in one hop,
+  bypassing `host`'s own advertise-gossip routes -- threads `macula-cli
+  call`'s existing `-direct` flag through, which was already implemented
+  and tested end-to-end (macula-go's `directdial` package, itself mirroring
+  `macula-io/macula`'s `macula_direct_dial` module) but never exposed here.
+  Ordinary `mesh_call` depends on gossip having already propagated a route
+  from `host` to wherever the procedure actually lives; on a large or
+  recently-changed mesh that isn't always true yet, and the call can fail
+  as `temporary_relay_failure` even though the target is live -- found
+  chasing exactly that symptom against a two-day-old service on the demo
+  fleet. See the new [Direct-dial](README.md#direct-dial) section.
+
 ## [0.7.0] - 2026-08-31
 
 ### Added
@@ -315,7 +331,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/macula-io/macula-mcp/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/macula-io/macula-mcp/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/macula-io/macula-mcp/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/macula-io/macula-mcp/compare/v0.5.0...v0.5.1
