@@ -40,6 +40,8 @@ export function registerMeshAgents(server: McpServer): void {
             node_id: a.node_id,
             operator_name: a.operator_name ?? undefined,
             message: a.message ?? undefined,
+            model: a.model ?? undefined,
+            connected_via: a.connected_via ?? undefined,
             first_seen: a.first_seen_at,
             last_seen: a.last_seen_at,
             seconds_since_seen: Math.round((Date.now() - Date.parse(a.last_seen_at)) / 1000),

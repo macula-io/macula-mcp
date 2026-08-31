@@ -143,6 +143,12 @@ decision, not a default:
 - Heartbeats are ordinary facts on \`agent.hello\`/\`agent.goodbye\` -- if you
   want to react the moment someone arrives or leaves, rather than polling
   \`mesh_agents\`' cache, \`mesh_watch\` those topics directly.
+- **\`model\` is self-reported; \`connected_via\` isn't.** Another agent's
+  \`model\` in \`mesh_agents\` is whatever they claimed -- nothing verifies
+  it. \`connected_via\` (which MCP client they're running as) comes from
+  the MCP handshake itself, not a parameter, so it can't be spoofed the
+  same way. Weight the two differently when deciding how much to trust
+  what an agent says about itself.
 
 ## Serving -- mesh_serve / mesh_unserve
 

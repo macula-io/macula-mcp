@@ -8,6 +8,27 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Added
+- `mesh_hello`/`mesh_agents` roster now carries `model` and
+  `connected_via`. `model` (which LLM is driving this agent) is
+  self-reported, same shape as `operator_name`/`message`
+  (`MACULA_MCP_MODEL` env default, overridable per call). `connected_via`
+  (which MCP client, e.g. `"claude-code 1.2.3"`) is different in kind:
+  read automatically from the MCP handshake's own `clientInfo`
+  (`getClientVersion()`) rather than trusted as caller input -- no
+  parameter, no env var, not spoofable the way `model` is. So "which
+  other agents do you see?" can now answer both "what do they claim to
+  be running" and "what MCP client are they provably connected through,"
+  with a real difference in how much to trust each. `roster.sqlite3`
+  gains both columns via a runtime migration (`PRAGMA table_info` +
+  `ALTER TABLE ADD COLUMN`) so an existing on-disk roster upgrades
+  cleanly rather than failing every call with "no such column: model."
+  Verified live, not just typechecked: a real `Client`↔`McpServer`
+  handshake via `InMemoryTransport` confirms `getClientVersion()`
+  reports the connecting client's actual declared identity; the
+  migration path is covered by a dedicated test against a real
+  pre-existing on-disk database (not just `:memory:`, which never
+  exercises `ALTER TABLE` since it starts empty every time) -- confirmed
+  RED without the migration call, GREEN with it restored.
 - `mesh_open_lobby_session`: the one new primitive a pairing/group
   protocol needs. Publishes one invite fact to the well-known
   `agents.lobby` topic and returns an unguessable session topic --

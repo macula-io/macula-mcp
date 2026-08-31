@@ -1,3 +1,7 @@
+import Database from "better-sqlite3";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeRoster, listAgents, pruneStale, removeAgent, upsertAgent } from "./roster.js";
 
@@ -41,11 +45,20 @@ describe("upsertAgent / listAgents", () => {
     });
   });
 
-  it("treats missing operator_name/message as null, not undefined-crashes", () => {
+  it("treats missing operator_name/message/model/connected_via as null, not undefined-crashes", () => {
     upsertAgent({ node_id: "a1", at: "2026-08-30T00:00:00.000Z" });
     const { agents } = listAgents(1, 10);
     expect(agents[0]?.operator_name).toBeNull();
     expect(agents[0]?.message).toBeNull();
+    expect(agents[0]?.model).toBeNull();
+    expect(agents[0]?.connected_via).toBeNull();
+  });
+
+  it("records model and connected_via, and refreshes them on a repeat sighting", () => {
+    upsertAgent({ node_id: "a1", model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", at: "2026-08-30T00:00:00.000Z" });
+    upsertAgent({ node_id: "a1", model: "claude-opus-5", connected_via: "claude-code 1.2.4", at: "2026-08-30T00:05:00.000Z" });
+    const { agents } = listAgents(1, 10);
+    expect(agents[0]).toMatchObject({ model: "claude-opus-5", connected_via: "claude-code 1.2.4" });
   });
 
   it("sorts most-recently-seen first", () => {
@@ -99,5 +112,50 @@ describe("pruneStale", () => {
   it("removes nothing when everything is fresh", () => {
     upsertAgent({ node_id: "fresh", at: new Date().toISOString() });
     expect(pruneStale(600)).toBe(0);
+  });
+});
+
+describe("schema migration", () => {
+  // :memory: (used by every other test in this file) starts empty on
+  // every open() -- it never exercises the ALTER TABLE path against a
+  // roster.sqlite3 that already has rows under the pre-model/
+  // connected_via schema. A real temp file, with the OLD table shape
+  // created by hand before roster.ts ever opens it, is the only way to
+  // actually prove an existing on-disk roster upgrades cleanly instead
+  // of every call failing with "no such column: model".
+  it("upgrades an existing pre-model/connected_via database without losing data or crashing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "macula-mcp-roster-test-"));
+    const dbFile = join(dir, "roster.sqlite3");
+    try {
+      const old = new Database(dbFile);
+      old.exec(`
+        CREATE TABLE agents (
+          node_id TEXT PRIMARY KEY,
+          operator_name TEXT,
+          message TEXT,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL
+        )
+      `);
+      old
+        .prepare("INSERT INTO agents (node_id, operator_name, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)")
+        .run("pre-existing", "Old Agent", "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z");
+      old.close();
+
+      process.env.MACULA_MCP_ROSTER_DB = dbFile;
+      closeRoster(); // drop the :memory: handle from beforeEach so the next open() reads dbFile
+
+      const before = listAgents(1, 10);
+      expect(before.total).toBe(1);
+      expect(before.agents[0]).toMatchObject({ node_id: "pre-existing", operator_name: "Old Agent", model: null, connected_via: null });
+
+      upsertAgent({ node_id: "new", model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", at: "2026-08-30T00:00:00.000Z" });
+      const after = listAgents(1, 10);
+      expect(after.total).toBe(2);
+      expect(after.agents.find((a) => a.node_id === "new")).toMatchObject({ model: "claude-sonnet-5", connected_via: "claude-code 1.2.3" });
+    } finally {
+      closeRoster();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

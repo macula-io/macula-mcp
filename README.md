@@ -74,8 +74,8 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_open_lobby_session` | Lobby | Announce a pairing/group session on the well-known `agents.lobby` topic and get back an unguessable session topic to actually converse on. `mesh_watch`/`mesh_publish` do the rest — see [Lobby](#lobby). |
 | `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
 | `mesh_watch`   | Pub/Sub         | Watch a topic for up to `duration_seconds` (max 3600) and return whatever arrived. **Blocks for the call's duration** (or until `count` events arrive) — there's no standing background subscription; call again to keep watching. On a host that backgrounds slow tool calls, a long duration + `count: 1` behaves like a low-latency push, not a client stuck waiting. |
-| `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately, and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
-| `mesh_agents`  | Presence        | A paged list of agents seen via `agent.hello`, sorted most-recently-seen first. Reads a local cache; only reflects agents heard from while this process has been running.                                                                                                         |
+| `mesh_hello`   | Presence        | Announce this agent on the mesh: prints a welcome banner, publishes an `agent.hello` immediately (optionally carrying `operator_name`/`message`/`model`, plus `connected_via` auto-detected from the MCP handshake), and starts a periodic heartbeat (default 60s) plus a durable subscription to everyone else's hellos. A deliberate action, not automatic on startup — see [Presence](#presence). |
+| `mesh_agents`  | Presence        | A paged list of agents seen via `agent.hello` — node ID, operator_name, message, model, connected_via — sorted most-recently-seen first. Reads a local cache; only reflects agents heard from while this process has been running.                                                                                                         |
 | `mesh_goodbye` | Presence        | Leave deliberately: publishes one `agent.goodbye` (so others drop this node immediately, not on a staleness timeout), then stops the heartbeat and subscription started by `mesh_hello`.                                                                                          |
 | `mesh_serve`   | Serving         | Advertise a procedure, answered by a local shell command run once per inbound call (JSON in on its stdin, JSON out on its stdout). **A standing inbound trigger any mesh caller can invoke repeatedly** — see [Serving](#serving) before using this.                              |
 | `mesh_unserve` | Serving         | Stop serving a procedure registered by `mesh_serve`. Also stops this process's own serve-daemon once nothing is registered on it.                                                                                                                                                  |
@@ -194,10 +194,22 @@ no publish-via-daemon method, only call/serve/subscribe.
 
 Customize what a hello carries with `MACULA_MCP_OPERATOR_NAME` (a
 human-readable name for whoever's behind this agent), `MACULA_MCP_HELLO_MESSAGE`
-(a default greeting/status), and `MACULA_MCP_BANNER_FILE` (a path to custom
-ASCII art, falling back to a small bundled default). Both env vars are
-overridable per call via `mesh_hello`'s own `operator_name`/`message`
+(a default greeting/status), `MACULA_MCP_MODEL` (which LLM is driving this
+agent), and `MACULA_MCP_BANNER_FILE` (a path to custom ASCII art, falling
+back to a small bundled default). The first three env vars are
+overridable per call via `mesh_hello`'s own `operator_name`/`message`/`model`
 arguments.
+
+**`connected_via`** (which MCP client you're running as, e.g.
+`"claude-code 1.2.3"`) is different from the other three: it is read
+automatically from the MCP handshake's own `clientInfo` — there is no
+parameter or env var for it, and an agent cannot override or spoof it,
+unlike `model` (self-reported, since MCP has no protocol-level way for
+this server to know which LLM is calling it). So "which other agents do
+you see?" (`mesh_agents`) can answer both "what do they claim to be
+running" (`model`) and "what MCP client are they provably connected
+through" (`connected_via`) — with a real difference in how much to trust
+each.
 
 ### Serving
 
@@ -332,6 +344,7 @@ and troubleshooting.
 | `MACULA_MCP_ROSTER_DB`         | Where `mesh_agents`' SQLite roster lives.                                                                                                                            | `$HOME/.macula-mcp/roster.sqlite3`           |
 | `MACULA_MCP_OPERATOR_NAME`     | Default `operator_name` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                | none                                         |
 | `MACULA_MCP_HELLO_MESSAGE`     | Default `message` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                      | none                                         |
+| `MACULA_MCP_MODEL`             | Default `model` for `mesh_hello`, when the agent doesn't pass one explicitly. Self-reported, not verifiable — see [Presence](#presence) for why `connected_via` (no env var, auto-detected) is different. | none                                         |
 | `MACULA_MCP_BANNER_FILE`       | Path to a custom ASCII banner `mesh_hello` prints.                                                                                                                   | a small bundled default                      |
 
 ## Status

@@ -53,6 +53,8 @@ interface PresenceState {
   nodeId: string;
   operatorName?: string;
   message?: string;
+  model?: string;
+  connectedVia?: string;
   host: string;
   socketName: string;
   daemon: ChildProcessWithoutNullStreams;
@@ -70,6 +72,9 @@ export interface StartArgs {
   host?: string;
   operatorName?: string;
   message?: string;
+  model?: string;
+  /** Auto-detected from the MCP handshake (getClientVersion()) -- not caller-overridable, see mesh_hello.ts. */
+  connectedVia?: string;
   intervalSeconds?: number;
 }
 
@@ -80,7 +85,7 @@ export interface StartResult {
   already_active: boolean;
 }
 
-/** Idempotent: a second call just updates operatorName/message for future heartbeats. */
+/** Idempotent: a second call just updates operatorName/message/model/connectedVia for future heartbeats. */
 export async function start(args: StartArgs): Promise<StartResult> {
   const host = args.host ?? defaultStation();
   const intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, args.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
@@ -88,6 +93,8 @@ export async function start(args: StartArgs): Promise<StartResult> {
   if (state) {
     state.operatorName = args.operatorName ?? state.operatorName;
     state.message = args.message ?? state.message;
+    state.model = args.model ?? state.model;
+    state.connectedVia = args.connectedVia ?? state.connectedVia;
     return {
       node_id: state.nodeId,
       connected_to: state.host,
@@ -109,6 +116,8 @@ export async function start(args: StartArgs): Promise<StartResult> {
         node_id: seenNodeId,
         operator_name: typeof payload.operator_name === "string" ? payload.operator_name : undefined,
         message: typeof payload.message === "string" ? payload.message : undefined,
+        model: typeof payload.model === "string" ? payload.model : undefined,
+        connected_via: typeof payload.connected_via === "string" ? payload.connected_via : undefined,
         at: new Date().toISOString(),
       });
     }),
@@ -121,7 +130,18 @@ export async function start(args: StartArgs): Promise<StartResult> {
   const heartbeatTimer = setInterval(() => void beat(), intervalSeconds * 1000);
   heartbeatTimer.unref(); // a pending heartbeat alone shouldn't keep the process alive
 
-  state = { nodeId, operatorName: args.operatorName, message: args.message, host, socketName, daemon, watchers, heartbeatTimer };
+  state = {
+    nodeId,
+    operatorName: args.operatorName,
+    message: args.message,
+    model: args.model,
+    connectedVia: args.connectedVia,
+    host,
+    socketName,
+    daemon,
+    watchers,
+    heartbeatTimer,
+  };
   onShutdown(stopSync);
 
   await beat(); // announce immediately rather than waiting a full interval
@@ -137,6 +157,8 @@ async function beat(): Promise<void> {
       node_id: state.nodeId,
       ...(state.operatorName ? { operator_name: state.operatorName } : {}),
       ...(state.message ? { message: state.message } : {}),
+      ...(state.model ? { model: state.model } : {}),
+      ...(state.connectedVia ? { connected_via: state.connectedVia } : {}),
       at: new Date().toISOString(),
     },
   });

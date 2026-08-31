@@ -52,32 +52,60 @@ function open(): Database.Database {
       last_seen_at TEXT NOT NULL
     )
   `);
+  migrateAddColumns(db, ["model", "connected_via"]);
   return db;
+}
+
+// `CREATE TABLE IF NOT EXISTS` above is a no-op against a roster.sqlite3
+// that already existed before a given column did -- it does not
+// retroactively add columns, so an upgrade without this would fail every
+// upsertAgent/listAgents call on a pre-existing roster with e.g.
+// "no such column: model". Checked via PRAGMA table_info rather than a
+// version table this single-table cache has never needed. All added
+// columns are TEXT and nullable, so this never needs a default/backfill.
+function migrateAddColumns(d: Database.Database, names: string[]): void {
+  const existing = new Set((d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name));
+  for (const name of names) {
+    if (!existing.has(name)) d.exec(`ALTER TABLE agents ADD COLUMN ${name} TEXT`);
+  }
 }
 
 export interface AgentRecord {
   node_id: string;
   operator_name: string | null;
   message: string | null;
+  model: string | null;
+  connected_via: string | null;
   first_seen_at: string;
   last_seen_at: string;
 }
 
 /** Records (or refreshes) one agent.hello sighting. Idempotent per node_id. */
-export function upsertAgent(rec: { node_id: string; operator_name?: string; message?: string; at: string }): void {
+export function upsertAgent(rec: {
+  node_id: string;
+  operator_name?: string;
+  message?: string;
+  model?: string;
+  connected_via?: string;
+  at: string;
+}): void {
   open()
     .prepare(
-      `INSERT INTO agents (node_id, operator_name, message, first_seen_at, last_seen_at)
-       VALUES (@node_id, @operator_name, @message, @at, @at)
+      `INSERT INTO agents (node_id, operator_name, message, model, connected_via, first_seen_at, last_seen_at)
+       VALUES (@node_id, @operator_name, @message, @model, @connected_via, @at, @at)
        ON CONFLICT(node_id) DO UPDATE SET
          operator_name = excluded.operator_name,
          message = excluded.message,
+         model = excluded.model,
+         connected_via = excluded.connected_via,
          last_seen_at = excluded.last_seen_at`,
     )
     .run({
       node_id: rec.node_id,
       operator_name: rec.operator_name ?? null,
       message: rec.message ?? null,
+      model: rec.model ?? null,
+      connected_via: rec.connected_via ?? null,
       at: rec.at,
     });
 }
