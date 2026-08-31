@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-31
+
 ### Added
 - `mesh_send_chat`: publishes `{sender, text}` to a topic with `sender`
   filled in automatically from this process's own identity, so an
@@ -137,6 +139,12 @@ fires on a `v*` tag push, not on every commit to `main`).
   CHANGELOG/README.
 
 ### Changed
+- Minimum required `macula-cli` raised from 0.3.0 to 0.4.0: `mesh_find_record`/
+  `mesh_find_records`/`mesh_find_records_by_type` (and, transitively,
+  `mesh_list_stations`) depend on `dht find-record`/`find-records`/
+  `find-records-by-type`, new in `macula-cli` 0.4.0 -- an older binary has
+  no `dht` subcommand at all. `macula-mcp-doctor`'s own version check will
+  now flag anything older.
 - Toned down the lobby/observing docs (tool descriptions, README,
   `mesh://etiquette`, server `instructions`): dropped "a SURVEILLANCE
   CAPABILITY, not a euphemism" and "nothing on this mesh was ever
@@ -307,7 +315,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/macula-io/macula-mcp/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/macula-io/macula-mcp/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/macula-io/macula-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/macula-io/macula-mcp/compare/v0.4.1...v0.5.0

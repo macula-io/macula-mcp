@@ -400,8 +400,15 @@ export function watchTopicOnDaemon(
  * -exec`, new in that release -- v0.2.x's `serve -daemon` can only
  * answer with a fixed `-reply`/`-echo`, computed once at registration
  * time, not a real per-call handler.
+ *
+ * Bumped to 0.4.0 for mesh_dht.ts/mesh_stations.ts: findRecord/
+ * findRecords/findRecordsByType depend on `dht find-record`/
+ * `find-records`/`find-records-by-type`, new in that release -- v0.3.x
+ * has no `dht` subcommand at all, so mesh_list_stations (which uses
+ * findRecordsByType to discover hecate_stations.list_stations's realm)
+ * has nothing to shell out to on an older binary.
  */
-export const MIN_MACULA_CLI_VERSION = "0.3.0";
+export const MIN_MACULA_CLI_VERSION = "0.4.0";
 
 export interface CliVersionCheck {
   ok: boolean;

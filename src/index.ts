@@ -94,7 +94,7 @@ per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. N
 command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.6.0" },
+  { name: "macula-mcp", version: "0.7.0" },
   { instructions: INSTRUCTIONS },
 );
 
