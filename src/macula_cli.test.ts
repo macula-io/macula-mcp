@@ -1,10 +1,14 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  LARGE_PAYLOAD_THRESHOLD_BYTES,
   MaculaCliError,
   defaultIdentityPath,
   extractSemver,
   isOlder,
   parseWatchOutput,
+  resolveCallArgsFlags,
   serveIdentityPath,
   watchIdentityPath,
 } from "./macula_cli.js";
@@ -120,5 +124,49 @@ describe("identity paths", () => {
   it("MACULA_MCP_SERVE_IDENTITY pins the serve identity to a fixed path", () => {
     process.env.MACULA_MCP_SERVE_IDENTITY = "/tmp/pinned-serve-identity.seed";
     expect(serveIdentityPath()).toBe("/tmp/pinned-serve-identity.seed");
+  });
+});
+
+describe("resolveCallArgsFlags", () => {
+  // Guards PLAN_LARGE_PAYLOAD_CALLS.md: hecate-rag.upload_knowledge's
+  // payload embeds a whole document's raw bytes, which can exceed a
+  // safe command-line length -- this is the transparent fallback that
+  // keeps call() working without the caller ever knowing the
+  // difference.
+
+  it("passes undefined callArgs through as no flags at all", async () => {
+    const { flags, cleanup } = await resolveCallArgsFlags(undefined);
+    expect(flags).toEqual([]);
+    await expect(cleanup()).resolves.toBeUndefined();
+  });
+
+  it("passes a small payload inline via --args, unchanged from before this existed", async () => {
+    const { flags, cleanup } = await resolveCallArgsFlags({ a: 1 });
+    expect(flags).toEqual(["--args", JSON.stringify({ a: 1 })]);
+    await expect(cleanup()).resolves.toBeUndefined();
+  });
+
+  it("writes a payload at the threshold to a temp file via --args-file", async () => {
+    // Pad a field so the JSON string's byte length lands at exactly the
+    // threshold -- the boundary itself must take the file path, not the
+    // inline one, per resolveCallArgsFlags' own "< threshold" cutoff.
+    const overhead = JSON.stringify({ raw_bytes: "" }).length;
+    const payload = { raw_bytes: "x".repeat(LARGE_PAYLOAD_THRESHOLD_BYTES - overhead) };
+    expect(Buffer.byteLength(JSON.stringify(payload), "utf8")).toBe(LARGE_PAYLOAD_THRESHOLD_BYTES);
+
+    const { flags, cleanup } = await resolveCallArgsFlags(payload);
+    expect(flags[0]).toBe("--args-file");
+    const filePath = flags[1] as string;
+    expect(existsSync(filePath)).toBe(true);
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual(payload);
+
+    await cleanup();
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it("cleanup is safe to call even when nothing was written", async () => {
+    const { cleanup } = await resolveCallArgsFlags({ small: true });
+    await expect(cleanup()).resolves.toBeUndefined();
+    await expect(cleanup()).resolves.toBeUndefined();
   });
 });

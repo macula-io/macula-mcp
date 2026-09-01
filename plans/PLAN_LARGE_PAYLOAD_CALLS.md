@@ -1,8 +1,12 @@
 # PLAN: Large-payload mesh calls (args-file, for upload_knowledge et al.)
 
-Status: **Proposal — sketch, not started.** Every claim about *existing*
-infrastructure below was verified against the actual source, not
-assumed — see "What's already real."
+Status: **Implemented, not yet released.** `macula-cli`'s `-args-file`
+flag and `macula-mcp`'s transparent temp-file fallback (`call()` →
+`resolveCallArgsFlags`) are both built and tested. What's left: tagging
+a `macula-cli` release carrying `-args-file`, then bumping
+`MIN_MACULA_CLI_VERSION` in `macula-mcp` to match -- deliberately not
+done here, since bumping it first would require a release that doesn't
+exist yet.
 
 ## Goal
 

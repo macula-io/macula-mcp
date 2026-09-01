@@ -504,7 +504,49 @@ export interface CallResult {
   payload: unknown;
   duration_ms: number;
 }
-export const call = (args: {
+
+/**
+ * Payload JSON strings at or above this size are written to a temp file
+ * and passed via `--args-file` instead of an inline `--args` argument.
+ * 32KB is comfortably under the tightest cross-platform command-line
+ * length limit this project's own install/release tooling has to
+ * respect (Windows' CreateProcess, ~32KB total) -- ordinary calls never
+ * notice; a real document (e.g. for hecate-rag.upload_knowledge, whose
+ * payload embeds the raw file base64-encoded) does. See
+ * PLAN_LARGE_PAYLOAD_CALLS.md. Exported for tests only.
+ */
+export const LARGE_PAYLOAD_THRESHOLD_BYTES = 32 * 1024;
+
+/**
+ * Resolves how a call's payload should reach macula-cli: inline via
+ * `--args` below LARGE_PAYLOAD_THRESHOLD_BYTES (the common case,
+ * unchanged from before this existed), or written to a temp file and
+ * passed via `--args-file` at or above it. `cleanup` removes the temp
+ * file if one was written and is always safe to call (a no-op
+ * otherwise) -- the caller must call it once the subprocess using
+ * `flags` has finished, success or failure alike. Exported for tests:
+ * the temp-file path isn't practical to exercise by spawning a real
+ * macula-cli subprocess in a unit test, but this is a pure decision
+ * plus a file write, testable on its own.
+ */
+export async function resolveCallArgsFlags(
+  callArgs: Record<string, unknown> | undefined,
+): Promise<{ flags: string[]; cleanup: () => Promise<void> }> {
+  const noop = async () => {};
+  if (callArgs === undefined) {
+    return { flags: [], cleanup: noop };
+  }
+  const json = JSON.stringify(callArgs);
+  if (Buffer.byteLength(json, "utf8") < LARGE_PAYLOAD_THRESHOLD_BYTES) {
+    return { flags: ["--args", json], cleanup: noop };
+  }
+  const dir = await mkdtemp(join(tmpdir(), "macula-mcp-call-args-"));
+  const filePath = join(dir, "args.json");
+  await writeFile(filePath, json, "utf8");
+  return { flags: ["--args-file", filePath], cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
+
+export const call = async (args: {
   host?: string;
   procedure: string;
   callArgs?: Record<string, unknown>;
@@ -514,10 +556,16 @@ export const call = (args: {
 }): Promise<CallResult> => {
   const flags: string[] = ["--identity", defaultIdentityPath()];
   if (args.timeoutMs) flags.push("--timeout", `${Math.max(1, Math.round(args.timeoutMs / 1000))}s`);
-  if (args.callArgs !== undefined) flags.push("--args", JSON.stringify(args.callArgs));
   if (args.realm) flags.push("--realm", args.realm);
   if (args.direct) flags.push("--direct");
-  return run<CallResult>(argv(["call"], flags, [args.host ?? defaultStation(), args.procedure]));
+  const positionals = [args.host ?? defaultStation(), args.procedure];
+
+  const { flags: argsFlags, cleanup } = await resolveCallArgsFlags(args.callArgs);
+  try {
+    return await run<CallResult>(argv(["call"], [...flags, ...argsFlags], positionals));
+  } finally {
+    await cleanup();
+  }
 };
 
 export interface PublishResult {

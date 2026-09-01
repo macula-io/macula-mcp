@@ -81,11 +81,16 @@ zero-new-code provisioning step for a human to run once per agent:
 
 ## What's open — not decided here
 
-- **Does a gated hecate-service actually verify an incoming `ucan_token`
-  against a human-membership-rooted chain?** Unconfirmed, not just
-  undecided — see `HECATE_AUTH_MODEL.md`'s matching note. If the answer
-  is no, this plan's own work has nothing to attach to yet, and that
-  verification is the actual prerequisite, not this.
+- **Confirmed, not just unconfirmed now**: no hecate-service verifies an
+  incoming `ucan_token` at all today — `macula:advertise/5`'s
+  `{ucan_required, Issuer}` policy exists and works, but every
+  hecate-service (hecate-rag included) hand-rolls its own advertise loop
+  with a hardcoded open policy, and nothing calls into it. See
+  `hecate-om/plans/PLAN_UCAN_GATED_CAPABILITIES.md` for the scoped fix —
+  and its own confirmed boundary: that policy checks one exact issuer's
+  direct signature, not a human-membership-rooted delegation chain of
+  arbitrary depth. This plan's own work has nothing to attach to until
+  that one lands.
 - **Expiry and refresh.** A manually-minted, manually-placed token file
   doesn't refresh itself. Nothing here re-mints it before `-expires-in`
   runs out; a session just starts failing gated calls at that point.

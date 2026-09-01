@@ -7,6 +7,16 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+- `call()` now transparently falls back to a temp file + `--args-file`
+  for any payload at or above 32KB, instead of always passing `--args
+  <json>` inline. `hecate-rag.upload_knowledge`'s payload embeds a whole
+  document's raw bytes, base64-encoded, which can exceed a safe
+  command-line length on any platform; a calling model never needs to
+  know the difference. Requires a `macula-cli` release carrying
+  `-args-file` (not yet tagged) -- `MIN_MACULA_CLI_VERSION` is
+  deliberately not bumped yet. See `plans/PLAN_LARGE_PAYLOAD_CALLS.md`.
+
 ## [0.11.0] - 2026-08-31
 
 ### Added
