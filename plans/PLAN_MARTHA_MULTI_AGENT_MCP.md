@@ -239,9 +239,5 @@ of something that was always sequential in one process.
 - **The MCP-prompts bridge** (see "MCP surface") — build it now, or wait
   for evidence the plain-`mesh_get` approach isn't robust enough? Leaning
   toward wait, not decided.
-- **`hecate-corpus/philosophy/alc/README.md` and `HECATE_DOMAIN_LIFECYCLE.md`**
-  still specify the ES/CQRS model this plan moves away from for
-  process-tracking (both flagged `stage: draft`, pending a replacement
-  design) — reconciling them is separate work, not done here.
 
 None of the above blocks starting; they block finishing.
