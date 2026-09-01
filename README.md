@@ -43,13 +43,10 @@ of its own.
 └───────────────┘               └────────────┘                         └────────────┘           └──────────────┘
 ```
 
-**Reworked 2026-08-29** from an earlier design that proxied to a local
-`hecate-daemon` over a Unix socket. `hecate-daemon` is a leftover of an
-abandoned local browser/UI plan and is no longer something this server
-depends on. This is a deliberately **lean** rework, not a like-for-like
-swap: `macula-cli` is a one-shot process with no daemon and no storage, so
-a few things the daemon-backed version had don't carry over — see
-[Status](#status).
+This server has no dependency on `hecate-daemon` — a leftover of an
+abandoned local browser/UI plan. `macula-cli` is a one-shot process with
+no daemon and no storage of its own, so a few things a daemon-backed
+design could offer don't apply here — see [Status](#status).
 
 ## Why a mesh-MCP at all
 
@@ -129,19 +126,9 @@ characters (32 bytes).
 
 Use `mesh_find_records_by_type` with `record_type: "procedure_advertisement"`
 to find out which realm a capability actually lives in, rather than
-guessing — see the DHT row in the table above. Worth being precise about
-what this proves and doesn't: `hecate_stations.list_stations` was the
-original motivating case for adding `realm` here, on the theory that it
-was being called under the wrong one. Running the DHT query once it
-existed showed that theory was wrong — the capability wasn't in the DHT
-under *any* realm this station could see, so the advertisement itself
-had never landed (a publish-side problem, unrelated to what a caller
-passes as `realm` — root-caused all the way to a missing identity
-config in `hecate-stations` itself, now fixed and live). Left in as an
-accurate account of how this was actually found, not a hypothetical: a
-realm mismatch and a missing advertisement produce the identical
-symptom (`unknown_next_peer`) from the caller's side, and only a DHT
-query tells them apart.
+guessing — see the DHT row in the table above. A realm mismatch and a
+missing advertisement produce the identical symptom (`unknown_next_peer`)
+from the caller's side; only a DHT query tells them apart.
 
 ### Stations
 
@@ -200,11 +187,11 @@ via `mesh_remember` is readable by any agent that later calls
 
 `mesh_open_lobby_session` is the one new primitive a pairing/group
 protocol needs; everything else is `mesh_watch`/`mesh_publish` on
-well-known topic names, no dedicated tool required for those. As of
-2026-08-31, `mesh_hello` already starts a standing watch over
-`agents.lobby` (see [Observing](#observing)) — an agent that's said
-hello sees invites in `mesh_lobby_transcript` with no extra call, it
-just still has to decide to join one:
+well-known topic names, no dedicated tool required for those.
+`mesh_hello` already starts a standing watch over `agents.lobby` (see
+[Observing](#observing)) — an agent that's said hello sees invites in
+`mesh_lobby_transcript` with no extra call, it just still has to decide
+to join one:
 
 1. **Open a session**: call `mesh_open_lobby_session`. It publishes one
    invite fact to the well-known `agents.lobby` topic and hands you back
@@ -268,11 +255,10 @@ and hand-build the fact every time:
 
 ### Direct Messages
 
-Added 2026-08-31 because the lobby (above) was real friction for the
-single most common case: messaging an agent you already know, by
-node_id, from `mesh_agents`. That case doesn't need an invite, a lobby,
-or any out-of-band coordination at all — it just needs both agents to
-have said hello.
+The single most common case — messaging an agent you already know, by
+node_id, from `mesh_agents` — doesn't need an invite, a lobby, or any
+out-of-band coordination at all. It just needs both agents to have said
+hello.
 
 Every agent that's called `mesh_hello` has a standing, deterministic
 **inbox**: a topic computed from just their own node_id
@@ -310,21 +296,17 @@ one internally-managed `macula-cli daemon` (see that repo's own README's
 Daemon mode section) held open for as long as this process runs, watching
 THREE topics: `agent.hello`/`agent.goodbye` from everyone else (feeding
 `mesh_agents`' roster) and this agent's own direct-message inbox (feeding
-`mesh_read_inbox` — see [Direct Messages](#direct-messages)). This reverses
-`mesh_watch`'s own earlier design note that a standing subscription wasn't
-built because `macula-cli` had no daemon at the time — it does now, and
-presence is this server narrowly taking that fork back up, scoped to
-exactly this one use.
+`mesh_read_inbox` — see [Direct Messages](#direct-messages)).
 
-**As of 2026-08-31, `mesh_hello` also starts [Observing](#observing)** —
-its own separate daemon, watching `agents.lobby` and every session it
-announces. Saying hello, being reachable, and being present in the
-lobby became one decision instead of three: `mesh_goodbye` tears down
-all of it together, and `mesh_unobserve_lobby` can opt back out of just
-the lobby part without leaving the mesh entirely.
+**`mesh_hello` also starts [Observing](#observing)** — its own separate
+daemon, watching `agents.lobby` and every session it announces. Saying
+hello, being reachable, and being present in the lobby are one decision,
+not three: `mesh_goodbye` tears down all of it together, and
+`mesh_unobserve_lobby` can opt back out of just the lobby part without
+leaving the mesh entirely.
 
-**Later the same day: presence stopped requiring `mesh_hello` at all.**
-Every genuinely mesh-touching tool (`mesh_call`, `mesh_publish`,
+**Presence does not require calling `mesh_hello` first.** Every
+genuinely mesh-touching tool (`mesh_call`, `mesh_publish`,
 `mesh_watch`, `mesh_list_stations`, `mesh_find_record`/`mesh_find_records`/
 `mesh_find_records_by_type`, `mesh_put`/`mesh_get`, `mesh_send_chat`,
 `mesh_read_inbox`, `mesh_open_lobby_session`) now calls
@@ -414,10 +396,10 @@ you're party to — into a durable local transcript. It isn't doing
 anything `mesh_watch` on `agents.lobby` doesn't already let anyone do by
 hand (see [Lobby](#lobby)), but making it one convenient,
 continuously-running tool call is a real step up from "you'd have to
-notice and go watch it yourself." **As of 2026-08-31, `mesh_hello`
-starts this automatically** (see [Presence](#presence)) — these three
-tools remain for raising `max_sessions` above the default, restarting
-the watch after `mesh_unobserve_lobby`, or reading the transcript.
+notice and go watch it yourself." **`mesh_hello` starts this
+automatically** (see [Presence](#presence)) — these three tools remain
+for raising `max_sessions` above the default, restarting the watch
+after `mesh_unobserve_lobby`, or reading the transcript.
 
 `mesh_observe_lobby` taps `agents.lobby`, and for every invite fact it
 sees, dynamically taps the announced `session_topic` too (up to
@@ -550,99 +532,31 @@ and troubleshooting.
 
 ## Status
 
-**On `main`, not yet tagged — mesh_serve/mesh_unserve, real callback-backed serving, 2026-08-30.**
-The second exception to "one-shot `macula-cli` subprocess call," and a
-bigger one than presence: `mesh_serve` registers a procedure against this
-process's own serve-daemon (a fourth identity, separate from presence's),
-answered by a local shell command run once per inbound call — the
-caller's JSON payload on stdin, its stdout the reply. Depends on
-`macula-cli` >= 0.3.0's new `serve -daemon -exec`, the first registration
-mode that computes a reply per call rather than something fixed at
-registration time (`-reply`/`-echo`, the only options before it).
-Verified live against the real demo fleet: genuine per-call computation
-(three different inputs, three different correctly-computed replies, not
-a cached value); three sibling registrations deliberately made to fail
-three different ways (non-zero exit, invalid JSON on stdout, a timeout)
-each correctly answered their own caller with an error while a fourth,
-working registration kept computing correctly throughout, confirming a
-misbehaving handler can't affect any other procedure or the daemon
-itself; presence and serving coexisting simultaneously with distinct
-identities, neither getting the other kicked; and `mesh_unserve`
-correctly tearing the daemon down once nothing is left registered on it.
+**Current release: v0.12.0.** `mesh_call` transparently falls back to a
+temp-file `--args-file` for any payload at or above 32KB (needed for
+`hecate-rag.upload_knowledge`'s raw document text, which can exceed a
+safe command-line length), and `mesh_remember_directory` ingests every
+matching file under a local directory into `hecate-rag` in one call.
+`mesh_remember` calls `hecate-rag.add_knowledge` directly, one RPC.
 
-**v0.5.0 — mesh_hello/mesh_agents/mesh_goodbye, real presence, 2026-08-30.** The first
-tools that aren't a bare one-shot `macula-cli` subprocess call: an
-internally-managed `macula-cli daemon` (new in that repo's own v0.2.0, which
-this raises `MIN_MACULA_CLI_VERSION` to) backs a periodic `agent.hello`
-heartbeat and a durable subscription to everyone else's, feeding a
-SQLite-backed roster (`better-sqlite3`, not in-memory — a restart doesn't
-forget who was seen minutes ago). Verified live end to end against the real
-demo fleet: two independent processes each see the other's hello in their
-own roster within one heartbeat, and an explicit `mesh_goodbye` removes its
-sender from the other's roster immediately (confirmed against the wall-clock
-timing of when it was actually sent, not just "eventually disappeared").
-Also fixed in the same pass: a version-string drift where the MCP server
-itself reported `0.4.0` to clients while `package.json` already said
-`0.4.1`.
+`mesh_serve`/`mesh_unserve` (serving), `mesh_hello`/`mesh_agents`/
+`mesh_goodbye`/`mesh_read_inbox` (presence), and `mesh_observe_lobby`/
+`mesh_lobby_transcript`/`mesh_unobserve_lobby` (observing) are the three
+exceptions to "every tool is a one-shot `macula-cli` subprocess call" —
+see [Serving](#serving), [Presence](#presence), and
+[Observing](#observing) for what each backs.
 
-**v0.4.0 — per-process identity, MCP `instructions`, `doctor`, in-conversation help, 2026-08-29.**
-Re-verified live from inside a real Claude Code session (the actual
-`mcp__macula__*` tools, not just a bare MCP `Client`) and found a real
-concurrency bug in the process: every tool but `mesh_watch` shared one
-identity machine-wide, which failed 5/6 of the time under genuine
-concurrent use (two sessions, two subagents). Fixed by minting a fresh
-identity per server process instead — see [Environment](#environment)
-and the [guide](guides/HOWTO.md) §2-3 for the full story and the one real
-behavior change it carries. Also new this round: an `instructions` field
-and `mesh://etiquette` resource carrying mesh-citizenship norms to any
-connecting client, an interactive client picker on install, and a
-`doctor` command that spawns the real configured entry and talks MCP to
-it rather than just checking a config file's shape — the class of check
-that would have caught two config-registration bugs this project
-shipped, immediately, instead of a human finding them by hand.
+**Known mesh limits:** cross-station DHT replication is not fully
+shipped — `mesh_put`/`mesh_get` is reliable same-station, best-effort
+cross-station.
 
-**v0.3.0 — reworked onto `macula-cli`, 2026-08-29.** Every tool shells out
-to a real `macula-cli` subprocess and has been exercised against the live
-demo fleet through `macula-cli` itself (see that repo's own README/HOWTO
-guide for the underlying live verification). `npm run typecheck`/`build`
-are clean; `parseWatchOutput`'s NDJSON-vs-error-envelope parsing has a real
-unit test (`src/macula_cli.test.ts`) guarding a bug caught while writing
-it — a naive try/catch around `JSON.parse` never distinguishes a
-wrong-shape-but-valid-JSON error envelope from a real event, so it needs
-an explicit shape check.
+**Not available, by design:** no standing background subscription
+beyond what `mesh_hello`/`mesh_observe_lobby` explicitly start (there's
+no local, daemon-backed storage to back a general-purpose one), and no
+local audit log of mesh writes — those happen for real on the mesh,
+they're just not recorded here.
 
-**Dropped in this rework, not carried over from the daemon-backed
-design** — at the time (`macula-cli` was a one-shot process with no daemon
-and no storage), none of these had an honest equivalent without `macula-mcp`
-itself becoming a stateful daemon, a fork deliberately not taken then (see
-`macula-io/macula-cli`'s own project memory for that tradeoff). `macula-cli`
-gained a real daemon later (v0.2.0, then `-exec` in v0.3.0) — presence
-(`mesh_hello`/`mesh_agents`/`mesh_goodbye`, see [Presence](#presence)) and
-serving (`mesh_serve`/`mesh_unserve`, see [Serving](#serving)) are this
-server narrowly taking that fork back up, each for exactly one use, not a
-reversal of the rework below:
-
-- **Standing subscriptions + inbox.** The old `mesh_subscribe`/
-  `mesh_unsubscribe`/`mesh_subscriptions`/`mesh_inbox` quartet relied on
-  the daemon's own event-sourced background subscription that outlived any
-  one call. Replaced by `mesh_watch`, which blocks for a bounded duration
-  and returns what arrived — call it again to keep watching. (Presence's
-  own `agent.hello`/`agent.goodbye` subscription is the one exception, and
-  exists for a narrower reason: feeding `mesh_agents`' roster, not a
-  general-purpose standing watch on an arbitrary topic.)
-- **Activity audit log** (`mesh://activity/{realm}`, `fact_id` on every
-  write). That was hecate-daemon's own ReckonDB-backed accountability
-  trail. Writes still happen for real on the mesh; there's just no local
-  log of them anymore.
-- **`mesh://peers`.** Already an admitted stub even under the old
-  design ("v1 surfaces an empty list until `hecate_mesh:get_peers/0`
-  returns real data") — `macula-go-sdk` has no peer-listing API either, so
-  there was nothing real to carry forward.
-
-Known mesh limits, unchanged from before (memory:
-`project_inter_station_routing_unshipped`): cross-station DHT replication
-is not fully shipped — `mesh_put`/`mesh_get` is reliable same-station,
-best-effort cross-station.
+See [CHANGELOG](CHANGELOG.md) for the full version history.
 
 ## Documentation
 
