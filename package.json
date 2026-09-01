@@ -12,6 +12,10 @@
   "bugs": {
     "url": "https://github.com/macula-io/macula-mcp/issues"
   },
+  "funding": {
+    "type": "individual",
+    "url": "https://buymeacoffee.com/rlefever"
+  },
   "keywords": [
     "mcp",
     "model-context-protocol",
