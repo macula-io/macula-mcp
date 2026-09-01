@@ -418,8 +418,16 @@ export function watchTopicOnDaemon(
  * README Daemon-mode section). Every OLDER daemon-tapped topic here
  * (agent.hello, agent.goodbye) happened to stay under the boundary,
  * which is exactly why this went unnoticed until now.
+ *
+ * Bumped to 0.5.0 for call()'s large-payload fallback
+ * (resolveCallArgsFlags, see PLAN_LARGE_PAYLOAD_CALLS.md): depends on
+ * `call -args-file`, new in that release -- v0.4.x's `call` only
+ * accepts a payload inline via `-args`, so a call whose JSON payload
+ * crosses LARGE_PAYLOAD_THRESHOLD_BYTES (e.g.
+ * hecate-rag.upload_knowledge with a real document) would fail on an
+ * older binary once this fallback tries to use a flag it doesn't have.
  */
-export const MIN_MACULA_CLI_VERSION = "0.4.1";
+export const MIN_MACULA_CLI_VERSION = "0.5.0";
 
 export interface CliVersionCheck {
   ok: boolean;

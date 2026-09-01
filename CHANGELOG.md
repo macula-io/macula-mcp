@@ -5,7 +5,7 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.12.0] - 2026-09-01
 
 ### Added
 - `call()` now transparently falls back to a temp file + `--args-file`
@@ -13,9 +13,8 @@ fires on a `v*` tag push, not on every commit to `main`).
   <json>` inline. `hecate-rag.upload_knowledge`'s payload embeds a whole
   document's raw bytes, base64-encoded, which can exceed a safe
   command-line length on any platform; a calling model never needs to
-  know the difference. Requires a `macula-cli` release carrying
-  `-args-file` (not yet tagged) -- `MIN_MACULA_CLI_VERSION` is
-  deliberately not bumped yet. See `plans/PLAN_LARGE_PAYLOAD_CALLS.md`.
+  know the difference. Bumps `MIN_MACULA_CLI_VERSION` to `0.5.0`
+  (`call -args-file`, new there). See `plans/PLAN_LARGE_PAYLOAD_CALLS.md`.
 
 ## [0.11.0] - 2026-08-31
 
