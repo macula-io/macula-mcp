@@ -85,13 +85,22 @@ Two pieces, not three — there is no `hecate-martha` backend service:
   free.
 - **`hecate-rag`** — all corpus content, personas included. Two
   retrieval shapes, not one: `hecate-rag.answer_query` (semantic,
-  `top_k`) for "find me the relevant template/antipattern list," and a
-  plain content fetch (`mesh_get`, already exists) for "give me
-  `domain_expert.md` verbatim" — a role's persona has to be exact, not
-  a RAG-reranked approximation of itself.
-- **`macula-mcp`** — unchanged. No new mesh logic, no daemon, no
-  storage, and — see "MCP surface" below — no new code, in the first
-  cut.
+  `top_k`) for "find me the relevant template/antipattern list," and
+  `hecate-rag.get_document_verbatim` (path-keyed exact fetch, new — see
+  `hecate-rag`'s own `PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md`) for
+  "give me `domain_expert.md` verbatim" — a role's persona has to be
+  exact, not a RAG-reranked approximation of itself. Not `mesh_get`:
+  content-addressing has no answer for "what's the current MCID for
+  role X" once a persona file changes, and cross-station delivery is
+  only best-effort; path-keyed retrieval against a service `macula-mcp`
+  already discovers by realm has neither problem.
+- **`macula-mcp`** — new code, scoped and small: a `role` MCP Prompt
+  (`macula-mcp`'s own `PLAN_MACULA_ROLE_PROMPT.md`) that resolves a role
+  name to `hecate-rag.get_document_verbatim` and injects the result as a
+  client-enforced prompt rather than a plain tool result an agent might
+  not attend to. No new daemon, no new storage — one new prompt callback
+  doing a discover-then-call the same way `mesh_recall`/`mesh_list_stations`
+  already do.
 
 ```
 ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
@@ -104,9 +113,10 @@ Two pieces, not three — there is no `hecate-martha` backend service:
         │ MCP/stdio          │ MCP/stdio          │ MCP/stdio
         ▼                    ▼                    ▼
 ┌──────────────────────────────────────────────────────────┐
-│  macula-mcp — UNCHANGED                                     │
-│  mesh_call · mesh_get · mesh_find_records_by_type ·         │
-│  mesh_watch · mesh_publish  ← ALL ALREADY EXIST              │
+│  macula-mcp                                                  │
+│  mesh_call · mesh_find_records_by_type · mesh_watch ·        │
+│  mesh_publish  ← ALL ALREADY EXIST                           │
+│  role (new prompt) ← calls get_document_verbatim below       │
 └───────────────────────────┬──────────────────────────────┘
                              │ spawns per call (macula-cli --identity)
                              ▼
@@ -116,8 +126,8 @@ Two pieces, not three — there is no `hecate-martha` backend service:
                         hecate-rag
               (ALL corpus content: role personas
                AND templates/antipatterns — exact
-               fetch via mesh_get, fuzzy via
-               answer_query)
+               fetch via get_document_verbatim, fuzzy
+               via answer_query)
 
         (planning/design state lives in git, in the
          domain's own repo — not on the mesh at all;
@@ -164,32 +174,29 @@ Checked against what `macula-mcp` already exposes:
 | Martha need | Already covered by | New code needed? |
 |---|---|---|
 | Discover available roles/capabilities | `mesh_find_records_by_type` (`record_type: "procedure_advertisement"`), filtered client-side | No |
-| Fetch a role's exact persona content | `mesh_get` (content-addressed, verbatim — not a RAG search) | No |
+| Fetch a role's exact persona content | New `role` MCP Prompt → `hecate-rag.get_document_verbatim` | Yes — `PLAN_MACULA_ROLE_PROMPT.md` (macula-mcp) + `PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md` (hecate-rag) |
 | Retrieve a template/antipattern list mid-task | `mesh_call` → `hecate-rag.answer_query` | No |
 | Read/edit a division's planning or design doc | Ordinary git/filesystem access — the harness's own tools | No |
 | Announce a gate was just crossed | `mesh_publish`, called by whichever harness made the commit | No |
 | Get notified a gate unlocked the next stage | `mesh_watch` on that published fact | No |
 
-**The one open question, and it's small and generic, not Martha-specific:**
-a `mesh_get` result is a plain tool result — data the model *might*
-attend to. MCP's formal "prompt" primitive is a stronger, client-enforced
-injection: the harness explicitly threads it into context rather than
-leaving it to the model to notice and adopt. Whether that robustness gap
-matters enough to build a generic "expose mesh-served content as an MCP
-prompt" bridge is worth revisiting once there's real experience with the
-plain-`mesh_get` approach — nothing about it is Martha-specific (any
-mesh-served markdown could use the same bridge), so if it's ever built
-it belongs in `macula-mcp` as a generic capability, not a Martha one.
-Not building it yet is the honest MVP answer, not a gap being ignored.
+**The MCP-prompts bridge, resolved 2026-09-01: building it.** A plain
+tool result is data the model *might* attend to; MCP's "prompt"
+primitive is a stronger, client-enforced injection the harness threads
+into context directly. Not Martha-specific — any mesh-served markdown
+could use the same bridge — so it lives in `macula-mcp` as a generic
+`role` prompt, not a Martha-only mechanism. See
+`PLAN_MACULA_ROLE_PROMPT.md`.
 
 ## macula-mcp, or a separate martha-mcp?
 
 **`macula-mcp`, and the question is close to moot now.** There is no
 Martha-specific backend to own — no service, no new mesh logic. What
-Martha needs from the MCP layer is `hecate-rag` retrieval and
-generic mesh pub/sub, both already generic capabilities any future
-role-based system would also want. A separate repo would have nothing
-of its own to hold.
+Martha needs from the MCP layer is `hecate-rag` retrieval and generic
+mesh pub/sub — generic capabilities (existing or, for verbatim fetch,
+newly built as generic) any future role-based system would also want,
+never Martha-specific ones. A separate repo would have nothing of its
+own to hold.
 
 ## Multi-agent coordination
 
@@ -236,8 +243,5 @@ of something that was always sequential in one process.
   metadata is a suggestion, not a gate. Whether a Review-Gate-class task
   should *refuse* to proceed on a harness that can't report its model
   strength is a real open question this plan doesn't answer.
-- **The MCP-prompts bridge** (see "MCP surface") — build it now, or wait
-  for evidence the plain-`mesh_get` approach isn't robust enough? Leaning
-  toward wait, not decided.
 
 None of the above blocks starting; they block finishing.
