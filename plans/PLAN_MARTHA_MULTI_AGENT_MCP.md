@@ -229,9 +229,9 @@ of something that was always sequential in one process.
   "operator website" implementation (a dashboard reading the same
   git-tracked documents), or retire outright? Either is consistent with
   this plan; neither is chosen.
-- **`macula-cli`'s `--identity`-per-agent flag isn't wired into
-  anything yet** — `HECATE_AUTH_MODEL.md` proposes it, this plan assumes
-  it, neither has built it.
+- **Per-agent UCAN delegation isn't wired into `macula-mcp` yet** — see
+  `PLAN_AGENT_IDENTITY_UCAN.md` for the scoped work and the one thing it
+  depends on that isn't confirmed to exist yet.
 - **No enforced quality floor for interactive roles** — advisory tier
   metadata is a suggestion, not a gate. Whether a Review-Gate-class task
   should *refuse* to proceed on a harness that can't report its model
