@@ -26,22 +26,24 @@
 // just remove the "which realm is hecate-rag on" step, the same
 // ergonomics gap mesh_list_stations already closed for stations.
 //
-// mesh_remember composes TWO real calls (ingest_document, then
-// embed_document) into one, the same "two steps become one" bar
-// mesh_send_chat's own wait_reply_seconds already established --
-// depositing a memory shouldn't require an agent to sequence two
-// separate tool calls by hand. document_id is only auto-generated
-// when the caller omits one (a random id has no unguessability
-// requirement the way the lobby's session_topic does, so a caller
-// wanting a stable, memorable id -- e.g. "session-2026-08-31-topic"
-// -- can still supply one; nothing here forces randomness on them).
+// mesh_remember calls hecate-rag's add_knowledge -- one mesh RPC, not
+// two. It used to sequence ingest_document then embed_document by hand
+// (the "two steps become one" bar mesh_send_chat's own
+// wait_reply_seconds already established), but add_knowledge (added to
+// hecate-rag the same day this file was first written) does that
+// server-side AND fixes the short-text gap the old path had: content
+// under ~80 chars used to produce `chunks: 0` because the chunker skips
+// anything that short; add_knowledge falls back to a single raw chunk
+// instead, which is exactly the "a paragraph or two" case a
+// conversational deposit usually is.
 //
-// Found live building/verifying hecate-rag this same session: content
-// under ~80 chars produces `chunks: 0`, not an error -- barrel's own
-// minimum-chunk-size filter, not a bug. mesh_remember surfaces that
-// plainly rather than treating it as a failure.
+// This is a real interface change, not just a backend swap:
+// add_knowledge has no document_id (it derives its own chunk ids from a
+// hash of source_label+text) and no source_type -- both dropped rather
+// than faked, since nothing on the other end reads them anymore.
+// source_label replaces source_path: a flat grouping label, not a
+// hierarchical path, matching what the wire field actually is.
 
-import { randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { call, defaultStation, findRecordsByType } from "./macula_cli.js";
@@ -49,14 +51,13 @@ import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
 const SEARCH_PROCEDURE = "hecate-rag.answer_query";
-const INGEST_PROCEDURE = "hecate-rag.ingest_document";
-const EMBED_PROCEDURE = "hecate-rag.embed_document";
+const ADD_KNOWLEDGE_PROCEDURE = "hecate-rag.add_knowledge";
 
 /** Discovers which realm hecate-rag is CURRENTLY advertised under -- never the all-zero default, matching mesh_list_stations's own reasoning. */
 async function discoverHecateRagRealm(host: string | undefined): Promise<{ realm: string } | { error: string }> {
   const discovered = await findRecordsByType({ host, recordType: "procedure_advertisement" });
   const match = discovered.records.find(
-    (r) => r.procedure_advertisement?.procedure === INGEST_PROCEDURE,
+    (r) => r.procedure_advertisement?.procedure === ADD_KNOWLEDGE_PROCEDURE,
   );
   if (!match?.procedure_advertisement?.realm) {
     return {
@@ -108,51 +109,38 @@ export function registerMeshMemory(server: McpServer): void {
 
   server.tool(
     "mesh_remember",
-    "Deposit something worth remembering into the mesh's shared memory (hecate-rag) -- ingests and embeds " +
-      "content in one call (two mesh RPCs sequenced for you: ingest_document then embed_document), so it " +
-      "becomes searchable via mesh_recall for any agent, not just you, in future sessions. document_id is " +
-      "auto-generated if you omit one; supply your own if you want a stable, memorable id (e.g. " +
-      "\"session-2026-08-31-topic\") instead of a random one. Content under ~80 characters produces " +
-      "chunks: 0 -- too short to index, not an error. Be deliberate about what you write here: this is " +
-      "shared, not private to you, and this mesh doesn't encrypt payloads -- the same caveat mesh_send_chat " +
-      "and mesh_open_lobby_session already carry. Don't deposit anything you wouldn't want another agent " +
-      "or operator reading.",
+    "Deposit something worth remembering into the mesh's shared memory (hecate-rag) -- one mesh RPC " +
+      "(add_knowledge), so it becomes searchable via mesh_recall for any agent, not just you, in future " +
+      "sessions. Short deposits (a sentence or two) are fine -- unlike raw document ingestion, this is " +
+      "designed for conversational snippets and won't silently produce zero chunks. Be deliberate about " +
+      "what you write here: this is shared, not private to you, and this mesh doesn't encrypt payloads -- " +
+      "the same caveat mesh_send_chat and mesh_open_lobby_session already carry. Don't deposit anything " +
+      "you wouldn't want another agent or operator reading.",
     {
-      content: z.string().describe("The text to remember, in your own words. Markdown is fine -- header-aware chunking splits on it."),
-      document_id: z.string().optional().describe("Stable id for this memory. Auto-generated (random) if omitted."),
-      source_path: z.string().optional().describe("Attribution/grouping path, e.g. \"agent-notes/macula-mcp-presence.md\". Auto-generated if omitted."),
-      source_type: z.string().optional().describe("MIME-ish type, default \"text/markdown\"."),
+      content: z.string().describe("The text to remember, in your own words. Markdown is fine -- header-aware chunking splits it if long."),
+      source_label: z.string().optional().describe("Grouping/attribution label, e.g. \"agent-notes/macula-mcp-presence\". Defaults to \"conversational\" if omitted."),
+      topics: z.array(z.string()).optional().describe("Topic labels to tag this deposit with, for later topic-filtered search."),
       host: z
         .string()
         .optional()
-        .describe(`Station to connect through for both the discovery lookup and the calls, "host[:port]". Defaults to ${defaultStation()}.`),
+        .describe(`Station to connect through for both the discovery lookup and the call, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ content, document_id, source_path, source_type, host }) => {
+    async ({ content, source_label, topics, host }) => {
       ensurePresence(server);
       try {
         const discovery = await discoverHecateRagRealm(host);
         if ("error" in discovery) return errorContent(discovery.error);
-        const docId = document_id ?? `mesh-remember-${Date.now()}-${randomBytes(4).toString("hex")}`;
-        const srcPath = source_path ?? `mesh-memory/${docId}.md`;
-        const srcType = source_type ?? "text/markdown";
 
-        await call({
+        const res = await call({
           host,
-          procedure: INGEST_PROCEDURE,
-          callArgs: { document_id: docId, source_path: srcPath, source_type: srcType, raw_bytes: content },
+          procedure: ADD_KNOWLEDGE_PROCEDURE,
+          callArgs: { text: content, source_label, topics },
           realm: discovery.realm,
         });
-        const embedRes = await call({
-          host,
-          procedure: EMBED_PROCEDURE,
-          callArgs: { document_id: docId },
-          realm: discovery.realm,
-        });
-        const payload = embedRes.payload as { chunks?: number } | undefined;
+        const payload = res.payload as { chunks?: number } | undefined;
         return jsonContent({
           realm: discovery.realm,
-          document_id: docId,
-          source_path: srcPath,
+          source_label: source_label ?? "conversational",
           chunks: payload?.chunks ?? 0,
         });
       } catch (e) {

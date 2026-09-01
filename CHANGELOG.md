@@ -16,6 +16,18 @@ fires on a `v*` tag push, not on every commit to `main`).
   know the difference. Bumps `MIN_MACULA_CLI_VERSION` to `0.5.0`
   (`call -args-file`, new there). See `plans/PLAN_LARGE_PAYLOAD_CALLS.md`.
 
+### Changed
+- `mesh_remember` now calls `hecate-rag.add_knowledge` (one mesh RPC)
+  instead of sequencing `ingest_document` then `embed_document` by
+  hand. Fixes the short-text gap the old path had (content under ~80
+  characters used to silently produce `chunks: 0`); `add_knowledge`
+  falls back to a single raw chunk instead. **Interface change**:
+  `document_id` and `source_type` are gone (the new capability has no
+  equivalent — nothing reads them anymore); `source_path` is renamed
+  `source_label` to match the wire field it actually is (a flat
+  grouping label, not a hierarchical path); new optional `topics` for
+  topic-filtered search later.
+
 ## [0.11.0] - 2026-08-31
 
 ### Added
