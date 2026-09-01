@@ -11,10 +11,19 @@ fires on a `v*` tag push, not on every commit to `main`).
 - `call()` now transparently falls back to a temp file + `--args-file`
   for any payload at or above 32KB, instead of always passing `--args
   <json>` inline. `hecate-rag.upload_knowledge`'s payload embeds a whole
-  document's raw bytes, base64-encoded, which can exceed a safe
-  command-line length on any platform; a calling model never needs to
-  know the difference. Bumps `MIN_MACULA_CLI_VERSION` to `0.5.0`
-  (`call -args-file`, new there). See `plans/PLAN_LARGE_PAYLOAD_CALLS.md`.
+  document's raw text, which can exceed a safe command-line length on
+  any platform for a real file; a calling model never needs to know the
+  difference. Bumps `MIN_MACULA_CLI_VERSION` to `0.5.0` (`call
+  -args-file`, new there). See `plans/PLAN_LARGE_PAYLOAD_CALLS.md`.
+- `mesh_remember_directory`: recursively ingests every matching file
+  under a local directory into hecate-rag, one `upload_knowledge` call
+  per file (content travels in the call, so this works regardless of
+  where hecate-rag is physically running -- hecate-rag's own
+  `seed_corpus` reads from its own filesystem instead, and isn't
+  reachable over the mesh at all). `document_id` is derived
+  deterministically from each file's relative path, so re-running it
+  upserts instead of duplicating. Sequential, one mesh call at a time;
+  returns a summary, not a per-file log.
 
 ### Changed
 - `mesh_remember` now calls `hecate-rag.add_knowledge` (one mesh RPC)

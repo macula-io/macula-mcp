@@ -13,8 +13,8 @@ exist yet.
 `macula-cli call`'s `-args` flag only accepts an inline JSON string, and
 `macula-mcp`'s `call()` always builds one. That's fine for the vast
 majority of mesh procedures, but `hecate-rag.upload_knowledge` and
-`hecate-rag.add_knowledge` expect a document's raw bytes inline in the
-JSON payload — base64-encoded, a real document can be large enough to
+`hecate-rag.add_knowledge` expect a document's raw text inline in the
+JSON payload, and a real document can be large enough on its own to
 exceed a safe command-line length on any platform. This plan makes any
 mesh call with a large payload work the same way a small one does,
 transparently, without the MCP tool caller needing to know the

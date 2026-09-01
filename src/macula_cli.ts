@@ -520,7 +520,7 @@ export interface CallResult {
  * length limit this project's own install/release tooling has to
  * respect (Windows' CreateProcess, ~32KB total) -- ordinary calls never
  * notice; a real document (e.g. for hecate-rag.upload_knowledge, whose
- * payload embeds the raw file base64-encoded) does. See
+ * payload embeds the file's raw text) does. See
  * PLAN_LARGE_PAYLOAD_CALLS.md. Exported for tests only.
  */
 export const LARGE_PAYLOAD_THRESHOLD_BYTES = 32 * 1024;

@@ -44,6 +44,9 @@
 // source_label replaces source_path: a flat grouping label, not a
 // hierarchical path, matching what the wire field actually is.
 
+import { createHash } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
+import { extname, join, relative, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { call, defaultStation, findRecordsByType } from "./macula_cli.js";
@@ -52,6 +55,7 @@ import { ensurePresence } from "./presence.js";
 
 const SEARCH_PROCEDURE = "hecate-rag.answer_query";
 const ADD_KNOWLEDGE_PROCEDURE = "hecate-rag.add_knowledge";
+const UPLOAD_KNOWLEDGE_PROCEDURE = "hecate-rag.upload_knowledge";
 
 /** Discovers which realm hecate-rag is CURRENTLY advertised under -- never the all-zero default, matching mesh_list_stations's own reasoning. */
 async function discoverHecateRagRealm(host: string | undefined): Promise<{ realm: string } | { error: string }> {
@@ -68,6 +72,38 @@ async function discoverHecateRagRealm(host: string | undefined): Promise<{ realm
     };
   }
   return { realm: match.procedure_advertisement.realm };
+}
+
+export const DEFAULT_INCLUDE_EXTENSIONS = [".md", ".mdx", ".txt"];
+export const DEFAULT_EXCLUDE_DIRS = [".git", "node_modules", "_build", "_build_resolved", "_checkouts", "dist", "target", ".next", "vendor"];
+const SOURCE_TYPE_BY_EXTENSION: Record<string, string> = {
+  ".md": "text/markdown",
+  ".mdx": "text/markdown",
+  ".txt": "text/plain",
+};
+
+/** Exported for tests only -- registerMeshMemory is the real entry point. */
+export function sourceTypeFor(ext: string): string {
+  return SOURCE_TYPE_BY_EXTENSION[ext] ?? "text/plain";
+}
+
+/**
+ * Stable, deterministic id from a file's relative path -- re-running
+ * mesh_remember_directory on the same directory upserts the same
+ * documents instead of duplicating them (rag_store:upsert_source is a
+ * real upsert, keyed on document_id). Exported for tests only.
+ */
+export function documentIdFor(relativePath: string): string {
+  return createHash("sha256").update(relativePath).digest("hex").slice(0, 16);
+}
+
+/** Exported for tests only. */
+export function isExcluded(relativePath: string, excludeDirs: string[]): boolean {
+  return relativePath.split(sep).some((segment) => excludeDirs.includes(segment));
+}
+
+function isDirectoryError(e: unknown): boolean {
+  return e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "EISDIR";
 }
 
 export function registerMeshMemory(server: McpServer): void {
@@ -146,6 +182,100 @@ export function registerMeshMemory(server: McpServer): void {
       } catch (e) {
         return errorContent(describeCliError("mesh_remember failed", e));
       }
+    },
+  );
+
+  server.tool(
+    "mesh_remember_directory",
+    "Recursively ingest every matching file under a LOCAL directory into the mesh's shared memory " +
+      "(hecate-rag), one hecate-rag.upload_knowledge call per file -- for real documents (a corpus, a " +
+      "set of notes), not conversational snippets (use mesh_remember for those). Each file's content " +
+      "travels in its own mesh call, so this works regardless of where hecate-rag is physically running " +
+      "-- it does NOT ask hecate-rag to read from its own filesystem (hecate-rag's seed_corpus does that, " +
+      "and isn't reachable over the mesh at all). document_id is derived deterministically from each " +
+      "file's relative path, so re-running this on the same directory updates existing documents instead " +
+      "of duplicating them. Binary or undecodable files are skipped, not treated as errors. Processes " +
+      "files sequentially, one mesh call at a time -- a large directory will take a while; the response " +
+      "is a summary (counts + any per-file failures), not a per-file log.",
+    {
+      directory: z.string().describe("Local directory to walk, recursively. Must exist and be readable."),
+      include_extensions: z
+        .array(z.string())
+        .optional()
+        .describe(`File extensions to ingest, e.g. [".md", ".ts"]. Defaults to ${JSON.stringify(DEFAULT_INCLUDE_EXTENSIONS)}.`),
+      exclude_dirs: z
+        .array(z.string())
+        .optional()
+        .describe(`Directory names to skip anywhere in the tree. Defaults to ${JSON.stringify(DEFAULT_EXCLUDE_DIRS)}.`),
+      source_prefix: z.string().optional().describe('Prepended to each file\'s relative path for source_path, e.g. "hecate-corpus".'),
+      host: z
+        .string()
+        .optional()
+        .describe(`Station to connect through for both the discovery lookup and every call, "host[:port]". Defaults to ${defaultStation()}.`),
+    },
+    async ({ directory, include_extensions, exclude_dirs, source_prefix, host }) => {
+      ensurePresence(server);
+      const includeExt = include_extensions ?? DEFAULT_INCLUDE_EXTENSIONS;
+      const excludeDirs = exclude_dirs ?? DEFAULT_EXCLUDE_DIRS;
+
+      let relativePaths: string[];
+      try {
+        relativePaths = await readdir(directory, { recursive: true });
+      } catch (e) {
+        return errorContent(`could not read directory ${directory}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      const discovery = await discoverHecateRagRealm(host);
+      if ("error" in discovery) return errorContent(discovery.error);
+
+      const ingested: { path: string; document_id: string; chunks: number }[] = [];
+      const skipped: { path: string; reason: string }[] = [];
+      const failed: { path: string; error: string }[] = [];
+
+      for (const rel of relativePaths) {
+        if (isExcluded(rel, excludeDirs)) continue;
+        const ext = extname(rel);
+        if (!includeExt.includes(ext)) continue;
+
+        let content: string;
+        try {
+          content = await readFile(join(directory, rel), "utf8");
+        } catch (e) {
+          if (isDirectoryError(e)) continue; // a directory that happens to end in a matching extension
+          skipped.push({ path: rel, reason: `unreadable or not valid UTF-8: ${e instanceof Error ? e.message : String(e)}` });
+          continue;
+        }
+        if (content.trim().length === 0) {
+          skipped.push({ path: rel, reason: "empty file" });
+          continue;
+        }
+
+        const documentId = documentIdFor(rel);
+        const sourcePath = source_prefix ? `${source_prefix}/${rel}` : rel;
+        try {
+          const res = await call({
+            host,
+            procedure: UPLOAD_KNOWLEDGE_PROCEDURE,
+            callArgs: { document_id: documentId, source_path: sourcePath, source_type: sourceTypeFor(ext), raw_bytes: content },
+            realm: discovery.realm,
+          });
+          const payload = res.payload as { chunks?: number } | undefined;
+          ingested.push({ path: rel, document_id: documentId, chunks: payload?.chunks ?? 0 });
+        } catch (e) {
+          failed.push({ path: rel, error: describeCliError("upload_knowledge failed", e) });
+        }
+      }
+
+      return jsonContent({
+        realm: discovery.realm,
+        directory,
+        ingested_count: ingested.length,
+        skipped_count: skipped.length,
+        failed_count: failed.length,
+        total_chunks: ingested.reduce((sum, r) => sum + r.chunks, 0),
+        skipped,
+        failed,
+      });
     },
   );
 }
