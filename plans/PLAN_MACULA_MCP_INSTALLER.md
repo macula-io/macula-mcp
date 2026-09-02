@@ -19,7 +19,7 @@ live shape, just probing for `macula-cli` now instead of a running
 **Tier-1 ship order (decided 2026-05-16):**
 
 1. Phase 0a thin-build spike — investigate stripping non-essential apps from the daemon release (~0.5 day). Decides binary-size budget before commit.
-2. Phase 0 Burrito build + CI + minisign + Codeberg Releases — **linux-x64 only** for MVP. macos-arm64, macos-x64, linux-arm64, win-x64 are follow-up slices.
+2. Phase 0 Burrito build + CI + minisign + GitHub Releases — **linux-x64 only** for MVP. macos-arm64, macos-x64, linux-arm64, win-x64 are follow-up slices.
 3. Phase 1 macula-mcp fetcher + launcher_systemd integration.
 4. Phase 6 + 7: publish `@macula/mcp` v0.3.0 + manifesto cross-post.
 
@@ -52,7 +52,7 @@ service, cross-vendor agent fabric) sits behind this single command.
 ## Architecture
 
 ```
-                 ┌─ Codeberg Releases ──┐
+                 ┌─ GitHub Releases ──┐
                  │  hecate-daemon-burr- │
                  │  ito-{platform}.tgz  │  (5 platforms)
                  └─────────▲────────────┘
@@ -127,7 +127,7 @@ npm runtime" path.
 |---|-----------|----------|------|
 | 1 | npm entrypoint `bin/install.ts` | macula-mcp | flow orchestration |
 | 2 | Platform-detect | macula-mcp | `os.platform()` × `os.arch()` |
-| 3 | Daemon fetcher | macula-mcp | Codeberg Releases download + minisign verify + unpack |
+| 3 | Daemon fetcher | macula-mcp | GitHub Releases download + minisign verify + unpack |
 | 4 | Daemon launcher | macula-mcp | systemd-user / launchd / schtasks |
 | 5 | Cert acquirer | hecate-daemon (autonomous, first-boot) | `POST /api/v1/provisional/issue` — depends on `PLAN_PROVISIONAL_REALM_TIER` Phase 0 |
 | 6 | MCP-client detector | macula-mcp | probes 5 well-known config paths |
@@ -141,8 +141,8 @@ npm runtime" path.
 |--------|--------|
 | Format | Burrito-built single-file BEAM release |
 | Platforms | linux-{x64,arm64}, macos-{x64,arm64}, windows-x64 |
-| Build CI | GitHub Actions on push-mirror (per `project_codeberg_ci_topology`); 5 binaries per tag |
-| Canonical host | Codeberg Releases (`codeberg.org/hecate-social/hecate-daemon/releases/...`) |
+| Build CI | GitHub Actions on the canonical repo; 5 binaries per tag |
+| Canonical host | GitHub Releases (`github.com/hecate-social/hecate-daemon/releases/...`) |
 | Mirror | GitHub Releases (auto-mirror, redundancy only) |
 | Signature | minisign per binary; public key bundled inside `@macula/mcp` package |
 | Size budget | ~15 MB per binary; investigate "thin" build (drop `serve_llm` etc.) under Phase 0a |
@@ -206,7 +206,7 @@ install page.
 | Phase | Scope | Blocks on | Effort | Status |
 |-------|-------|-----------|--------|--------|
 | **0a** | "Thin" build investigation — strip non-essential daemon apps to halve binary size | none | 0.5 day | 📋 next |
-| **0** | Burrito-built hecate-daemon for **linux-x64 only**, signed with minisign, on Codeberg Releases. See "Phase 0 detail" below. | Phase 0a | 4.5 days | 📋 |
+| **0** | Burrito-built hecate-daemon for **linux-x64 only**, signed with minisign, on GitHub Releases. See "Phase 0 detail" below. | Phase 0a | 4.5 days | 📋 |
 | **1** | `bin/install.ts` integration: fetcher + systemd-user launcher; wire into existing install flow | Phase 0 | 1 day | 📋 |
 | **2** | Add Cursor + Claude Desktop + Windsurf detection/config | Phase 1 | 0.5 day | ✅ already shipped MVP |
 | **3** | macos-arm64 binary + launcher_launchd (post-viral) | Phase 0 settled | 1 day | 📋 deferred |
@@ -315,7 +315,7 @@ hecate-daemon is acceptable.
 ## Phase 0 detail — Burrito + CI + signing (linux-x64 only)
 
 **Target deliverable:** A signed `hecate-daemon-linux-x64-vX.Y.Z.tar.gz`
-on Codeberg Releases, downloadable + verifiable from any internet-
+on GitHub Releases, downloadable + verifiable from any internet-
 connected linux-x64 machine.
 
 ### 0.1 Burrito setup in hecate-daemon (1.5 days)
@@ -380,9 +380,9 @@ jobs:
           echo "$MINISIGN_KEY" > /tmp/key.sec
           minisign -S -s /tmp/key.sec -m _build/dist/burrito_out/hecate-daemon-linux-x64.tar.gz
           shred -u /tmp/key.sec
-      - name: Upload to Codeberg Releases
-        env: { CODEBERG_TOKEN: ${{ secrets.CODEBERG_RELEASE_TOKEN }} }
-        run: scripts/upload-to-codeberg.sh ${{ github.ref_name }}
+      - name: Upload to GitHub Releases
+        env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        run: gh release upload ${{ github.ref_name }} dist/*
       - name: Upload to GH Releases (mirror)
         uses: softprops/action-gh-release@v2
 ```
@@ -461,7 +461,7 @@ export async function fetchDaemon(opts: {
 
 Behaviour:
 
-1. Compute URL: `https://codeberg.org/hecate-social/hecate-daemon/releases/download/v${ver}/hecate-daemon-${platform.label}.tar.gz`
+1. Compute URL: `https://github.com/hecate-social/hecate-daemon/releases/download/v${ver}/hecate-daemon-${platform.label}.tar.gz`
 2. Stream-download with progress (node:stream)
 3. Stream the matching `.minisig` file from the same release
 4. Run `minisign -V -p keys/macula-minisign.pub -x <sig> -m <tgz>` via
@@ -522,7 +522,7 @@ Update `src/bin/install.ts`:
      // ... existing flow
    } else {
 -    warn(`no hecate-daemon found at ${dp.socket}`);
--    info("see codeberg.org/hecate-social/hecate-daemon for install,");
+-    info("see github.com/hecate-social/hecate-daemon for install,");
 -    info("Continuing with MCP-config registration anyway");
 +    if (args.noFetch) {
 +      warn("no daemon found; --no-fetch given, only writing MCP config");
@@ -564,7 +564,7 @@ publish a new daemon version.
 | Burrito Erlang-release support thin | Medium | +0.5 day | Plan B same; test early |
 | Binary >50 MB after thin-build | Medium | UX hit, not estimate hit | 0a measures this first; if >50 MB, document the size and ship anyway |
 | glibc version skew between CI builder (Ubuntu 22.04 → glibc 2.35) and user systems | Low (linux-only) | broken on Ubuntu 20.04 etc. | Build against an older glibc (Ubuntu 20.04 runner → glibc 2.31) for broader compat; or document min-glibc |
-| Codeberg Releases API hiccup at release time | Low | +retry | GH Releases mirror as fallback download URL |
+| GitHub Releases API hiccup at release time | Low | +retry | GH Releases mirror as fallback download URL |
 | First-run ERTS unpack >2s | Low | UX hit | Cache pre-unpacked under `~/.hecate/erts-cache/` (Burrito does this by default) |
 
 ### Smoke-test matrix (Phase 0 ships when all pass)
@@ -588,7 +588,7 @@ publish a new daemon version.
 | `macula-io/macula-mcp` | `bin/uninstall.ts` | reverse | 📋 |
 | `macula-io/macula-mcp` | `bin/status.ts` | health + cert TTL + registered clients | 📋 |
 | `macula-io/macula-mcp` | `src/install/platform.ts` | detect | 📋 |
-| `macula-io/macula-mcp` | `src/install/fetcher.ts` | Codeberg release download + minisign | 📋 |
+| `macula-io/macula-mcp` | `src/install/fetcher.ts` | GitHub release download + minisign | 📋 |
 | `macula-io/macula-mcp` | `src/install/launcher_systemd.ts` | linux | 📋 |
 | `macula-io/macula-mcp` | `src/install/launcher_launchd.ts` | macos | 📋 |
 | `macula-io/macula-mcp` | `src/install/launcher_schtasks.ts` | windows | 📋 |

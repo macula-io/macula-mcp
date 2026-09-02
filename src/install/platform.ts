@@ -35,7 +35,7 @@ function mapOs(p: NodeJS.Platform): OS {
   if (p === "win32") return "win32";
   throw new Error(
     `unsupported platform: ${p}. Macula supports linux, darwin, win32. ` +
-      `File an issue at codeberg.org/macula-io/macula-mcp if you need ${p}.`,
+      `File an issue at github.com/macula-io/macula-mcp if you need ${p}.`,
   );
 }
 
