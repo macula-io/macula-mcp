@@ -22,6 +22,12 @@ fires on a `v*` tag push, not on every commit to `main`).
   `MACULA_MCP_PORTAL_URL` and `MACULA_MCP_REALM_DIR` override the portal and
   the credential directory.
 
+### Fixed
+- The install scripts and docs pass `--allow-scripts=@macula-io/mcp,better-sqlite3`:
+  npm 12 also blocks a dependency's own install script, and better-sqlite3's is
+  the one that fetches the SQLite native binding the roster and transcript
+  stores need (seen on a fresh Arch box with npm 12.0.2).
+
 ## [0.13.0] - 2026-09-02
 
 ### Added

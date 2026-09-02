@@ -59,7 +59,7 @@ install_err="$(mktemp)"
 # describe. Harmless on pre-v12 npm: verified locally, it's just an
 # "Unknown cli config" warning there, not a failure -- scripts already
 # ran unconditionally on those versions anyway.
-if ! npm install -g --allow-scripts="@macula-io/mcp" "$pkg" 2>"$install_err"; then
+if ! npm install -g --allow-scripts="@macula-io/mcp,better-sqlite3" "$pkg" 2>"$install_err"; then
   cat "$install_err" >&2
   rm -f "$install_err"
   die "npm install -g ${pkg} failed (see above). If this is an EACCES/permission error, npm's

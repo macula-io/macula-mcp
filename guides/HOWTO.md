@@ -19,7 +19,7 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 
 Four steps, in order: check Node.js 20+ is present (won't install it for
 you), install `macula-cli` if it isn't already on `PATH`,
-`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`, then run
+`npm install -g --allow-scripts=@macula-io/mcp,better-sqlite3 @macula-io/mcp`, then run
 `macula-mcp-install`.
 
 **Since v0.5.1, `npm install -g @macula-io/mcp` on its own also keeps
@@ -36,7 +36,11 @@ Never runs on this repo's own `npm ci` (see `CONTRIBUTING.md`), and
 never fails the npm install itself if the fetch fails — a warning, not
 a blocker.
 
-**Needs `--allow-scripts=@macula-io/mcp` on npm v12+** (both installer
+**Needs `--allow-scripts=@macula-io/mcp,better-sqlite3` on npm v12+** (both installer
+scripts pass it; `better-sqlite3` is named too because npm 12 also blocks a
+dependency's own install script, and that is the one that fetches the SQLite
+native binding this server's roster and transcript stores need -- seen on a
+fresh Arch box with npm 12.0.2, 2026-09-02)
 scripts pass it already; add it yourself if you run the bare `npm
 install -g` above). npm v12 (2026-07) disabled install-time lifecycle
 scripts by default, and without the flag this exact `postinstall` hook
@@ -94,13 +98,13 @@ with its own [install/uninstall](https://github.com/macula-io/macula-cli).
 
 **Installed fine, but `macula-cli` is missing or stale, and no
 `[macula-mcp postinstall]` lines showed up during install.** You're on
-npm v12+ and installed without `--allow-scripts=@macula-io/mcp` (a manual
+npm v12+ and installed without `--allow-scripts=@macula-io/mcp,better-sqlite3` (a manual
 `npm install -g @macula-io/mcp`, not the `install.sh`/`install.ps1`
 above, which already pass it). npm v12 disabled install-time lifecycle
 scripts by default and skips them silently — no error, no warning, the
 install just succeeds without running `postinstall`. Re-run with the flag
 to fix it retroactively:
-`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`. If that
+`npm install -g --allow-scripts=@macula-io/mcp,better-sqlite3 @macula-io/mcp`. If that
 still doesn't print `[macula-mcp postinstall]` lines, skip the hook
 entirely and run what it would have run:
 `curl -fsSL https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash`

@@ -542,7 +542,7 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 ```
 
 Both check Node.js, install `macula-cli` if it isn't already on `PATH`,
-`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`, then run
+`npm install -g --allow-scripts=@macula-io/mcp,better-sqlite3 @macula-io/mcp`, then run
 `macula-mcp-install` to register the `macula` MCP server with every
 detected client (Claude Code, Claude Desktop, Cursor, Windsurf, opencode) —
 safe-merges into existing configs and backs them up first. Idempotent;
@@ -556,7 +556,7 @@ this bootstrapper's own first-time-only step above) — so a plain
 `npm install -g @macula-io/mcp@latest` on a machine that already has
 `macula-cli` won't leave it silently behind a version bump like this one
 needed. Opt out with `MACULA_MCP_SKIP_CLI_INSTALL` if you manage it
-yourself. **Needs `--allow-scripts=@macula-io/mcp`** (both installer
+yourself. **Needs `--allow-scripts=@macula-io/mcp,better-sqlite3`** (both installer
 scripts above already pass it): npm v12 disabled install-time lifecycle
 scripts by default, and without the flag this `postinstall` hook silently
 no-ops — no error, it just doesn't run — leaving a stale `macula-cli`

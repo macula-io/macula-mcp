@@ -9,7 +9,7 @@
 // that runs the same installer the top-level bootstrapper already uses.
 //
 // DOESN'T RUN AT ALL on npm v12+ unless the install itself passed
-// `--allow-scripts=@macula-io/mcp` -- npm v12 (2026-07) disabled
+// `--allow-scripts=@macula-io/mcp,better-sqlite3` -- npm v12 (2026-07) disabled
 // install-time lifecycle scripts by default, silently: no error, this
 // file just never executes. install.sh/install.ps1 pass the flag; a
 // manual `npm install -g @macula-io/mcp` needs it added by hand. See

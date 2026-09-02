@@ -66,7 +66,7 @@ try {
     # locally, it's just an "Unknown cli config" warning there, not a
     # failure -- scripts already ran unconditionally on those versions
     # anyway.
-    npm install -g --allow-scripts="@macula-io/mcp" $pkg
+    npm install -g --allow-scripts="@macula-io/mcp,better-sqlite3" $pkg
     if ($LASTEXITCODE -ne 0) { throw "npm install -g $pkg exited with code $LASTEXITCODE" }
 } catch {
     throw "npm install -g $pkg failed: $_`n`nIf this is a permission error, check your npm global prefix" +
