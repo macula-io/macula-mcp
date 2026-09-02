@@ -39,8 +39,8 @@ export const REGISTER_PROCEDURE = "hecate_citizens.register_presence";
 export const CITIZEN_KIND = "agent";
 export const OFFERS = ["conversation"];
 export const DEFAULT_RENEW_SECONDS = 300;
-export const FIRST_ATTEMPT_TIMEOUT_MS = 12_000;
-const CALL_TIMEOUT_MS = 8_000;
+export const FIRST_ATTEMPT_TIMEOUT_MS = 15_000;
+const CALL_TIMEOUT_MS = 6_000;
 
 export interface CitizenshipStatus {
   /** The default identity's node_id, which is what gets registered. */
@@ -55,6 +55,8 @@ export interface CitizenshipStatus {
   next_renewal_at?: string;
   /** Why the last attempt failed, if it did. Cleared by the next success. */
   error?: string;
+  /** An attempt is still in flight (the first one outlived its bounded wait, or a renewal is running); status() again later. */
+  pending?: boolean;
 }
 
 interface CitizenshipState {
@@ -65,6 +67,7 @@ interface CitizenshipState {
   registeredAt?: string;
   expiresAt?: number;
   error?: string;
+  inFlight: boolean;
   renewTimer?: NodeJS.Timeout;
   renewSeconds: number;
 }
@@ -170,6 +173,8 @@ export async function register(input: { host: string; nodeId: string; displayNam
 async function attempt(): Promise<void> {
   if (!state) return;
   const s = state;
+  if (s.inFlight) return; // a renewal must never stack on a slow first attempt
+  s.inFlight = true;
   try {
     const { realm, expires_at } = await register({ host: s.host, nodeId: s.nodeId, displayName: s.displayName });
     s.realm = realm;
@@ -179,6 +184,8 @@ async function attempt(): Promise<void> {
   } catch (e) {
     s.error = e instanceof Error ? e.message : String(e);
     console.error(`citizenship: registering ${s.nodeId} with ${REGISTER_PROCEDURE} failed: ${s.error}`);
+  } finally {
+    s.inFlight = false;
   }
 }
 
@@ -212,7 +219,7 @@ export async function start(input: {
   }
   stop();
   const renewSeconds = Math.max(30, input.renewSeconds ?? DEFAULT_RENEW_SECONDS);
-  state = { host: input.host ?? defaultStation(), nodeId: input.nodeId, displayName: input.displayName, renewSeconds };
+  state = { host: input.host ?? defaultStation(), nodeId: input.nodeId, displayName: input.displayName, renewSeconds, inFlight: false };
   await withTimeout(attempt(), FIRST_ATTEMPT_TIMEOUT_MS);
   const timer = setInterval(() => void attempt(), renewSeconds * 1000);
   timer.unref();
@@ -240,5 +247,6 @@ export function status(): CitizenshipStatus {
     expires_at: state.expiresAt,
     next_renewal_at: nextRenewal,
     error: state.error,
+    ...(state.inFlight ? { pending: true } : {}),
   };
 }
