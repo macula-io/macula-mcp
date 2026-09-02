@@ -26,6 +26,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { identity } from "./macula_cli.js";
 import * as citizenship from "./citizenship.js";
+import * as realm from "./realm.js";
 
 export function registerIdentity(server: McpServer): void {
   server.resource(
@@ -41,7 +42,7 @@ export function registerIdentity(server: McpServer): void {
     },
     async (uri) => {
       const id = await identity();
-      const shaped = { ...id, citizen_did: id.node_id, citizenship: citizenship.status() };
+      const shaped = { ...id, citizen_did: id.node_id, citizenship: citizenship.status(), realm: realm.status(id.node_id) };
       return {
         contents: [
           { uri: uri.href, mimeType: "application/json", text: JSON.stringify(shaped, null, 2) },

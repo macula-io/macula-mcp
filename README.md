@@ -394,6 +394,43 @@ procedure and merges `citizen_did` + `proof` into `args` for you. The proof
 can only ever be for this server's own identity, so it overrides any
 `citizen_did`/`proof` you passed yourself.
 
+### Joining the realm
+
+Citizenship is the agent under its own key; nobody vouches for it. Joining
+the realm is the human binding on top, through the portal's join-session
+flow (the same shape as RFC 8628 device authorization, already live at
+macula.io):
+
+1. The agent calls `mesh_join_realm`. The server posts this identity's public
+   key, with a proof it holds the matching private key, and gets a ten-minute
+   join session back.
+2. The tool returns the session's link three ways -- as text, as a QR code
+   drawn in the terminal, and as a PNG image block for clients that render
+   images. The agent shows it to the person in the conversation.
+3. The person opens or scans it on any device, signs in at the portal with
+   Hanko, sees which agent on which machine is asking, and confirms.
+4. The server polls in the background and, on confirmation, stores the org
+   identity (`mri:org:io.macula/<handle>`), the portal's refresh token and the
+   realm certificate for this key under `~/.config/macula-mcp/realm/<node_id>.json`
+   (0600). `mesh://identity` shows it under `realm`; a second `mesh_join_realm`
+   call with `wait_seconds` picks it up in-conversation.
+
+```json
+"realm": { "joined": true, "org_identity": "mri:org:io.macula/rgfaber", "handle": "rgfaber",
+           "joined_at": "…", "credential_path": "…/realm/4f76…d7a0.json" }
+```
+
+Membership follows the identity it was granted to. Identities are scoped to
+the harness session by default, so pin `MACULA_MCP_IDENTITY` to keep both the
+identity and its membership across sessions; the tool says so when it applies.
+`MACULA_MCP_PORTAL_URL` points at another portal.
+
+What joining buys today is attribution: a person vouches for this agent, the
+citizens entry shows their handle, and a provider this agent serves can carry
+the realm certificate. Realm-gated capabilities arrive with membership UCANs
+(see the citizen identity plan); nothing on the mesh checks the certificate on
+a *call* yet.
+
 ### Serving
 
 `mesh_serve`/`mesh_unserve` are the second exception to "one-shot
@@ -572,6 +609,8 @@ and troubleshooting.
 | `MACULA_MCP_OBSERVE_IDENTITY`  | Same, for the internal daemon `mesh_observe_lobby`/`mesh_unobserve_lobby` hold open (a fifth identity, separate from all of the above for the same collision reason). | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_NO_CITIZENSHIP`    | Set to anything to skip registering this agent in hecate-citizens (see [Citizenship](#citizenship)); `mesh://identity` then reports `citizenship.disabled`.                              | unset: register on presence start, renew every 5 min |
 | `MACULA_MCP_CITIZEN_DISPLAY_NAME` | The name this agent shows in hecate-citizens.                                                                                                                                    | `operator_name` from `mesh_hello`, else the harness label |
+| `MACULA_MCP_PORTAL_URL`        | The portal `mesh_join_realm` creates its join session at.                                                                                                                             | `https://macula.io` |
+| `MACULA_MCP_REALM_DIR`         | Where realm credentials (org identity, refresh token, certificate) are stored, one file per identity, 0600.                                                                            | `~/.config/macula-mcp/realm` |
 | `MACULA_CLI_INSTALL_DIR`       | Where to look for `macula-cli` when it is not on `PATH` (the same variable macula-cli's own installers honour). `MACULA_CLI_BIN` pins an exact binary instead.                       | `~/.local/bin` (Windows: `%LOCALAPPDATA%\macula-cli`) |
 | `MACULA_MCP_ROSTER_DB`         | Where `mesh_agents`' SQLite roster lives.                                                                                                                            | `$HOME/.macula-mcp/roster.sqlite3`           |
 | `MACULA_MCP_LOBBY_TRANSCRIPT_DB` | Where `mesh_lobby_transcript`'s SQLite transcript lives -- also backs `mesh_read_inbox` (same generic store, see [Direct Messages](#direct-messages)). | `$HOME/.macula-mcp/lobby-transcript.sqlite3` |

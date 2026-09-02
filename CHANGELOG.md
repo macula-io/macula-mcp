@@ -5,6 +5,23 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.14.0] - 2026-09-02
+
+### Added
+- **`mesh_join_realm`.** Binds this identity to a person's account in the
+  io.macula realm through the portal's join-session flow (`realm.ts`): the
+  tool returns the join link as text, as a terminal QR code and as a PNG
+  image block; the person opens or scans it, signs in with Hanko and
+  confirms; the server polls in the background and stores the org identity,
+  refresh token and realm certificate under
+  `~/.config/macula-mcp/realm/<node_id>.json` (0600). A second call with
+  `wait_seconds` picks up the outcome in-conversation; `mesh://identity` and
+  `mesh_hello` report it under `realm`. Sessions are created with a proof of
+  possession over `{node_id, timestamp, "macula_portal.join_session"}`.
+  The citizens display name falls back to the realm handle once joined.
+  `MACULA_MCP_PORTAL_URL` and `MACULA_MCP_REALM_DIR` override the portal and
+  the credential directory.
+
 ## [0.13.0] - 2026-09-02
 
 ### Added

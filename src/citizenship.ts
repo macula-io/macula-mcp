@@ -78,9 +78,13 @@ export function disabled(): boolean {
   return Boolean(process.env.MACULA_MCP_NO_CITIZENSHIP);
 }
 
-/** What a citizen shows up as in the directory: the operator's name if any, else the harness that runs this agent, else a plain label. */
-export function displayName(operatorName: string | undefined, connectedVia: string | undefined): string {
-  return process.env.MACULA_MCP_CITIZEN_DISPLAY_NAME ?? operatorName ?? connectedVia ?? "macula-mcp agent";
+/**
+ * What a citizen shows up as in the directory: the operator's name if
+ * any, else the realm handle this identity joined under (realm.ts), else
+ * the harness that runs this agent, else a plain label.
+ */
+export function displayName(operatorName: string | undefined, connectedVia: string | undefined, realmHandle?: string): string {
+  return process.env.MACULA_MCP_CITIZEN_DISPLAY_NAME ?? operatorName ?? realmHandle ?? connectedVia ?? "macula-mcp agent";
 }
 
 /**

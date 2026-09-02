@@ -61,6 +61,7 @@ import { registerMeshServe } from "./mesh_serve.js";
 import { registerMeshUnserve } from "./mesh_unserve.js";
 import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
 import { serverVersion } from "./version.js";
+import { registerMeshJoinRealm } from "./mesh_join_realm.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -115,6 +116,10 @@ service consults: your node_id is your citizen_did there (mesh_hello and mesh://
 outcome under "citizenship"; MACULA_MCP_NO_CITIZENSHIP=1 opts out). For a capability gated by an \
 ownership proof (hecate_mail.open_mailbox, hecate_graph.learn_link), pass prove_identity:true to \
 mesh_call and it signs and attaches citizen_did + proof for you.
+- mesh_join_realm binds this identity to a PERSON's account in the io.macula realm: it returns a link and a \
+QR code, the person opens or scans it, signs in at the portal and confirms; call it again with wait_seconds \
+to pick up the result (mesh://identity shows it too, under "realm"). Show the link and the QR to the person \
+in the conversation -- only they can confirm. Membership is attribution today, not extra permissions.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
@@ -175,6 +180,7 @@ registerMeshWatch(server);
 // customizing operator_name/message/model, or an explicit restart after
 // mesh_goodbye.
 registerMeshHello(server);
+registerMeshJoinRealm(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);
 // mesh_read_inbox reads the transcript mesh_hello's own inbox watch

@@ -58,8 +58,9 @@ describe("displayName", () => {
     else process.env.MACULA_MCP_CITIZEN_DISPLAY_NAME = saved;
   });
 
-  it("prefers the operator's name, then the harness label, then a plain label", () => {
-    expect(displayName("raf", "opencode 1.18.25")).toBe("raf");
+  it("prefers the operator's name, then the realm handle, then the harness label, then a plain label", () => {
+    expect(displayName("raf", "opencode 1.18.25", "rgfaber")).toBe("raf");
+    expect(displayName(undefined, "opencode 1.18.25", "rgfaber")).toBe("rgfaber");
     expect(displayName(undefined, "opencode 1.18.25")).toBe("opencode 1.18.25");
     expect(displayName(undefined, undefined)).toBe("macula-mcp agent");
   });

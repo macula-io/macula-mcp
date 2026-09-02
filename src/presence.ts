@@ -81,6 +81,7 @@ import { inboxTopic } from "./inbox.js";
 import { recordFact } from "./lobby_transcript.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import * as citizenship from "./citizenship.js";
+import * as realm from "./realm.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";
@@ -175,6 +176,8 @@ export interface StartResult {
   citizen_did: string;
   /** Whether this agent is currently registered in hecate-citizens, and why not if not -- see citizenship.ts. */
   citizenship: citizenship.CitizenshipStatus;
+  /** Whether this identity is bound to a person's account in the realm -- see realm.ts / mesh_join_realm. */
+  realm: realm.RealmStatus;
 }
 
 /** The presence node_id currently watching an inbox, or undefined if presence isn't active -- see mesh_read_inbox.ts. */
@@ -227,7 +230,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     const citizen = await citizenship.start({
       host: state.host,
       nodeId: state.nodeId,
-      displayName: citizenship.displayName(state.operatorName, state.connectedVia),
+      displayName: citizenship.displayName(state.operatorName, state.connectedVia, realm.orgHandle(state.nodeId)),
     });
     return {
       node_id: state.nodeId,
@@ -238,6 +241,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       lobby_topic: lobbyObserver.LOBBY_TOPIC,
       citizen_did: state.nodeId,
       citizenship: citizen,
+      realm: realm.status(state.nodeId),
     };
   }
 
@@ -307,7 +311,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   const citizen = await citizenship.start({
     host,
     nodeId,
-    displayName: citizenship.displayName(args.operatorName, args.connectedVia),
+    displayName: citizenship.displayName(args.operatorName, args.connectedVia, realm.orgHandle(nodeId)),
   });
   return {
     node_id: nodeId,
@@ -318,6 +322,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     lobby_topic: lobbyObserver.LOBBY_TOPIC,
     citizen_did: nodeId,
     citizenship: citizen,
+    realm: realm.status(nodeId),
   };
 }
 
