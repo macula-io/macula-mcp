@@ -5,6 +5,25 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.12.1] - 2026-09-01
+
+### Fixed
+- `install.sh`/`install.ps1` now pass `--allow-scripts=@macula-io/mcp` to
+  `npm install -g`. npm v12 (2026-07-08 GitHub changelog: "npm
+  install-time security and GAT bypass2FA deprecation") disabled
+  install-time lifecycle scripts by default, silently: no error, the
+  `postinstall` hook (`scripts/postinstall.mjs`, keeps `macula-cli`
+  current) just stopped running. Harmless on pre-v12 npm -- confirmed
+  live, it's only an "Unknown cli config" warning there, not a failure.
+  README.md and guides/HOWTO.md updated to match, plus a new HOWTO
+  troubleshooting entry for anyone who already hit this via a manual
+  `npm install -g` (not the installer scripts) before this fix.
+  No git/HTTPS-tarball dependencies in package.json, so npm v12's other
+  new restriction doesn't apply here. Publishing already goes through
+  npm OIDC Trusted Publishing (`release.yml`, no `NPM_TOKEN`), so the
+  2FA-bypass GAT deprecation (the changelog's other half, phased through
+  January 2027) doesn't affect this repo either.
+
 ## [0.12.0] - 2026-09-01
 
 ### Added

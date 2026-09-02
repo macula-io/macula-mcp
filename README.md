@@ -465,12 +465,13 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 ```
 
 Both check Node.js, install `macula-cli` if it isn't already on `PATH`,
-`npm install -g @macula-io/mcp`, then run `macula-mcp-install` to register the
-`macula` MCP server with every detected client (Claude Code, Claude Desktop,
-Cursor, Windsurf) — safe-merges into existing configs and backs them up
-first. Idempotent; re-running is a no-op if everything's already current.
-If more than one client is detected in a real terminal, it asks which to
-register with (Enter for all).
+`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`, then run
+`macula-mcp-install` to register the `macula` MCP server with every
+detected client (Claude Code, Claude Desktop, Cursor, Windsurf) —
+safe-merges into existing configs and backs them up first. Idempotent;
+re-running is a no-op if everything's already current. If more than one
+client is detected in a real terminal, it asks which to register with
+(Enter for all).
 
 `npm install -g @macula-io/mcp` also keeps `macula-cli` at the version
 this package actually needs on its own (a `postinstall` hook, not just
@@ -478,7 +479,13 @@ this bootstrapper's own first-time-only step above) — so a plain
 `npm install -g @macula-io/mcp@latest` on a machine that already has
 `macula-cli` won't leave it silently behind a version bump like this one
 needed. Opt out with `MACULA_MCP_SKIP_CLI_INSTALL` if you manage it
-yourself.
+yourself. **Needs `--allow-scripts=@macula-io/mcp`** (both installer
+scripts above already pass it): npm v12 disabled install-time lifecycle
+scripts by default, and without the flag this `postinstall` hook silently
+no-ops — no error, it just doesn't run — leaving a stale `macula-cli`
+undetected exactly the way this hook exists to prevent. Harmless on
+pre-v12 npm, which just warns about the unrecognized flag and installs
+normally.
 
 Then verify it actually works, not just that the config file has the
 entry:
@@ -532,7 +539,7 @@ and troubleshooting.
 
 ## Status
 
-**Current release: v0.12.0.** `mesh_call` transparently falls back to a
+**Current release: v0.12.1.** `mesh_call` transparently falls back to a
 temp-file `--args-file` for any payload at or above 32KB (needed for
 `hecate-rag.upload_knowledge`'s raw document text, which can exceed a
 safe command-line length), and `mesh_remember_directory` ingests every

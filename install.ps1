@@ -55,7 +55,18 @@ if ($env:MACULA_MCP_VERSION) {
 
 Write-Host "installing $pkg globally..."
 try {
-    npm install -g $pkg
+    # --allow-scripts is the bare package name, never $pkg -- it's an
+    # allowlist keyed on package identity, not an install spec, so a
+    # version-suffixed $pkg (MACULA_MCP_VERSION set) would never match.
+    # npm v12 (2026-07) disabled install-time lifecycle scripts by
+    # default; without this flag, macula-cli's own postinstall step in
+    # package.json silently no-ops on npm v12+ (no error, it just doesn't
+    # run) instead of keeping macula-cli current the way this installer's
+    # own README/HOWTO.md describe. Harmless on pre-v12 npm: verified
+    # locally, it's just an "Unknown cli config" warning there, not a
+    # failure -- scripts already ran unconditionally on those versions
+    # anyway.
+    npm install -g --allow-scripts="@macula-io/mcp" $pkg
     if ($LASTEXITCODE -ne 0) { throw "npm install -g $pkg exited with code $LASTEXITCODE" }
 } catch {
     throw "npm install -g $pkg failed: $_`n`nIf this is a permission error, check your npm global prefix" +

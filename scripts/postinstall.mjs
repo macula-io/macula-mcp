@@ -8,6 +8,13 @@
 // a dependency, so this is the closest equivalent: a postinstall hook
 // that runs the same installer the top-level bootstrapper already uses.
 //
+// DOESN'T RUN AT ALL on npm v12+ unless the install itself passed
+// `--allow-scripts=@macula-io/mcp` -- npm v12 (2026-07) disabled
+// install-time lifecycle scripts by default, silently: no error, this
+// file just never executes. install.sh/install.ps1 pass the flag; a
+// manual `npm install -g @macula-io/mcp` needs it added by hand. See
+// guides/HOWTO.md's "Troubleshooting the install" section.
+//
 // Committed as plain JS, not compiled from src/ -- this must run before
 // `npm run build` has ever produced dist/ (this repo's own `npm ci` hits
 // this exact script on a fresh clone), so the file itself can't depend on

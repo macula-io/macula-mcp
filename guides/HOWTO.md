@@ -18,8 +18,9 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 ```
 
 Four steps, in order: check Node.js 20+ is present (won't install it for
-you), install `macula-cli` if it isn't already on `PATH`, `npm install -g
-@macula-io/mcp`, then run `macula-mcp-install`.
+you), install `macula-cli` if it isn't already on `PATH`,
+`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`, then run
+`macula-mcp-install`.
 
 **Since v0.5.1, `npm install -g @macula-io/mcp` on its own also keeps
 `macula-cli` current** — a `postinstall` hook checks the installed
@@ -34,6 +35,15 @@ call failed with a version error or someone happened to run `doctor`.
 Never runs on this repo's own `npm ci` (see `CONTRIBUTING.md`), and
 never fails the npm install itself if the fetch fails — a warning, not
 a blocker.
+
+**Needs `--allow-scripts=@macula-io/mcp` on npm v12+** (both installer
+scripts pass it already; add it yourself if you run the bare `npm
+install -g` above). npm v12 (2026-07) disabled install-time lifecycle
+scripts by default, and without the flag this exact `postinstall` hook
+silently no-ops — no error, the install just succeeds without it — which
+is precisely the "stale `macula-cli` completely undetected" gap this hook
+exists to close. Harmless to pass on older npm: it just warns about the
+unrecognized flag and installs normally.
 
 If more than one MCP client is detected and you're running in a real
 terminal (not a piped `curl | bash`), `macula-mcp-install` asks which to
@@ -81,6 +91,20 @@ still gets its stale config entry cleaned up), then `npm uninstall -g
 with its own [install/uninstall](https://github.com/macula-io/macula-cli).
 
 ### Troubleshooting the install
+
+**Installed fine, but `macula-cli` is missing or stale, and no
+`[macula-mcp postinstall]` lines showed up during install.** You're on
+npm v12+ and installed without `--allow-scripts=@macula-io/mcp` (a manual
+`npm install -g @macula-io/mcp`, not the `install.sh`/`install.ps1`
+above, which already pass it). npm v12 disabled install-time lifecycle
+scripts by default and skips them silently — no error, no warning, the
+install just succeeds without running `postinstall`. Re-run with the flag
+to fix it retroactively:
+`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`. If that
+still doesn't print `[macula-mcp postinstall]` lines, skip the hook
+entirely and run what it would have run:
+`curl -fsSL https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash`
+(or [macula-cli's own install.ps1](https://github.com/macula-io/macula-cli) on Windows).
 
 **`npm install -g` fails with `EACCES`.** npm's global prefix isn't owned
 by your user — common with a system-package-manager-installed Node. See
