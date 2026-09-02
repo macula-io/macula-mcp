@@ -539,7 +539,7 @@ and troubleshooting.
 
 ## Status
 
-**Current release: v0.12.1.** `mesh_call` transparently falls back to a
+**Current release: v0.12.3.** `mesh_call` transparently falls back to a
 temp-file `--args-file` for any payload at or above 32KB (needed for
 `hecate-rag.upload_knowledge`'s raw document text, which can exceed a
 safe command-line length), and `mesh_remember_directory` ingests every

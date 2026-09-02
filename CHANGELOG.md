@@ -5,6 +5,43 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.12.3] - 2026-09-02
+
+### Fixed
+- **`mesh_agents`'s `is_self` compared against the wrong identity.**
+  It re-derived identity via a fresh `identity()` call -- the separate
+  "default" identity used by `mesh_call`/`mesh_put`/`mesh_get`/
+  `mesh_publish` -- instead of the identity presence's own `agent.hello`
+  beats actually carry. Since identities used to be minted fresh per
+  server process (see the next entry), a second independent call had no
+  guarantee of ever matching, even within one session: verified live,
+  the roster's own self-entry (cross-checked against `mesh_hello`'s
+  reported `node_id`) came back `is_self: false`. Now uses
+  `presence.currentNodeId()`, the literal value presence publishes,
+  same pattern `mesh_read_inbox.ts` already used for the same reason.
+- **Every identity churned on every process restart, not just across
+  genuinely concurrent sessions.** An identity used to live in
+  `tmpdir()`, keyed by `process.pid` plus a random suffix, deleted on
+  exit -- indistinguishable to a mesh peer from meeting a stranger every
+  time (observed live: an agent re-introducing itself as "new node this
+  session" to a peer it had already talked to the day before), and very
+  likely the actual root cause of the `is_self` bug above. Now persists
+  under `~/.config/macula-mcp/identities/`, scoped by
+  `CLAUDE_CODE_SESSION_ID` when the harness sets it (survives even a
+  `--resume`), else this process's own parent process id (survives a
+  restart of just the `macula-mcp` child, since the parent harness
+  process didn't change; distinct across any two concurrent harness
+  invocations of any kind, since two separate processes always have two
+  different PIDs). Two naive alternatives were considered and rejected
+  as worse than the original bug: one identity per npm install (every
+  concurrent Claude Code/opencode window would fight over the same
+  node_id, and a station kicks the second connection presenting an ID
+  already in use) and scoping by working directory (most users launch
+  every project from one workspace root, so two concurrent sessions
+  from the same directory would collide the same way). Verified
+  end-to-end against the real `macula-cli` binary: two separate `node`
+  processes sharing the same scope resolved the identical node_id.
+
 ## [0.12.2] - 2026-09-02
 
 ### Fixed
