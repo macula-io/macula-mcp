@@ -8,8 +8,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { identity } from "./macula_cli.js";
 import { errorContent, jsonContent } from "./reply.js";
+import * as presence from "./presence.js";
 import { listAgents, pruneStale } from "./roster.js";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -30,7 +30,18 @@ export function registerMeshAgents(server: McpServer): void {
     async ({ page, page_size }) => {
       try {
         pruneStale(STALE_AFTER_SECONDS);
-        const { node_id: selfNodeId } = await identity();
+        // The node_id THIS process's own agent.hello beats actually carry
+        // (presence.ts's state.nodeId) -- not a fresh identity() call.
+        // identity() resolves the separate "default" identity (used by
+        // mesh_call/mesh_put/mesh_get/mesh_publish) via a path that's
+        // minted fresh per process and cached only for that process's
+        // lifetime, so a second, independent identity() call here could
+        // never reliably match what presence actually published, even
+        // within the same session -- self-detection was silently wrong
+        // as a result (verified live 2026-09-02: the roster's own
+        // self-entry, confirmed via mesh_hello's node_id, came back
+        // is_self:false). No presence yet -- correctly nobody is "self".
+        const selfNodeId = presence.currentNodeId();
         const { total, agents } = listAgents(page, page_size);
         return jsonContent({
           total,
