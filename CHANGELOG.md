@@ -23,6 +23,14 @@ fires on a `v*` tag push, not on every commit to `main`).
   the credential directory.
 
 ### Fixed
+- `mesh_call` accepts the realm-prefixed procedure form a DHT
+  `procedure_advertisement` prints (`<64 hex>/<procedure>`) and splits it
+  into the bare procedure plus `realm`, also before signing an ownership
+  proof. A fresh opencode install copied that form straight from
+  `mesh_find_records_by_type` into `procedure` and got `unknown_next_peer`
+  for every hand-written call to hecate-rag while the service was up and
+  answering the bare name (2026-09-02). A `realm` passed alongside that
+  disagrees with the prefix is refused with both values named.
 - The install scripts and docs pass `--allow-scripts=@macula-io/mcp,better-sqlite3`:
   npm 12 also blocks a dependency's own install script, and better-sqlite3's is
   the one that fetches the SQLite native binding the roster and transcript

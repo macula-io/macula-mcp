@@ -647,7 +647,40 @@ export async function resolveCallArgsFlags(
   return { flags: ["--args-file", filePath], cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
-export const call = async (args: {
+const REALM_PREFIXED_PROCEDURE = /^([0-9a-fA-F]{64})\/(.+)$/;
+
+/**
+ * Accept a procedure in the form the DHT prints it. A
+ * `procedure_advertisement` record shows its procedure as
+ * `hex(realm)/procedure` (macula-go's `DiscoveryURI`), while the CALL
+ * frame's registry lookup on the station wants the bare procedure with
+ * the realm passed separately. An agent that copies the printed form
+ * straight into `procedure` gets `unknown_next_peer` for a service that
+ * is up and answers the bare name -- seen live 2026-09-02 from a fresh
+ * opencode install, every hand-written call to hecate-rag failing while
+ * `mesh_recall` (which builds the name itself) got through. So the
+ * prefix is split off here and becomes the realm; a `realm` passed
+ * alongside must agree with it, or the call is refused before it goes
+ * anywhere, because silently preferring one of the two would hide a
+ * genuine mistake.
+ */
+export const splitRealmPrefix = (
+  procedure: string,
+  realm?: string,
+): { procedure: string; realm?: string } => {
+  const m = REALM_PREFIXED_PROCEDURE.exec(procedure);
+  if (!m) return { procedure, realm };
+  const [, prefixed, bare] = m;
+  if (realm && realm.toLowerCase() !== prefixed.toLowerCase()) {
+    throw new MaculaCliError(
+      `procedure names realm ${prefixed} but realm ${realm} was passed as well; pass the bare procedure ` +
+        `"${bare}" with the realm you mean, or the realm-prefixed procedure alone`,
+    );
+  }
+  return { procedure: bare, realm: prefixed };
+};
+
+export const call = async (rawArgs: {
   host?: string;
   procedure: string;
   callArgs?: Record<string, unknown>;
@@ -655,6 +688,7 @@ export const call = async (args: {
   realm?: string;
   direct?: boolean;
 }): Promise<CallResult> => {
+  const args = { ...rawArgs, ...splitRealmPrefix(rawArgs.procedure, rawArgs.realm) };
   const flags: string[] = ["--identity", defaultIdentityPath()];
   if (args.timeoutMs) flags.push("--timeout", `${Math.max(1, Math.round(args.timeoutMs / 1000))}s`);
   if (args.realm) flags.push("--realm", args.realm);

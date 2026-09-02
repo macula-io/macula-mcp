@@ -13,7 +13,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { call, defaultStation, identitySign } from "./macula_cli.js";
+import { call, defaultStation, identitySign, splitRealmPrefix } from "./macula_cli.js";
 import { withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
@@ -25,7 +25,13 @@ export function registerMeshCall(server: McpServer): void {
       "Macula RPC is procedure-addressed: the target station routes to a peer that advertises it. " +
       `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given.`,
     {
-      procedure: z.string().describe("Procedure URI, e.g. mri:proc:realm:build."),
+      procedure: z
+        .string()
+        .describe(
+          "Procedure name as advertised, e.g. hecate-rag.search_chunks_semantic, with the realm in `realm`. " +
+            "The realm-prefixed form a DHT procedure_advertisement prints (`<64 hex>/<procedure>`) is " +
+            "accepted too and split into procedure + realm for you.",
+        ),
       args: z
         .record(z.unknown())
         .optional()
@@ -78,9 +84,12 @@ export function registerMeshCall(server: McpServer): void {
             "capabilities as that citizen.",
         ),
     },
-    async ({ procedure, args, timeout_ms, host, realm, direct, prove_identity }) => {
+    async ({ procedure: rawProcedure, args, timeout_ms, host, realm: rawRealm, direct, prove_identity }) => {
       ensurePresence(server);
       try {
+        // Split here, before signing: an ownership proof is bound to the
+        // procedure name the server checks, which is the bare one.
+        const { procedure, realm } = splitRealmPrefix(rawProcedure, rawRealm);
         const callArgs = prove_identity ? withIdentityProof(args, await identitySign({ procedure })) : args;
         const res = await call({ host, procedure, callArgs, timeoutMs: timeout_ms, realm, direct });
         return jsonContent({ result: res.payload, responded_by: res.responded_by, duration_ms: res.duration_ms });
