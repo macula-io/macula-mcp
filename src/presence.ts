@@ -273,7 +273,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   // the same way mesh_observe_lobby.ts itself would.
   await lobbyObserver.start({ host });
 
-  state = {
+  const newState: PresenceState = {
     nodeId,
     operatorName: args.operatorName,
     message: args.message,
@@ -285,7 +285,9 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     watchers,
     heartbeatTimer,
   };
+  state = newState;
   onShutdown(stopSync);
+  watchForUnexpectedDeath(newState);
 
   await beat(); // announce immediately rather than waiting a full interval
   return {
@@ -296,6 +298,49 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     inbox_topic: myInboxTopic,
     lobby_topic: lobbyObserver.LOBBY_TOPIC,
   };
+}
+
+/**
+ * A daemon or watcher child dying on its own (crash, killed externally,
+ * lost connection) used to leave `state` set with nothing to notice --
+ * found live 2026-09-02: an agent's inbox watcher died silently mid-
+ * session, isActive()/already_active kept reporting true, and a real
+ * message from another agent was simply never recorded, with no error
+ * anywhere. The only fix the operator had was to notice independently
+ * and run a full mesh_goodbye + mesh_hello -- which DID restart
+ * delivery, confirming the daemon/watchers are what actually needed
+ * restarting, not some deeper mesh issue. This wires that same recovery
+ * automatically: exit/error on any constituent process clears `state`
+ * via stopSync() (same teardown a deliberate goodbye uses, minus the
+ * goodbye publish and explicitlyLeft flag -- an involuntary death isn't
+ * "leaving", so ensurePresence()/the next mesh_hello should restart it
+ * without the caller needing to notice or intervene).
+ *
+ * `forState` is closed over, not read from the module-level `state`
+ * variable, so a handler registered against an OLD state -- already
+ * superseded by a fresh start, or already torn down by a deliberate
+ * stop() (whose own child.kill() calls also fire "exit") -- never acts
+ * on a state that isn't current anymore.
+ *
+ * Residual gap, not addressed here: a watcher process that hangs
+ * without actually exiting (connection wedged but the OS process
+ * lingers) wouldn't fire "exit" and so wouldn't be caught by this --
+ * no evidence yet that this is what actually happened, so not building
+ * a liveness-ping mechanism against a failure mode that's still
+ * hypothetical.
+ */
+function watchForUnexpectedDeath(forState: PresenceState): void {
+  const onDeath = (source: string) => {
+    if (state !== forState) return;
+    console.error(`presence: ${source} exited unexpectedly -- marking presence inactive so the next mesh_hello restarts it cleanly`);
+    stopSync();
+  };
+  forState.daemon.on("exit", () => onDeath("daemon"));
+  forState.daemon.on("error", () => onDeath("daemon"));
+  for (const w of forState.watchers) {
+    w.on("exit", () => onDeath("watcher"));
+    w.on("error", () => onDeath("watcher"));
+  }
 }
 
 async function beat(): Promise<void> {
