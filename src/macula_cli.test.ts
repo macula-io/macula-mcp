@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   LARGE_PAYLOAD_THRESHOLD_BYTES,
@@ -124,6 +126,25 @@ describe("identity paths", () => {
   it("MACULA_MCP_SERVE_IDENTITY pins the serve identity to a fixed path", () => {
     process.env.MACULA_MCP_SERVE_IDENTITY = "/tmp/pinned-serve-identity.seed";
     expect(serveIdentityPath()).toBe("/tmp/pinned-serve-identity.seed");
+  });
+
+  // Guards the 2026-09-02 fix: a mined identity used to live in tmpdir()
+  // and be deleted on exit, so it churned on every process restart, not
+  // just across genuinely concurrent sessions -- indistinguishable to a
+  // mesh peer from meeting a stranger every time. It now persists under
+  // a scope key (CLAUDE_CODE_SESSION_ID, or this process's own PPID)
+  // that survives a restart of just this session's macula-mcp child
+  // while still differing from any other concurrent session's.
+  it("persists under the scope key actually active in this process, not a fresh random one", () => {
+    const path = defaultIdentityPath();
+    const expectedScopeKey = process.env.CLAUDE_CODE_SESSION_ID ?? `ppid-${process.ppid}`;
+    expect(path).toContain(`default-${expectedScopeKey}.seed`);
+  });
+
+  it("lives under a persistent config directory, not the OS temp dir", () => {
+    const path = defaultIdentityPath();
+    expect(path.startsWith(join(homedir(), ".config", "macula-mcp"))).toBe(true);
+    expect(path.startsWith(tmpdir())).toBe(false);
   });
 });
 

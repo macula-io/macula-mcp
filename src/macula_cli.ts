@@ -17,10 +17,9 @@
 // subprocess, point-in-time -- not a peer registry this file accumulates.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** The station this server targets when a tool call doesn't override it. */
@@ -51,8 +50,11 @@ export function onShutdown(fn: () => void): void {
 }
 
 /**
- * Per-server-process identities, freshly minted (temp dir, deleted on
- * exit) rather than macula-cli's own shared machine-wide default.
+ * Per-concern identities (default/watch/presence/serve/observe), scoped
+ * to persist across restarts of the SAME session but never collide with
+ * a DIFFERENT, concurrent one -- rather than macula-cli's own shared
+ * machine-wide default, and rather than this file's own original
+ * throwaway-per-process scheme.
  *
  * History: the first fix here (2026-08-29) gave only mesh_watch a
  * dedicated identity, because a station kicks a connection the moment
@@ -68,52 +70,71 @@ export function onShutdown(fn: () => void): void {
  * still sharing ONE identity, so two Claude Code sessions (or two
  * subagents) doing ordinary mesh work at overlapping moments would
  * silently fail each other, with no clue why from the error message
- * alone.
+ * alone. The fix that followed (mint a fresh, random identity per
+ * concern per SERVER PROCESS, deleted on exit) solved that, but
+ * overcorrected: an agent's identity churned on every process restart
+ * too, not just across genuinely concurrent sessions, which is
+ * indistinguishable to a peer from meeting a stranger every time (found
+ * 2026-09-02, working the very presence-reliability problem this
+ * comment is now part of -- a roster self-check compared a fresh
+ * per-call identity() against presence's own, already-published one,
+ * and could never match after the underlying server process had
+ * restarted even once).
  *
- * Fix: mint two identities per macula-mcp server process at first use
- * -- one for mesh_call/mesh_put/mesh_get/mesh_publish ("default"), one
- * for mesh_watch, kept separate from each other for the original
- * watch-vs-others reason above. Different processes (different
- * sessions, different subagents each with their own macula-mcp
- * connection) get different identities and can never collide with each
- * other. `mesh_call`'s own docs already tells the model this is
- * commons infrastructure, not a private sandbox -- these are
- * throwaway per-run identities, not an attempt to look like a stable
- * durable node.
+ * Fix: derive each identity's path from a SCOPE KEY that survives a
+ * restart of this same session but differs from any other concurrent
+ * one -- `CLAUDE_CODE_SESSION_ID` when the harness sets it (stable
+ * across this logical session, including a `--resume`), else this
+ * process's own PARENT process id (stable across a restart of just the
+ * `macula-mcp` child -- the actual observed failure mode above -- since
+ * the parent harness process that spawned it didn't change; distinct
+ * across concurrent sessions of ANY harness, including ones with no
+ * session-id concept at all, because two separate harness invocations
+ * are always two separate OS processes). Per-concern separation is
+ * unchanged and just as load-bearing as before -- the scope key makes
+ * two RUNS of the same concern agree, it says nothing about two
+ * DIFFERENT concerns in the same run, which must still never share a
+ * path.
  *
- * Tradeoff, called out because it's a real behavior change: `macula-cli
- * identity` run by hand on the same machine, and mesh://identity read
- * through this server, now report DIFFERENT node IDs -- previously
- * every non-watch tool shared macula-cli's own persisted default
- * identity, so they matched. Override with MACULA_MCP_IDENTITY /
- * MACULA_MCP_WATCH_IDENTITY to pin either to a fixed path (e.g. to
- * restore the old shared-identity behavior, or to give a long-running
- * server a stable node ID across restarts) -- an explicit override is
- * never auto-cleaned on exit, only a freshly minted one is.
+ * Tradeoffs, called out because they're real behavior changes:
+ * - `macula-cli identity` run by hand on the same machine, and
+ *   mesh://identity read through this server, report DIFFERENT node IDs
+ *   from each other (unchanged from the throwaway-per-process era).
+ * - A full harness restart (not just this session's `macula-mcp` child
+ *   dying and respawning) gets a new PPID and so a new identity, UNLESS
+ *   the harness's own session id survives that restart (Claude Code's
+ *   does, across `--resume`). A harness with neither a persisted
+ *   session id nor a stable parent across its own restart looks, to a
+ *   mesh peer, like meeting a new agent each time -- exactly the
+ *   original symptom, just narrowed to "after a full restart" instead
+ *   of "after any restart".
+ * - Identity files now persist indefinitely under `identityDir` (one
+ *   per kind x scope-key ever seen) instead of being deleted on exit --
+ *   intentional, since the entire point is for the next process sharing
+ *   that scope to load the same one. No pruning of old ones is done
+ *   here; each is a tiny seed file, and unbounded growth over the
+ *   lifetime of a single machine hasn't been treated as worth the
+ *   complexity of an eviction policy yet.
+ *
+ * Override with MACULA_MCP_IDENTITY / MACULA_MCP_WATCH_IDENTITY / etc.
+ * to pin any of the five to a fixed, explicit path instead (e.g. to
+ * restore old-style shared-identity behavior, or to hand an agent a
+ * durable identity that survives even a PPID change).
  */
-const identityDir = join(tmpdir(), "macula-mcp-identities");
-const mintedIdentityPaths = new Set<string>();
+const identityDir = join(homedir(), ".config", "macula-mcp", "identities");
+
+/**
+ * Stable within one logical session, distinct from any other concurrent
+ * one -- see the doc comment above for why this is the right pair of
+ * properties. Computed once per process (both inputs are fixed for a
+ * process's whole lifetime), not per call.
+ */
+const scopeKey = process.env.CLAUDE_CODE_SESSION_ID ?? `ppid-${process.ppid}`;
 
 function mintIdentityPath(kind: "default" | "watch" | "presence" | "serve" | "observe"): string {
   mkdirSync(identityDir, { recursive: true });
-  const p = join(identityDir, `${kind}-${process.pid}-${randomBytes(6).toString("hex")}.seed`);
-  mintedIdentityPaths.add(p);
-  return p;
+  return join(identityDir, `${kind}-${scopeKey}.seed`);
 }
-
-process.on("exit", () => {
-  for (const p of mintedIdentityPaths) {
-    try {
-      rmSync(p, { force: true });
-    } catch {
-      // best effort -- OS temp cleanup will catch anything left behind
-    }
-  }
-});
-// Node doesn't fire "exit" on a bare SIGINT/SIGTERM unless the process
-// actually exits; without this, Ctrl-C or a client-initiated shutdown
-// would skip the cleanup above and leak a temp identity file per run.
-// shutdownHooks run first and synchronously -- see onShutdown's own doc.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     for (const fn of shutdownHooks) {
