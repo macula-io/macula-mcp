@@ -17,19 +17,51 @@
 // subprocess, point-in-time -- not a peer registry this file accumulates.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 /** The station this server targets when a tool call doesn't override it. */
 export function defaultStation(): string {
   return process.env.MACULA_MESH_STATION ?? "station-de-frankfurt.macula.io:4433";
 }
 
-/** Name/path of the macula-cli binary; override for testing or a non-PATH install. */
+/**
+ * Name/path of the macula-cli binary. MACULA_CLI_BIN pins it; otherwise
+ * "macula-cli" when it is on PATH; otherwise the place macula-cli's own
+ * install.sh/install.ps1 put it (also where this package's postinstall
+ * puts it), because an MCP client launched from a desktop session or a
+ * login shell very often does not carry the PATH line the installer
+ * asked the user to add -- and then every single tool failed with
+ * ENOENT on a fresh install that had in fact succeeded (2026-09-02).
+ * Falls back to the bare name so spawn's own ENOENT message still names
+ * the fix.
+ */
 export function binPath(): string {
-  return process.env.MACULA_CLI_BIN ?? "macula-cli";
+  const pinned = process.env.MACULA_CLI_BIN;
+  if (pinned) return pinned;
+  if (onPath("macula-cli")) return "macula-cli";
+  const installed = installedCliCandidates().find((p) => existsSync(p));
+  return installed ?? "macula-cli";
+}
+
+function onPath(name: string): boolean {
+  const exts = process.platform === "win32" ? [".exe", ".cmd", ""] : [""];
+  return (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter((dir) => dir.length > 0)
+    .some((dir) => exts.some((ext) => existsSync(join(dir, name + ext))));
+}
+
+/** Where macula-cli's installers put the binary by default (MACULA_CLI_INSTALL_DIR overrides both of them). Exported for tests. */
+export function installedCliCandidates(): string[] {
+  const override = process.env.MACULA_CLI_INSTALL_DIR;
+  if (process.platform === "win32") {
+    const base = override ?? join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "macula-cli");
+    return [join(base, "macula-cli.exe")];
+  }
+  return [join(override ?? join(homedir(), ".local", "bin"), "macula-cli")];
 }
 
 /**
@@ -526,6 +558,46 @@ export interface IdentityResult {
 /** The identity every mesh_call/mesh_put/mesh_get/mesh_publish call uses -- see the comment above defaultIdentityPath(). */
 export const identity = (): Promise<IdentityResult> =>
   run<IdentityResult>(argv(["identity"], ["--identity", defaultIdentityPath()], []));
+
+export interface IdentitySignResult {
+  node_id: string;
+  timestamp: number;
+  signature: string;
+}
+
+/**
+ * An ownership proof for `procedure`, signed by the default identity:
+ * {node_id, timestamp, procedure} as hecate-citizens' and hecate-mail's
+ * ownership-proof verifiers expect it (`macula-cli identity sign`). The
+ * proof is bound to the procedure so it cannot be replayed against
+ * another gated capability, and to a fresh timestamp (60s skew allowed
+ * on the verifying side), so sign right before the call, never ahead.
+ */
+export const identitySign = (args: { procedure: string }): Promise<IdentitySignResult> =>
+  run<IdentitySignResult>(
+    argv(["identity", "sign"], ["--identity", defaultIdentityPath(), "--procedure", args.procedure], []),
+  );
+
+/**
+ * The realm a procedure is currently advertised under, from the DHT
+ * visible at `host` -- the discover-then-call step mesh_list_stations,
+ * mesh_recall/mesh_remember and citizenship all need, since a hecate
+ * service is never served under the all-zero realm and there is no
+ * other way to learn its realm than from its own advertisement.
+ */
+export async function discoverProcedureRealm(args: { host?: string; procedure: string }): Promise<string> {
+  const host = args.host ?? defaultStation();
+  const discovered = await findRecordsByType({ host, recordType: "procedure_advertisement" });
+  const match = discovered.records.find((r) => r.procedure_advertisement?.procedure === args.procedure);
+  const realm = match?.procedure_advertisement?.realm;
+  if (!realm) {
+    throw new Error(
+      `${args.procedure} is not currently advertised on the mesh (checked ${discovered.count} procedure_advertisement ` +
+        `record(s) visible from ${host})`,
+    );
+  }
+  return realm;
+}
 
 export interface CallResult {
   procedure: string;

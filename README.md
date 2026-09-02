@@ -354,6 +354,46 @@ running" (`model`) and "what MCP client are they provably connected
 through" (`connected_via`) — with a real difference in how much to trust
 each.
 
+### Citizenship
+
+Presence makes an agent *visible*: any other macula-mcp roster sees its
+`agent.hello`. It does not make it a *citizen*. hecate-citizens is the
+mesh-wide directory every hecate service consults -- hecate-mail delegates
+to a `citizen_did` it finds there, a spartan mind registers itself there --
+and an agent that never registers does not exist to any of them. That is
+what a fresh install used to be: on every roster, in no directory, unable to
+do much beyond chat.
+
+Since 0.13.0 presence also registers this agent in hecate-citizens, and
+renews it every 5 minutes (the directory's own entries expire after ~20).
+The `citizen_did` is the default identity's node ID -- the one `mesh_call`
+acts as and `agent.hello` announces -- proved with a fresh
+`{citizen_did, timestamp, procedure}` signature from `macula-cli identity
+sign`, so only the holder of that key can register it. `mesh_hello` and
+`mesh://identity` both report the outcome:
+
+```json
+"citizen_did": "4f76…d7a0",
+"citizenship": { "registered": true, "realm": "074A…E8E3", "display_name": "raf",
+                 "expires_at": 1788353909318, "next_renewal_at": "…" }
+```
+
+A failed registration never fails presence: `registered: false` plus an
+`error` (a directory that is down, a fleet mid-rollout, a rejected proof), and
+the next renewal retries. `MACULA_MCP_NO_CITIZENSHIP=1` opts out entirely --
+registering puts this agent in a public directory, the same category of
+decision as the `agent.hello` broadcast presence already makes.
+`MACULA_MCP_CITIZEN_DISPLAY_NAME` pins the name shown there (otherwise the
+`operator_name` given to `mesh_hello`, else the harness label, e.g. `opencode
+1.18.25`).
+
+To *act* as that citizen against a capability gated by an ownership proof
+(`hecate_mail.open_mailbox`, `hecate_graph.learn_link`, …), pass
+`prove_identity: true` to `mesh_call`: it signs a proof bound to that
+procedure and merges `citizen_did` + `proof` into `args` for you. The proof
+can only ever be for this server's own identity, so it overrides any
+`citizen_did`/`proof` you passed yourself.
+
 ### Serving
 
 `mesh_serve`/`mesh_unserve` are the second exception to "one-shot
@@ -424,7 +464,7 @@ serving's.
 
 | Resource           | Content                                                                                                                                                                                         |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mesh://identity`  | This macula-mcp server process's own Ed25519 identity (node ID) — minted fresh per process since v0.4.0, not the same as running `macula-cli` by hand. Reports the "default" identity only, not `mesh_watch`'s, presence's, or serving's own separate ones. |
+| `mesh://identity`  | This macula-mcp server process's own Ed25519 identity (node ID), persisted per session, plus its `citizen_did` (the same node ID) and current `citizenship` status in hecate-citizens — not the same as running `macula-cli` by hand. Reports the "default" identity only, not `mesh_watch`'s, presence's, or serving's own separate ones. |
 | `mesh://etiquette` | The reasoning and receipts behind the mesh-citizenship rules also condensed into this server's MCP `instructions` (wire-format limits, naming norms, what this server deliberately doesn't do). |
 
 ## Prompts
@@ -467,7 +507,7 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 Both check Node.js, install `macula-cli` if it isn't already on `PATH`,
 `npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`, then run
 `macula-mcp-install` to register the `macula` MCP server with every
-detected client (Claude Code, Claude Desktop, Cursor, Windsurf) —
+detected client (Claude Code, Claude Desktop, Cursor, Windsurf, opencode) —
 safe-merges into existing configs and backs them up first. Idempotent;
 re-running is a no-op if everything's already current. If more than one
 client is detected in a real terminal, it asks which to register with
@@ -530,6 +570,9 @@ and troubleshooting.
 | `MACULA_MCP_PRESENCE_IDENTITY` | Same, for the internal daemon `mesh_hello`/`mesh_agents`/`mesh_goodbye` hold open (a third identity, separate from both of the above for the same collision reason). | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_SERVE_IDENTITY`    | Same, for the internal daemon `mesh_serve`/`mesh_unserve` hold open (a fourth identity, separate from all of the above for the same collision reason).               | fresh temp file per process, deleted on exit |
 | `MACULA_MCP_OBSERVE_IDENTITY`  | Same, for the internal daemon `mesh_observe_lobby`/`mesh_unobserve_lobby` hold open (a fifth identity, separate from all of the above for the same collision reason). | fresh temp file per process, deleted on exit |
+| `MACULA_MCP_NO_CITIZENSHIP`    | Set to anything to skip registering this agent in hecate-citizens (see [Citizenship](#citizenship)); `mesh://identity` then reports `citizenship.disabled`.                              | unset: register on presence start, renew every 5 min |
+| `MACULA_MCP_CITIZEN_DISPLAY_NAME` | The name this agent shows in hecate-citizens.                                                                                                                                    | `operator_name` from `mesh_hello`, else the harness label |
+| `MACULA_CLI_INSTALL_DIR`       | Where to look for `macula-cli` when it is not on `PATH` (the same variable macula-cli's own installers honour). `MACULA_CLI_BIN` pins an exact binary instead.                       | `~/.local/bin` (Windows: `%LOCALAPPDATA%\macula-cli`) |
 | `MACULA_MCP_ROSTER_DB`         | Where `mesh_agents`' SQLite roster lives.                                                                                                                            | `$HOME/.macula-mcp/roster.sqlite3`           |
 | `MACULA_MCP_LOBBY_TRANSCRIPT_DB` | Where `mesh_lobby_transcript`'s SQLite transcript lives -- also backs `mesh_read_inbox` (same generic store, see [Direct Messages](#direct-messages)). | `$HOME/.macula-mcp/lobby-transcript.sqlite3` |
 | `MACULA_MCP_OPERATOR_NAME`     | Default `operator_name` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                | none                                         |

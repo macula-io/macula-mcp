@@ -60,6 +60,7 @@ import { registerMeshAgents } from "./mesh_agents.js";
 import { registerMeshServe } from "./mesh_serve.js";
 import { registerMeshUnserve } from "./mesh_unserve.js";
 import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
+import { serverVersion } from "./version.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -109,6 +110,11 @@ mesh_serve/mesh_unserve are the one exception: they never auto-start presence.
 - mesh_observe_lobby is only for raising the session cap or restarting the watch after \
 mesh_unobserve_lobby; it's a broader listening scope than anything else here (everyone's lobby \
 traffic, not just yours), so read mesh://etiquette before relying on it.
+- Presence also registers you in hecate-citizens, the mesh-wide citizens directory every hecate \
+service consults: your node_id is your citizen_did there (mesh_hello and mesh://identity report the \
+outcome under "citizenship"; MACULA_MCP_NO_CITIZENSHIP=1 opts out). For a capability gated by an \
+ownership proof (hecate_mail.open_mailbox, hecate_graph.learn_link), pass prove_identity:true to \
+mesh_call and it signs and attaches citizen_did + proof for you.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
@@ -118,7 +124,7 @@ per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. N
 command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
 
 const server = new McpServer(
-  { name: "macula-mcp", version: "0.11.0" },
+  { name: "macula-mcp", version: serverVersion() },
   { instructions: INSTRUCTIONS },
 );
 

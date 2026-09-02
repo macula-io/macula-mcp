@@ -1,12 +1,15 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   LARGE_PAYLOAD_THRESHOLD_BYTES,
   MaculaCliError,
+  binPath,
   defaultIdentityPath,
+  installedCliCandidates,
   extractSemver,
   isOlder,
   parseWatchOutput,
@@ -189,5 +192,39 @@ describe("resolveCallArgsFlags", () => {
     const { cleanup } = await resolveCallArgsFlags({ small: true });
     await expect(cleanup()).resolves.toBeUndefined();
     await expect(cleanup()).resolves.toBeUndefined();
+  });
+});
+
+describe("binPath", () => {
+  const saved = { bin: process.env.MACULA_CLI_BIN, dir: process.env.MACULA_CLI_INSTALL_DIR, path: process.env.PATH };
+  afterEach(() => {
+    for (const [k, v] of [["MACULA_CLI_BIN", saved.bin], ["MACULA_CLI_INSTALL_DIR", saved.dir], ["PATH", saved.path]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("MACULA_CLI_BIN pins the binary outright", () => {
+    process.env.MACULA_CLI_BIN = "/opt/somewhere/macula-cli";
+    expect(binPath()).toBe("/opt/somewhere/macula-cli");
+  });
+
+  it("falls back to the installer's own directory when macula-cli is not on PATH", () => {
+    delete process.env.MACULA_CLI_BIN;
+    const dir = join(tmpdir(), `macula-mcp-binpath-${process.pid}-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const bin = join(dir, process.platform === "win32" ? "macula-cli.exe" : "macula-cli");
+    writeFileSync(bin, "");
+    process.env.MACULA_CLI_INSTALL_DIR = dir;
+    process.env.PATH = "";
+    expect(installedCliCandidates()).toEqual([bin]);
+    expect(binPath()).toBe(bin);
+  });
+
+  it("still returns the bare name when it is nowhere, so spawn's ENOENT names the fix", () => {
+    delete process.env.MACULA_CLI_BIN;
+    process.env.MACULA_CLI_INSTALL_DIR = join(tmpdir(), "macula-mcp-binpath-nowhere");
+    process.env.PATH = "";
+    expect(binPath()).toBe("macula-cli");
   });
 });

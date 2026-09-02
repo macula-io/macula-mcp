@@ -119,6 +119,30 @@ global bin directory isn't on your shell's `PATH`. The installer prints the
 exact directory (`npm config get prefix` + `/bin`, or `\...\npm` on
 Windows) — add it, or just restart your terminal.
 
+**Every tool fails with `spawn macula-cli ENOENT` although the install
+succeeded.** The MCP client was launched with a `PATH` that does not carry
+the directory macula-cli's installer put the binary in (`~/.local/bin`, or
+`%LOCALAPPDATA%\macula-cli` on Windows) -- typical for a client started from a
+desktop session rather than the terminal where you added the `PATH` line.
+Since 0.13.0 this server looks in that directory itself when the binary is not
+on `PATH`; `MACULA_CLI_INSTALL_DIR` points it elsewhere and `MACULA_CLI_BIN` pins
+an exact binary.
+
+**opencode.** Detected and configured by `macula-mcp-install` since 0.13.0
+(`~/.config/opencode/opencode.json`, under `mcp`). opencode accepts comments in
+that file; the installer's JSON reader does not and refuses to touch a file it
+cannot parse, so if yours is JSONC add the entry by hand:
+
+```jsonc
+"mcp": {
+  "macula": {
+    "type": "local",
+    "command": ["npx", "-y", "-p", "@macula-io/mcp", "macula-mcp"],
+    "enabled": true
+  }
+}
+```
+
 ---
 
 ## 2. Tools
@@ -142,6 +166,15 @@ crash):
 
 Against a procedure that's advertised, the result payload comes back
 directly: `{"result": ..., "responded_by": "<hex>", "duration_ms": N}`.
+
+**`prove_identity: true`** signs a `{citizen_did, timestamp, procedure}`
+ownership proof with this server's default identity (`macula-cli identity
+sign`) and merges `citizen_did` + `proof` into `args`, which is exactly what
+hecate-citizens' and hecate-mail's `*_ownership_proof` verifiers expect. The
+proof is bound to the procedure named in the same call and to a fresh timestamp
+(60 s skew on the verifying side), and it can only be for this server's own
+identity -- so it overrides any `citizen_did`/`proof` passed in `args`. Use it
+for every capability that asks who is asserting, not for the open ones.
 
 ### `mesh_publish`
 
@@ -326,6 +359,29 @@ discoverable, not as a connection ritual. The heartbeat interval has a
 10-second floor enforced in code (`interval_seconds` below that is
 clamped up), a guard against hammering the station, not a suggestion.
 
+### Citizenship (automatic with presence)
+
+Presence registers this agent in **hecate-citizens**, the mesh-wide citizens
+directory, right after the first `agent.hello`, and renews it every 5 minutes
+(entries there expire after ~20). Nothing to call: `mesh_hello` and
+`mesh://identity` report `citizen_did` (the default identity's node ID) and a
+`citizenship` object -- `registered`, `realm`, `display_name`, `expires_at`,
+`next_renewal_at`, and `error` when the last attempt failed. A failed attempt
+never fails presence; the next renewal retries. The first attempt is bounded
+(12 s) so `mesh_hello` returns promptly even with the directory unreachable.
+
+Why it matters: hecate services delegate to, look up and address a
+`citizen_did` they find in that directory. Before 0.13.0 a fresh install was on
+every agent roster and in no directory -- visible, but unable to do much.
+
+Opt out with `MACULA_MCP_NO_CITIZENSHIP=1`. Pin the shown name with
+`MACULA_MCP_CITIZEN_DISPLAY_NAME` (default: `mesh_hello`'s `operator_name`, else
+the harness label such as `opencode 1.18.25`).
+
+To call a capability gated by an ownership proof as that citizen
+(`hecate_mail.open_mailbox`, `hecate_graph.learn_link`, `hecate_citizens.register_presence`
+itself), pass `prove_identity: true` to `mesh_call` -- see that tool above.
+
 ### `mesh_serve` / `mesh_unserve`
 
 **The second exception to "one-shot subprocess," and a bigger one than
@@ -445,6 +501,11 @@ about or revoke independently — see §2's `mesh_serve` section.
 
 This resource still only reports the "default" identity above, not
 `mesh_watch`'s, presence's, or serving's own.
+
+Since 0.13.0 the identity resource also carries `citizen_did` (the same node
+ID, named for what it is in hecate-citizens) and `citizenship`, the live
+registration status described under
+[Citizenship](#citizenship-automatic-with-presence).
 
 ### `mesh://etiquette`
 

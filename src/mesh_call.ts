@@ -13,7 +13,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { call, defaultStation } from "./macula_cli.js";
+import { call, defaultStation, identitySign } from "./macula_cli.js";
+import { withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
@@ -65,11 +66,23 @@ export function registerMeshCall(server: McpServer): void {
             "(\"procedure has no direct-dial advertisement\"). Prefer this whenever a plain call fails " +
             "against a target you otherwise know is up.",
         ),
+      prove_identity: z
+        .boolean()
+        .optional()
+        .describe(
+          "Sign a {citizen_did, timestamp, procedure} ownership proof with this server's own identity and " +
+            "merge citizen_did + proof into args, for capabilities gated by an ownership proof " +
+            "(hecate_mail.open_mailbox, hecate_graph.learn_link, hecate_citizens.register_presence). The proof " +
+            "is bound to this procedure and to this identity, so it overrides any citizen_did/proof you passed. " +
+            "Presence already registers this identity in hecate-citizens; this is for calling the gated " +
+            "capabilities as that citizen.",
+        ),
     },
-    async ({ procedure, args, timeout_ms, host, realm, direct }) => {
+    async ({ procedure, args, timeout_ms, host, realm, direct, prove_identity }) => {
       ensurePresence(server);
       try {
-        const res = await call({ host, procedure, callArgs: args, timeoutMs: timeout_ms, realm, direct });
+        const callArgs = prove_identity ? withIdentityProof(args, await identitySign({ procedure })) : args;
+        const res = await call({ host, procedure, callArgs, timeoutMs: timeout_ms, realm, direct });
         return jsonContent({ result: res.payload, responded_by: res.responded_by, duration_ms: res.duration_ms });
       } catch (e) {
         return errorContent(describeCliError("mesh_call failed", e));

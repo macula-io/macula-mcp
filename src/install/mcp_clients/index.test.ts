@@ -69,10 +69,13 @@ describe("MCP client adapters", () => {
         expect(result.configPath).toBe(client.configPath());
 
         const parsed = JSON.parse(await readFile(client.configPath(), "utf8"));
-        expect(parsed.mcpServers.macula).toEqual({
-          command: "npx",
-          args: ["-y", "-p", "@macula-io/mcp", "macula-mcp"],
-        });
+        const container = client.CONTAINER_KEY ?? "mcpServers";
+        expect(parsed[container].macula).toEqual(
+          client.EXPECTED_ENTRY ?? {
+            command: "npx",
+            args: ["-y", "-p", "@macula-io/mcp", "macula-mcp"],
+          },
+        );
       });
 
       it("is idempotent: installing twice is a no-op the second time", async () => {
@@ -85,16 +88,17 @@ describe("MCP client adapters", () => {
         await client.install();
         // Something else's entry must survive uninstall -- proves this
         // isn't just truncating the file.
+        const container = client.CONTAINER_KEY ?? "mcpServers";
         const before = JSON.parse(await readFile(client.configPath(), "utf8"));
-        before.mcpServers["someone-elses-server"] = { command: "whatever" };
+        before[container]["someone-elses-server"] = { command: "whatever" };
         await writeFile(client.configPath(), JSON.stringify(before));
 
         const result = await client.uninstall();
         expect(result.outcome).toBe("replaced");
 
         const after = JSON.parse(await readFile(client.configPath(), "utf8"));
-        expect(after.mcpServers.macula).toBeUndefined();
-        expect(after.mcpServers["someone-elses-server"]).toEqual({ command: "whatever" });
+        expect(after[container].macula).toBeUndefined();
+        expect(after[container]["someone-elses-server"]).toEqual({ command: "whatever" });
       });
     });
   }

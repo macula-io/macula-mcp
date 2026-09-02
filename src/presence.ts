@@ -80,6 +80,7 @@ import { removeAgent, upsertAgent } from "./roster.js";
 import { inboxTopic } from "./inbox.js";
 import { recordFact } from "./lobby_transcript.js";
 import * as lobbyObserver from "./lobby_observer.js";
+import * as citizenship from "./citizenship.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";
@@ -170,6 +171,10 @@ export interface StartResult {
   already_active: boolean;
   inbox_topic: string;
   lobby_topic: string;
+  /** The same node_id, named for what it is in the citizens directory. */
+  citizen_did: string;
+  /** Whether this agent is currently registered in hecate-citizens, and why not if not -- see citizenship.ts. */
+  citizenship: citizenship.CitizenshipStatus;
 }
 
 /** The presence node_id currently watching an inbox, or undefined if presence isn't active -- see mesh_read_inbox.ts. */
@@ -219,6 +224,11 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     // called mesh_unobserve_lobby earlier without a full mesh_goodbye --
     // calling mesh_hello again is "make sure I'm still fully present."
     await lobbyObserver.start({ host: state.host });
+    const citizen = await citizenship.start({
+      host: state.host,
+      nodeId: state.nodeId,
+      displayName: citizenship.displayName(state.operatorName, state.connectedVia),
+    });
     return {
       node_id: state.nodeId,
       connected_to: state.host,
@@ -226,6 +236,8 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       already_active: true,
       inbox_topic: inboxTopic(state.nodeId),
       lobby_topic: lobbyObserver.LOBBY_TOPIC,
+      citizen_did: state.nodeId,
+      citizenship: citizen,
     };
   }
 
@@ -290,6 +302,13 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   watchForUnexpectedDeath(newState);
 
   await beat(); // announce immediately rather than waiting a full interval
+  // Visible (hello) first, then a citizen: registration is bounded and
+  // never fails presence -- see citizenship.ts.
+  const citizen = await citizenship.start({
+    host,
+    nodeId,
+    displayName: citizenship.displayName(args.operatorName, args.connectedVia),
+  });
   return {
     node_id: nodeId,
     connected_to: host,
@@ -297,6 +316,8 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     already_active: false,
     inbox_topic: myInboxTopic,
     lobby_topic: lobbyObserver.LOBBY_TOPIC,
+    citizen_did: nodeId,
+    citizenship: citizen,
   };
 }
 
@@ -350,6 +371,9 @@ async function beat(): Promise<void> {
     topic: HELLO_TOPIC,
     fact: {
       node_id: state.nodeId,
+      // The same key, named for the citizens directory, so a peer that
+      // heard this hello can look the agent up there without guessing.
+      citizen_did: state.nodeId,
       ...(state.operatorName ? { operator_name: state.operatorName } : {}),
       ...(state.message ? { message: state.message } : {}),
       ...(state.model ? { model: state.model } : {}),
@@ -401,6 +425,7 @@ export async function stop(): Promise<StopResult> {
  */
 function stopSync(): void {
   if (!state) return;
+  citizenship.stop();
   clearInterval(state.heartbeatTimer);
   state.daemon.kill();
   for (const w of state.watchers) w.kill();

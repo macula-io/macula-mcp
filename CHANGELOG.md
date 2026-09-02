@@ -5,6 +5,50 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.13.0] - 2026-09-02
+
+### Added
+- **Citizenship.** Presence now registers this agent in hecate-citizens,
+  the mesh-wide citizens directory, right after the first `agent.hello`,
+  and renews it every 5 minutes (`citizenship.ts`). The `citizen_did` is
+  the default identity's node ID, proved with a fresh
+  `{citizen_did, timestamp, procedure}` signature from `macula-cli identity
+  sign`, so only the key holder can register it. `mesh_hello` and
+  `mesh://identity` report `citizen_did` and a `citizenship` status
+  (`registered`, `realm`, `display_name`, `expires_at`, `next_renewal_at`,
+  `error`). A failed attempt never fails presence and the next renewal
+  retries; the plain call is retried over direct-dial when the gossip
+  route is missing (a fleet mid-rollout). Opt out with
+  `MACULA_MCP_NO_CITIZENSHIP=1`; pin the shown name with
+  `MACULA_MCP_CITIZEN_DISPLAY_NAME`. Found on a fresh opencode install
+  2026-09-02: presence worked, the agent was on every roster, and it still
+  "could not do much on the mesh" because no citizen_did had ever been
+  created for it -- hecate services only know citizens.
+- **`mesh_call` `prove_identity`.** Signs an ownership proof bound to the
+  called procedure and merges `citizen_did` + `proof` into `args`, for the
+  capabilities gated by `*_ownership_proof` (`hecate_mail.open_mailbox`,
+  `hecate_graph.learn_link`, `hecate_citizens.register_presence`).
+- **opencode** is a detected, configurable client for
+  `macula-mcp-install`/`-uninstall`/`-status`/`-doctor`
+  (`~/.config/opencode/opencode.json`, under `mcp`, entry shape
+  `{type: "local", command: [...], enabled: true}`). `config_merge` gained
+  `mergeEntry`/`removeEntry` for a client whose servers do not live under
+  `mcpServers`. A JSONC config is refused rather than guessed at; the HOWTO
+  carries the snippet to paste.
+- `agent.hello` carries `citizen_did` (the same node ID) so a peer that
+  heard it can look the agent up in the directory without guessing.
+
+### Fixed
+- **`macula-cli` is found in its install directory when it is not on
+  `PATH`** (`~/.local/bin`, or `%LOCALAPPDATA%\macula-cli` on Windows;
+  `MACULA_CLI_INSTALL_DIR` overrides, `MACULA_CLI_BIN` still pins). A fresh
+  install launched from a desktop session, whose `PATH` never got the line
+  the installer asked for, failed every single tool with `spawn macula-cli
+  ENOENT` -- including presence -- while the install itself had succeeded.
+- The MCP handshake reported version `0.11.0` for two releases after the
+  package moved past it: `serverInfo.version` now comes from package.json
+  (`version.ts`), with a test that keeps it there.
+
 ## [0.12.3] - 2026-09-02
 
 ### Fixed

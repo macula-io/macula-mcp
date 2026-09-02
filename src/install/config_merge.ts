@@ -24,6 +24,9 @@ export interface McpServerEntry {
   env?: Record<string, string>;
 }
 
+/** The top-level key a client keeps its MCP servers under: `mcpServers` for Claude Code/Cursor/Windsurf/Claude Desktop, `mcp` for opencode. */
+export const DEFAULT_CONTAINER_KEY = "mcpServers";
+
 export type MergeOutcome = "added" | "replaced" | "unchanged" | "skipped_conflict";
 
 export interface MergeResult {
@@ -77,8 +80,23 @@ export async function mergeMcpServer(
   entry: McpServerEntry,
   opts: { force?: boolean } = {},
 ): Promise<MergeResult> {
+  return mergeEntry(path, DEFAULT_CONTAINER_KEY, name, entry, opts);
+}
+
+/**
+ * Same as mergeMcpServer, for a client whose servers live under another
+ * top-level key and/or with another entry shape (opencode: `mcp`, with
+ * `{type, command: string[], enabled}`).
+ */
+export async function mergeEntry(
+  path: string,
+  containerKey: string,
+  name: string,
+  entry: McpServerEntry | Record<string, unknown>,
+  opts: { force?: boolean } = {},
+): Promise<MergeResult> {
   const existing = await readConfig(path);
-  const servers = (existing.mcpServers as Record<string, McpServerEntry>) ?? {};
+  const servers = (existing[containerKey] as Record<string, Record<string, unknown>>) ?? {};
   const current = servers[name];
 
   if (current && deepEqual(current, entry)) {
@@ -101,7 +119,7 @@ export async function mergeMcpServer(
 
   const next = {
     ...existing,
-    mcpServers: { ...servers, [name]: entry },
+    [containerKey]: { ...servers, [name]: entry },
   };
 
   const bak = await backup(path);
@@ -123,6 +141,15 @@ export async function removeMcpServer(
   path: string,
   name: string,
 ): Promise<MergeResult> {
+  return removeEntry(path, DEFAULT_CONTAINER_KEY, name);
+}
+
+/** Same as removeMcpServer, under any container key -- see mergeEntry. */
+export async function removeEntry(
+  path: string,
+  containerKey: string,
+  name: string,
+): Promise<MergeResult> {
   if (!existsSync(path)) {
     return {
       outcome: "unchanged",
@@ -131,7 +158,7 @@ export async function removeMcpServer(
     };
   }
   const existing = await readConfig(path);
-  const servers = (existing.mcpServers as Record<string, McpServerEntry>) ?? {};
+  const servers = (existing[containerKey] as Record<string, Record<string, unknown>>) ?? {};
   if (!(name in servers)) {
     return {
       outcome: "unchanged",
@@ -140,7 +167,7 @@ export async function removeMcpServer(
     };
   }
   const { [name]: _removed, ...rest } = servers;
-  const next = { ...existing, mcpServers: rest };
+  const next = { ...existing, [containerKey]: rest };
   const bak = await backup(path);
   await writeFile(path, JSON.stringify(next, null, 2) + "\n", "utf8");
   return {
