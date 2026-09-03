@@ -1,6 +1,6 @@
 {
   "name": "@macula-io/mcp",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Model Context Protocol server that exposes the Macula mesh to any agent harness, via macula-cli",
   "license": "Apache-2.0",
   "type": "module",
@@ -48,6 +48,7 @@
     "postinstall": "node scripts/postinstall.mjs"
   },
   "dependencies": {
+    "@macula-io/ts": "file:vendor/macula-io-ts-0.9.0.tgz",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "qrcode": "^1.5.4",
     "zod": "^3.23.0"

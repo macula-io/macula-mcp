@@ -28,14 +28,30 @@ Continue, and anything else that speaks MCP.
 ## What it is
 
 The 2026 equivalent of "an editor plugin" is an MCP server: editor- and
-harness-agnostic, agent-native. `macula-mcp` is deliberately thin — it does
-**not** speak QUIC, DHT, or Macula RPC itself. It speaks MCP over stdio to
-the agent, and shells out to
-[`macula-cli`](https://github.com/macula-io/macula-cli), a one-shot
-scriptable CLI built directly on `macula-go-sdk`, for every mesh operation.
-`macula-cli` does the actual QUIC handshake/call/publish/watch/content
-transfer as a subprocess per tool call; `macula-mcp` carries no mesh logic
-of its own.
+harness-agnostic, agent-native. `macula-mcp` speaks MCP over stdio to the
+agent.
+
+**Since 2026-09, most mesh operations run in-process** via
+[`@macula-io/ts`](https://github.com/macula-io/macula-ts), a TypeScript SDK
+that talks QUIC/DHT/Macula RPC directly (no subprocess): `mesh_call`,
+`mesh_publish`, `mesh_watch`, the DHT tools, `mesh_put`/`mesh_get`, and
+`mesh_serve`/`mesh_unserve` (now backed by a single persistent Session this
+process holds in memory — no daemon subprocess, no control socket). A few
+things still shell out to
+[`macula-cli`](https://github.com/macula-io/macula-cli) because
+`@macula-io/ts` doesn't support them yet: non-default realms, direct-dial
+(so `mesh_call`'s `realm`/`direct` options and anything requiring them —
+notably UCAN-gated capabilities — still need `macula-cli`), and
+ownership-proof signing (`mesh_call`'s `prove_identity`). `mesh_stations`
+and `mesh_recall`/`mesh_remember`/`mesh_remember_directory` are a genuine
+hybrid: DHT discovery via `@macula-io/ts`, the actual realm-scoped call via
+`macula-cli`, since the services they call are always advertised under a
+non-zero realm. `mesh_hello`/`mesh_goodbye` (presence), the lobby-observer
+tools, room tools, and `mesh_ring`/`mesh_answer_ring` are untouched by this
+cutover and still run entirely through `macula-cli`. See CHANGELOG.md for
+the full list of what changed and the known gaps (no record-signature
+verification on the DHT tools yet, no `responded_by`/`seq` on some
+results).
 
 ```
 ┌───────────────┐   MCP/stdio   ┌────────────┐  spawns, parses stdout  ┌────────────┐   QUIC    ┌──────────────┐

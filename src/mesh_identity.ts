@@ -24,7 +24,8 @@
 // A real stub in both directions isn't worth keeping around.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { identity } from "./macula_cli.js";
+import { defaultIdentityPath } from "./macula_cli.js";
+import { tsIdentity } from "./macula_ts_client.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
 import * as ringService from "./ring_service.js";
@@ -44,7 +45,7 @@ export function registerIdentity(server: McpServer): void {
       mimeType: "application/json",
     },
     async (uri) => {
-      const id = await identity();
+      const id = tsIdentity(defaultIdentityPath());
       const shaped = { ...id, citizen_did: id.node_id, citizenship: citizenship.status(), realm: realm.status(id.node_id), ring: ringService.status() };
       return {
         contents: [

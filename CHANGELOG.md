@@ -5,6 +5,66 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.18.0] - 2026-09-04
+
+### Changed
+- **Cut over to [`@macula-io/ts`](https://github.com/macula-io/macula-ts) for most mesh operations**,
+  replacing the `macula-cli` subprocess: `mesh_call`, `mesh_publish`, `mesh_watch`,
+  `mesh_find_record`/`mesh_find_records`/`mesh_find_records_by_type`, `mesh_put`/`mesh_get`, and
+  `mesh_serve`/`mesh_unserve` now talk QUIC/DHT/RPC directly in-process. `mesh_serve`/`mesh_unserve` is the
+  biggest structural change: a single persistent `Session` this process holds in memory for as long as
+  anything is registered, replacing the `macula-cli serve -daemon` subprocess, its control socket, and its
+  NDJSON IPC protocol entirely — that machinery existed only to let separate one-shot CLI invocations share
+  one connection, which stops mattering once the SDK is called in-process. The `-exec` behavior (a served
+  procedure answered by a local shell command, JSON on stdin/stdout, per-call timeout) is reimplemented in
+  `serve.ts` directly, since there's no daemon subprocess left to own it.
+- New `src/macula_ts_client.ts`: the thin adapter layer between the cut-over `mesh_*.ts` tool files and
+  `@macula-io/ts`'s `Session`/`Identity`. Connects fresh per one-shot call (mirroring `macula-cli`'s own
+  one-shot subprocess model) rather than holding a shared session for these — a deliberate, simpler,
+  easier-to-reason-about choice over a connection pool, left as a real future optimization if the extra
+  per-call handshake latency turns out to matter.
+- Added `@macula-io/ts` as a dependency — **vendored as a packed tarball** at `vendor/macula-io-ts-0.9.0.tgz`,
+  not a git or npm registry dependency, and this is deliberate, not an oversight: `@macula-io/ts`'s own
+  zero-install-script packaging (no `binding.gyp`/`addon`/`cabi` at install time, only a prebuilt native
+  addon) only holds when installed from a packed tarball. Both a `git:` dependency and a local-directory
+  `file:` dependency were tried first and both silently bypass `package.json`'s `"files"` filtering, so npm
+  sees `binding.gyp` in the raw checkout and runs `node-gyp rebuild` anyway — reintroducing the exact
+  native-compile-at-install problem `@macula-io/ts` exists to avoid. Confirmed live: a git dependency failed
+  outright in a clean environment with no Go/C++ toolchain; the vendored tarball installs with zero compile
+  signals. This is a real, honest stopgap pending a real npm publish of `@macula-io/ts` (a separate decision,
+  not made here) — the vendored `.tgz` should be replaced with a real registry dependency once that happens,
+  not left as a permanent pattern.
+- Identity/seed continuity preserved exactly: the cut-over tools reuse `macula_cli.ts`'s existing
+  `defaultIdentityPath()`/`watchIdentityPath()`/`serveIdentityPath()` seed-file conventions
+  (`~/.config/macula-mcp/identities/<kind>-<scopeKey>.seed`) via a new `loadOrGenerateIdentity()` helper —
+  same load-or-generate policy, same per-kind identity separation, same node IDs a deployment already
+  depends on.
+
+### Known gaps (real, not hidden — see README.md)
+- `@macula-io/ts` does not yet support non-default realms or direct-dial. `mesh_call`'s `realm` and `direct`
+  options now throw a clear error instead of being silently ignored — meaning UCAN-gated capabilities (which
+  require `direct: true`) still need `macula-cli`'s path via those exact same failing options; nothing
+  routes around this automatically. `mesh_call`'s `prove_identity` (ownership-proof signing) still shells
+  out to `macula-cli`'s `identity sign` for the same reason — `@macula-io/ts`'s `Identity` has no `sign()`.
+- `mesh_stations` and `mesh_recall`/`mesh_remember`/`mesh_remember_directory` are a genuine hybrid: the DHT
+  discovery half runs on `@macula-io/ts`, but the actual call (to `hecate_stations.list_stations` /
+  `hecate-rag.*`) stays on `macula-cli`, since those services are always advertised under a non-zero realm.
+- The DHT tools no longer report `verified`/`verify_error` — `@macula-io/ts` does not verify a record's
+  signature or expiry on the caller's behalf yet (documented in its own `findRecord`/`findRecords`/
+  `findRecordsByType`). A caller that needs to trust a record's payload must check the signature itself.
+- `mesh_call`'s result no longer includes `responded_by`; `mesh_publish`'s no longer includes `seq`;
+  `mesh_watch`'s events no longer include `delivered_via`/`received_at` — none of these are surfaced by
+  `@macula-io/ts` yet.
+- `mesh_serve`'s persistent Session has no reconnect supervisor yet (the old `macula-cli` daemon had one,
+  mirroring the Erlang reference SDK's `respawn_link` pattern) — if the underlying connection dies, served
+  procedures stop answering until `mesh_serve` is called again. Real, scoped future work, not attempted here.
+- Existing narrow unit tests (`mesh_call.test.ts`, `mesh_memory.test.ts`) test pure helper functions
+  (`splitRealmPrefix`, `sourceTypeFor`, etc.) unaffected by this cutover and still pass; they do not exercise
+  the new `@macula-io/ts`-backed call paths. New mocked unit tests for `macula_ts_client.ts` were not added
+  in this pass — correctness here rests on live verification against the real production fleet (every
+  cut-over tool, including a full `mesh_serve` → call-from-a-separate-process → `mesh_unserve` → confirm-gone
+  cycle), not on unit test coverage. A real gap, flagged for follow-up.
+
 ## [0.17.0] - 2026-09-03
 
 **Requires Node.js 24.18.1 or newer** (`engines.node` bumped from `>=20`):

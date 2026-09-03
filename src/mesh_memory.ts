@@ -54,7 +54,12 @@ import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { call, defaultStation, findRecordsByType } from "./macula_cli.js";
+// Same hybrid as mesh_stations.ts and for the identical reason: hecate-rag
+// is ALWAYS called under a discovered non-zero realm, which @macula-io/ts's
+// call() does not support yet -- the DHT discovery half (all-zero realm)
+// uses macula-ts, the actual realm-scoped call stays on macula-cli.
+import { call, defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
@@ -64,7 +69,11 @@ const UPLOAD_KNOWLEDGE_PROCEDURE = "hecate-rag.upload_knowledge";
 
 /** Discovers which realm hecate-rag is CURRENTLY advertised under -- never the all-zero default, matching mesh_list_stations's own reasoning. */
 async function discoverHecateRagRealm(host: string | undefined): Promise<{ realm: string } | { error: string }> {
-  const discovered = await findRecordsByType({ host, recordType: "procedure_advertisement" });
+  const discovered = await findRecordsByType({
+    host,
+    recordType: "procedure_advertisement",
+    identityPath: defaultIdentityPath(),
+  });
   const match = discovered.records.find(
     (r) => r.procedure_advertisement?.procedure === ADD_KNOWLEDGE_PROCEDURE,
   );

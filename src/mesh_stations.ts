@@ -38,7 +38,15 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { call, defaultStation, findRecordsByType } from "./macula_cli.js";
+// The DHT lookup (all-zero realm) goes through macula-ts; the actual
+// list_stations call goes through macula-cli's `call`, not macula-ts's --
+// @macula-io/ts's call() does not support a non-default realm yet, and
+// hecate_stations is ALWAYS advertised under a non-zero realm (the whole
+// point of the lookup below). A genuine hybrid, not a shortcut: each half
+// uses whichever backend actually supports what it needs. See
+// README.md/CHANGELOG.md.
+import { call, defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
@@ -97,7 +105,11 @@ export function registerMeshListStations(server: McpServer): void {
     async ({ near, continent, country, city, host }) => {
       ensurePresence(server);
       try {
-        const discovered = await findRecordsByType({ host, recordType: "procedure_advertisement" });
+        const discovered = await findRecordsByType({
+          host,
+          recordType: "procedure_advertisement",
+          identityPath: defaultIdentityPath(),
+        });
         const match = discovered.records.find(
           (r) => r.procedure_advertisement?.procedure === LIST_STATIONS_PROCEDURE,
         );

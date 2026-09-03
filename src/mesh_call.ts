@@ -13,7 +13,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { call, defaultStation, identitySign, splitRealmPrefix } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation, identitySign, splitRealmPrefix } from "./macula_cli.js";
+import { call } from "./macula_ts_client.js";
 import { withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
@@ -23,7 +24,9 @@ export function registerMeshCall(server: McpServer): void {
     "mesh_call",
     "Invoke a procedure advertised on the mesh (build, test, search, deploy on commons hardware). " +
       "Macula RPC is procedure-addressed: the target station routes to a peer that advertises it. " +
-      `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given.`,
+      `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given. ` +
+      "If this server's own MACULA_MCP_UCAN is set, its delegated authority is attached to every call " +
+      "automatically (see the direct field below for the flag reaching a gated capability actually needs).",
     {
       procedure: z
         .string()
@@ -70,7 +73,13 @@ export function registerMeshCall(server: McpServer): void {
             "temporary_relay_failure) even though the target is live and reachable. direct-dial sidesteps " +
             "that gap, at the cost of failing outright if the provider only advertised the plain way " +
             "(\"procedure has no direct-dial advertisement\"). Prefer this whenever a plain call fails " +
-            "against a target you otherwise know is up.",
+            "against a target you otherwise know is up. Required (set this true) to reach any UCAN-gated " +
+            "capability: those are advertised direct-dial only, so a plain call can never route to one even " +
+            "with a UCAN attached (see MACULA_MCP_UCAN in this server's own environment). As of this writing " +
+            "(2026-09-03), that combination -- this true, together with MACULA_MCP_UCAN set -- is refused " +
+            "outright, before any call is attempted: no released macula-cli can compose -direct with -ucan " +
+            "yet (the fix landed on macula-cli's master, unreleased). A plain (non-direct) call still carries " +
+            "MACULA_MCP_UCAN fine, for whatever that's worth against an ungated procedure.",
         ),
       prove_identity: z
         .boolean()
@@ -91,8 +100,16 @@ export function registerMeshCall(server: McpServer): void {
         // procedure name the server checks, which is the bare one.
         const { procedure, realm } = splitRealmPrefix(rawProcedure, rawRealm);
         const callArgs = prove_identity ? withIdentityProof(args, await identitySign({ procedure })) : args;
-        const res = await call({ host, procedure, callArgs, timeoutMs: timeout_ms, realm, direct });
-        return jsonContent({ result: res.payload, responded_by: res.responded_by, duration_ms: res.duration_ms });
+        const res = await call({
+          host,
+          procedure,
+          callArgs,
+          timeoutMs: timeout_ms,
+          realm,
+          direct,
+          identityPath: defaultIdentityPath(),
+        });
+        return jsonContent({ result: res.payload, duration_ms: res.duration_ms });
       } catch (e) {
         return errorContent(describeCliError("mesh_call failed", e));
       }

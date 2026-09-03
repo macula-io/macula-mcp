@@ -14,19 +14,19 @@
 // connecting station. A capability's realm is embedded in its
 // procedure_uri (hex(realm) + "/" + procedure, macula-go's DiscoveryURI
 // convention), decoded here into procedure_advertisement.realm/.procedure
-// rather than left for the caller to parse. Every record's signature is
-// checked by `macula-cli` and reported as `verified`/`verify_error` --
-// never treat a record with `verified: false` as trustworthy.
-//
-// Requires macula-cli's `dht` subcommand (added alongside these tools;
-// not yet in a tagged macula-cli release as of this writing -- these
-// tools will fail with an "unknown command" style error against an
-// older macula-cli until one is cut and MIN_MACULA_CLI_VERSION here is
-// bumped to match).
+// As of the macula-ts cutover (2026-09), these tools no longer verify a
+// record's signature or check its expiry on the caller's behalf -- there
+// is no `verified`/`verify_error` field anymore. @macula-io/ts's own
+// findRecord/findRecords/findRecordsByType say the same in their own doc
+// comments: a caller that needs to trust `payload` must check the
+// signature itself (against `key`/`signature`/`expires_at_ms`). This is a
+// real, known regression from the macula-cli-backed implementation, not
+// an oversight -- see README.md/CHANGELOG.md.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation, findRecord, findRecords, findRecordsByType } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { findRecord, findRecords, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
@@ -50,7 +50,7 @@ export function registerMeshDht(server: McpServer): void {
     async ({ key_hex, host }) => {
       ensurePresence(server);
       try {
-        const res = await findRecord({ host, keyHex: key_hex });
+        const res = await findRecord({ host, keyHex: key_hex, identityPath: defaultIdentityPath() });
         return jsonContent({ host: res.host, found: res.found, record: res.record });
       } catch (e) {
         return errorContent(describeCliError("mesh_find_record failed", e));
@@ -73,7 +73,7 @@ export function registerMeshDht(server: McpServer): void {
     async ({ key_hex, host }) => {
       ensurePresence(server);
       try {
-        const res = await findRecords({ host, keyHex: key_hex });
+        const res = await findRecords({ host, keyHex: key_hex, identityPath: defaultIdentityPath() });
         return jsonContent({ host: res.host, count: res.count, records: res.records });
       } catch (e) {
         return errorContent(describeCliError("mesh_find_records failed", e));
@@ -103,7 +103,7 @@ export function registerMeshDht(server: McpServer): void {
     async ({ record_type, host }) => {
       ensurePresence(server);
       try {
-        const res = await findRecordsByType({ host, recordType: record_type });
+        const res = await findRecordsByType({ host, recordType: record_type, identityPath: defaultIdentityPath() });
         return jsonContent({ host: res.host, type: res.type, count: res.count, records: res.records });
       } catch (e) {
         return errorContent(describeCliError("mesh_find_records_by_type failed", e));
