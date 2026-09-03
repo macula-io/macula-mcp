@@ -723,7 +723,19 @@ export interface ServeRegisterResult {
   registered: boolean;
   procedure: string;
 }
-/** Registers `procedure` with the daemon at socketName -- serve.ts's own daemon, not presence's. */
+/**
+ * Registers `procedure` with the daemon at socketName -- serve.ts's own
+ * daemon, not presence's. Deliberately WITHOUT macula-cli's `-direct`
+ * (the direct-dial DHT advertisement): on the daemon path that flag's
+ * put_record goes over the very session ServeForever is reading and
+ * times out ("dht: put_record: connection: read stream: deadline
+ * exceeded", seen live 2026-09-03 on every registration; the one-shot
+ * `serve -direct` works). A macula-cli fix belongs in its daemon
+ * Register (publish the record via callSession, advertise via
+ * serveSession). Not needed for reach: advertise-gossip carries a
+ * daemon-served procedure to every station within seconds (verified
+ * live the same day, Paris-served, Frankfurt-called, 3 s).
+ */
 export const serveRegister = (args: {
   socketName: string;
   procedure: string;

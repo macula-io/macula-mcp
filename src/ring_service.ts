@@ -43,6 +43,11 @@ export type Policy = (typeof POLICY)[keyof typeof POLICY];
 
 /** Generous: the relay round trip is local, but the room tap and publish inside it hit the mesh. */
 const HANDLER_TIMEOUT_SECONDS = 30;
+// Reach across stations comes from ordinary advertise-gossip: a procedure
+// served on one station was callable from another within 3 s (verified
+// live 2026-09-03). macula-cli's -direct (a direct-dial DHT record) is
+// deliberately not used -- see macula_cli.ts's serveRegister for the
+// daemon-path bug that makes it time out.
 
 /**
  * The operator's standing answer to a ring from a stranger. WP2 reads it

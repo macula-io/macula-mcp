@@ -236,10 +236,17 @@ This exists so an invite is acknowledged, verified, or explicitly unreachable.
   within the call. `scripts/ring-two-process-check.mjs` passes 11/11 over the
   Frankfurt station: accepted rings are two-sided before the answer, deferred
   rings land pending, a forged proof is declined as unverified, a node nobody
-  serves fails loudly. Two facts learned live: direct-dial does not apply to
-  agent-served procedures (they publish no direct-dial DHT record, so the
-  fallback's "no direct-dial advertisement" message is expected noise on an
-  unreachable ring), and identities are scoped per LOGICAL SESSION by design
+  serves fails loudly, and the accepted ring crosses stations (callee on
+  Paris, caller on Frankfurt) over ordinary advertise-gossip, which carried a
+  daemon-served procedure to another station within 3 s when measured. Two
+  facts learned live: macula-cli's `serve -direct` (a direct-dial DHT record,
+  which would let a caller dial the callee's station in one hop) is broken on
+  the DAEMON path -- its put_record goes over the session ServeForever is
+  reading and times out on every registration, while the one-shot `serve
+  -direct` works; the fix is in macula-cli's daemon Register (publish via
+  callSession, advertise via serveSession), and until it lands rings rely on
+  gossip like every other daemon-served procedure. And identities are scoped
+  per LOGICAL SESSION by design
   (`macula_cli.ts` keys them on `CLAUDE_CODE_SESSION_ID`, else the parent pid),
   so three agents started from one Claude Code shell share one node id and get
   each other kicked off the station -- the check script pins every identity per

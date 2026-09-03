@@ -64,9 +64,12 @@ async function callee() {
   }
 }
 
-function spawnCallee(dir, policy) {
+function spawnCallee(dir, policy, station) {
   mkdirSync(dir, { recursive: true });
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "callee"], { env: isolatedEnv(dir, { MACULA_MCP_CONTACT_POLICY: policy }), stdio: ["pipe", "pipe", "inherit"] });
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "callee"], {
+    env: isolatedEnv(dir, { MACULA_MCP_CONTACT_POLICY: policy, ...(station ? { MACULA_MESH_STATION: station } : {}) }),
+    stdio: ["pipe", "pipe", "inherit"],
+  });
   const lines = [];
   const waiters = [];
   createInterface({ input: child.stdout }).on("line", (l) => {
@@ -99,7 +102,11 @@ async function orchestrate() {
   const transcript = await import(join(DIST, "lobby_transcript.js"));
   const envelope = await import(join(DIST, "envelope.js"));
 
-  const open = spawnCallee(join(base, "callee-open"), "open");
+  // The open callee sits on ANOTHER station than the caller (Paris vs the
+  // default Frankfurt), so an accepted ring proves advertise-gossip carries
+  // a ring endpoint across stations, not just that two peers on one station
+  // can talk.
+  const open = spawnCallee(join(base, "callee-open"), "open", process.env.RING_CHECK_CALLEE_STATION ?? "station-fr-paris.macula.io:4433");
   const ask = spawnCallee(join(base, "callee-ask"), "ask");
   try {
     const me = await presence.start({ operatorName: "ring-check-caller" });
@@ -107,7 +114,7 @@ async function orchestrate() {
     console.log(`caller ${me.node_id.slice(0, 12)}…`);
     const openReady = await withTimeout(open.next(), 60_000, "open callee start");
     const askReady = await withTimeout(ask.next(), 60_000, "ask callee start");
-    check("open callee serves agent.<id>.ring", openReady.ring.serving === 1, `${openReady.node_id.slice(0, 12)}… ${openReady.ring.error ?? ""}`);
+    check("open callee serves agent.<id>.ring on another station", openReady.ring.serving === 1, `${openReady.node_id.slice(0, 12)}… ${openReady.ring.error ?? ""}`);
     check("ask callee serves agent.<id>.ring", askReady.ring.serving === 1, `${askReady.node_id.slice(0, 12)}… ${askReady.ring.error ?? ""}`);
     check("three distinct identities", new Set([me.node_id, openReady.node_id, askReady.node_id]).size === 3);
 
