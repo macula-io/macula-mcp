@@ -4,6 +4,15 @@ Status: **Proposal — sketch, not started.** Every claim about *existing*
 infrastructure below was verified against the actual source, not
 assumed — see "What's already real."
 
+**Update, 2026-09-03**: this plan's own blocker (no hecate-service verifies
+`ucan_token`) is now sequenced as Phase 4 of
+`macula-io/macula-architecture/plans/PLAN_CLOSE_SERVICE_AUTH_GAPS.md`, and a
+DEEPER blocker was found the same day: no client SDK's direct-dial call
+path can attach a UCAN at all (identical gap in go/rust/dotnet/php, that
+plan's own Phase 0) — this plan's `-ucan -direct` combination literally
+cannot work yet, confirmed by `macula-cli call`'s own explicit refusal to
+combine the two flags. This plan is Phase 2 of that one; start there.
+
 ## Goal
 
 An agent session acting through `macula-mcp` should carry its own
