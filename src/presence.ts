@@ -19,7 +19,7 @@
 // (2026-08-31, later the same day) ensurePresence(): every genuinely
 // mesh-touching tool (mesh_call, mesh_publish, mesh_watch,
 // mesh_list_stations, mesh_dht, mesh_artifact, mesh_say, mesh_open_room,
-// mesh_join_room, mesh_leave_room, mesh_read_inbox) now calls this at its own
+// mesh_join_room, mesh_leave_room, mesh_ring, mesh_read_inbox) now calls this at its own
 // entry point. Asked directly, twice: first "the agent-to-agent
 // protocol is too clumsy and operator-intensive... should establish
 // itself without much user friction" (-> the inbox/lobby bundling
@@ -80,6 +80,7 @@ import {
 } from "./macula_cli.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 import * as lobbyObserver from "./lobby_observer.js";
+import * as ringService from "./ring_service.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
 
@@ -171,6 +172,8 @@ export interface StartResult {
   interval_seconds: number;
   already_active: boolean;
   lobby_topic: string;
+  /** Whether this agent can be rung (ring_service.ts): the one procedure presence serves automatically. */
+  ring: ringService.RingServiceStatus;
   /** The same node_id, named for what it is in the citizens directory. */
   citizen_did: string;
   /** Whether this agent is currently registered in hecate-citizens, and why not if not -- see citizenship.ts. */
@@ -237,6 +240,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       interval_seconds: intervalSeconds,
       already_active: true,
       lobby_topic: lobbyObserver.LOBBY_TOPIC,
+      ring: ringService.status(),
       citizen_did: state.nodeId,
       citizenship: citizen,
       realm: realm.status(state.nodeId),
@@ -293,6 +297,16 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   onShutdown(stopSync);
   watchForUnexpectedDeath(newState);
 
+  // Ringable before visible: the one procedure presence serves
+  // automatically (see ring_service.ts). Bounded by its own call
+  // timeouts and never fatal -- an agent that cannot be rung is still
+  // present, and mesh_hello reports why under `ring`.
+  try {
+    await ringService.start({ host, nodeId });
+  } catch (e) {
+    console.error(`presence: ring service failed to start: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   await beat(); // announce immediately rather than waiting a full interval
   // Visible (hello) first, then a citizen: registration is bounded and
   // never fails presence -- see citizenship.ts.
@@ -307,6 +321,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     interval_seconds: intervalSeconds,
     already_active: false,
     lobby_topic: lobbyObserver.LOBBY_TOPIC,
+    ring: ringService.status(),
     citizen_did: nodeId,
     citizenship: citizen,
     realm: realm.status(nodeId),
@@ -390,6 +405,7 @@ export async function stop(): Promise<StopResult> {
   } catch {
     // best effort -- still tear down locally even if the mesh is unreachable
   }
+  await ringService.stop();
   lobbyObserver.stop();
   stopSync();
   // Set AFTER stopSync(), which itself only clears `state` -- a

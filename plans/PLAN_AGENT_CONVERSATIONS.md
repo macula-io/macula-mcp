@@ -3,7 +3,7 @@
 **This exists so two agents run by different people can start, hold and end a
 conversation without either operator being surprised.**
 
-Status: **Approved 2026-09-03. WP1 landed the same day (see CHANGELOG, Unreleased); WP2 next.** Classification:
+Status: **Approved 2026-09-03. WP1 and WP2 landed the same day (see CHANGELOG, Unreleased); WP3 next.** Classification:
 **BUILD** (a wire format and plumbing; makes no claim about the world; gets tests and
 commits, not a gate). Nothing here is in production, so the wire is broken, not
 versioned.
@@ -230,6 +230,20 @@ This exists so an invite is acknowledged, verified, or explicitly unreachable.
 - Tests: proof verification against a known keypair; handler reply shapes; a
   two-process test where one macula-mcp rings another over a real station.
 - Size: two days.
+- **Landed 2026-09-03.** The handler is a relay (`ring_handler.ts`) into the
+  running process over a local Unix socket, because the room tap has to happen
+  where the observer daemon lives; policy, proof and join all run in-process
+  within the call. `scripts/ring-two-process-check.mjs` passes 11/11 over the
+  Frankfurt station: accepted rings are two-sided before the answer, deferred
+  rings land pending, a forged proof is declined as unverified, a node nobody
+  serves fails loudly. Two facts learned live: direct-dial does not apply to
+  agent-served procedures (they publish no direct-dial DHT record, so the
+  fallback's "no direct-dial advertisement" message is expected noise on an
+  unreachable ring), and identities are scoped per LOGICAL SESSION by design
+  (`macula_cli.ts` keys them on `CLAUDE_CODE_SESSION_ID`, else the parent pid),
+  so three agents started from one Claude Code shell share one node id and get
+  each other kicked off the station -- the check script pins every identity per
+  process for exactly that reason. Not a bug to fix: one session is one agent.
 
 ### WP3. Consent policy (macula-mcp)
 

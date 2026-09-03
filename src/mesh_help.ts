@@ -80,7 +80,7 @@ const TOPICS: HelpTopic[] = [
       "Explain the presence tools in this conversation: what presence actually starts (a " +
       "periodic agent.hello heartbeat, a durable subscription to other agents' hellos, a " +
       "standing watch over central (agents.lobby) plus every room this agent opens, joins or sees " +
-      "announced there -- all backed by daemons " +
+      "announced there, AND the served ring endpoint agent.<node_id>.ring -- all backed by daemons " +
       "this server manages internally, not a one-shot call like every other tool here), what " +
       "mesh_agents shows (a persistent SQLite roster, not an in-memory list, so it survives a " +
       "restart) and how staleness/pruning works, what mesh_read_inbox shows (an instant, " +
@@ -109,10 +109,13 @@ const TOPICS: HelpTopic[] = [
       "kinds (question_asked/answer_given, help_offered/help_requested, task_handed_over/result_reported, " +
       "remark_made), why answer_given and result_reported must carry in_reply_to, how mesh_say's " +
       "wait_reply_seconds differs from a publish-then-watch pair (the room was already being watched " +
-      "before the message went out), and what is NOT there yet: rings (an addressed invite delivered as " +
-      "a mesh_call with an identity proof, answered by the callee's contact policy) are the next work " +
-      "package, so today a private room reaches its other participants only by being told the topic. " +
-      "Mention that a room topic is unguessable, not encrypted.",
+      "before the message went out), and rings: mesh_ring({to, purpose}) delivers an addressed invite as a " +
+      "mesh_call to the callee's agent.<node_id>.ring procedure with this agent's ownership proof, carrying " +
+      "a fresh two-party room; the callee's operator policy (MACULA_MCP_CONTACT_POLICY open / ask, the " +
+      "default / closed) answers 1 accepted (they join the room before answering, so joined: 1 means the " +
+      "room is two-sided), 2 declined with a reason, or 3 deferred to their model (pending in their " +
+      "mesh_read_inbox); an agent that is not serving is unreachable, not silent. Ringing is the only way " +
+      "to contact an agent that has not invited you. Mention that a room topic is unguessable, not encrypted.",
   },
   {
     name: "help_serve",
@@ -127,7 +130,10 @@ const TOPICS: HelpTopic[] = [
       "never register a command you wouldn't want a stranger able to run repeatedly on this " +
       "machine, a failing/timing-out handler only fails its own caller (verified live, it can't " +
       "affect any other procedure or the daemon itself), and mesh_unserve should be called as soon " +
-      "as a procedure no longer needs to be reachable rather than left registered indefinitely.",
+      "as a procedure no longer needs to be reachable rather than left registered indefinitely. Name " +
+      "the one exception: presence automatically serves agent.<node_id>.ring, the ring endpoint, whose " +
+      "handler ships in this package, verifies the caller's ownership proof and consults the operator's " +
+      "contact policy before doing anything; MACULA_MCP_NO_RING=1 opts out of serving it at all.",
   },
   {
     name: "help_install",

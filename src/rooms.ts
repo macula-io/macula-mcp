@@ -113,8 +113,8 @@ export interface JoinRoomResult {
   already_joined: 0 | 1;
 }
 
-/** Joins a room learned from central or out of band: taps it and says participant_joined. Idempotent. */
-export async function joinRoom(args: { host?: string; room_topic: string }): Promise<JoinRoomResult> {
+/** Joins a room learned from central, from a ring, or out of band: taps it and says participant_joined. Idempotent. openedBy is known from a ring; otherwise it is read from a room_opened this process has seen. */
+export async function joinRoom(args: { host?: string; room_topic: string; openedBy?: string }): Promise<JoinRoomResult> {
   if (!isRoomTopic(args.room_topic)) throw new RoomError(`not a room topic: ${args.room_topic}`);
   if (rooms.has(args.room_topic)) return { room_topic: args.room_topic, joined: null, published_seq: null, already_joined: 1 };
   await lobbyObserver.start({ host: args.host });
@@ -122,7 +122,7 @@ export async function joinRoom(args: { host?: string; room_topic: string }): Pro
   lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
   const joined = buildEnvelope({ room_topic: args.room_topic, from: me, kind: "participant_joined", text: "" });
   const res = await publish({ host: args.host, topic: args.room_topic, fact: { ...joined } });
-  const openedBy = openerOf(args.room_topic) ?? "";
+  const openedBy = args.openedBy ?? openerOf(args.room_topic) ?? "";
   rooms.set(args.room_topic, {
     room_topic: args.room_topic,
     opened_by: openedBy,

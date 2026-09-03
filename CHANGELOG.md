@@ -13,6 +13,25 @@ nothing was in production, and both ends of every conversation are this
 package.
 
 ### Added
+- **Rings** (`mesh_ring`, `rings.ts`, `ring_service.ts`, `ownership_proof.ts`;
+  work package 2): the addressed invite is a `mesh_call` to the callee's
+  `agent.<node_id>.ring` procedure, carrying a room and the caller's
+  `{node_id, timestamp, procedure}` ownership proof (the same one
+  hecate-citizens verifies; verified here with Node's own Ed25519). Presence
+  serves that procedure automatically -- the one exception to "serving is never
+  automatic" -- with a relay handler shipped in the package
+  (`dist/ring_handler.js`) that forwards the call over a local socket into the
+  running server, where proof verification, the operator's contact policy
+  (`MACULA_MCP_CONTACT_POLICY`: `open`, `ask` (default), `closed`) and the
+  room join happen. Answers are integers: `1` accepted (the callee joins the
+  room before answering; the caller waits for `participant_joined`), `2`
+  declined with a reason, `3` deferred (pending in the callee's
+  `mesh_read_inbox`); a node nobody serves is `unreachable`, not silent.
+  `MACULA_MCP_NO_RING=1` serves nothing. Rings sent and received are recorded
+  in `rings.sqlite3` (`MACULA_MCP_RINGS_DB`); `mesh_rooms` lists outgoing rings
+  still awaiting an answer; `mesh://identity` and `mesh_hello` report the
+  endpoint under `ring`. Verified live in two processes over the default
+  station: `scripts/ring-two-process-check.mjs`.
 - **The conversation envelope** (`envelope.ts`): every message is
   `{message_id, room_topic, in_reply_to?, sent_at, from, from_citizen?, kind,
   text, refs?}`, validated before publishing. Kinds are past-tense business

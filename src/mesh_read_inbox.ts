@@ -20,6 +20,21 @@ import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { recentFacts } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, threadEnvelopes } from "./envelope.js";
+import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./rings.js";
+
+function ringView(r: RingRecord) {
+  return {
+    ring_id: r.ring_id,
+    direction: r.direction,
+    peer: r.peer,
+    purpose: r.purpose,
+    room_topic: r.room_topic,
+    sent_at: r.sent_at,
+    recorded_at: r.recorded_at,
+    ...(r.answer !== null ? { answer: r.answer, answer_label: answerLabel(r.answer) } : {}),
+    ...(r.reason !== null ? { reason: r.reason } : {}),
+  };
+}
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
@@ -27,10 +42,12 @@ const MAX_LIMIT = 500;
 export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
     "mesh_read_inbox",
-    "Read what has arrived in the rooms you are in, threaded (each message carries thread_root and depth " +
-      "from its in_reply_to chain), plus recent help_requested/help_offered broadcasts on central from other " +
-      "agents. Instant, a local SQLite read, never blocks. Pass room_topic to read one room. Only ever shows " +
-      "what arrived while this process was watching that room -- nothing from before you joined.",
+    "Read what has arrived: rings (pending ones first -- someone rang you under your \"ask\" policy and " +
+      "is waiting for your answer -- then recent answered ones, both directions), the rooms you are in, " +
+      "threaded (each message carries thread_root and depth from its in_reply_to chain), and recent " +
+      "help_requested/help_offered broadcasts on central from other agents. Instant, a local SQLite read, " +
+      "never blocks. Pass room_topic to read one room only. Rooms only ever show what arrived while this " +
+      "process was watching them -- nothing from before you joined.",
     {
       room_topic: z.string().optional().describe("One room to read. Omit for every room you are in."),
       limit: z
@@ -69,7 +86,14 @@ export function registerMeshReadInbox(server: McpServer): void {
           : threadEnvelopes(
               recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })),
             ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me);
+        const rings = room_topic
+          ? undefined
+          : {
+              pending: pendingIncoming().map(ringView),
+              recent: listRings({ limit: 20 }).filter((r) => r.answer !== null || r.reason !== null).map(ringView),
+            };
         return jsonContent({
+          ...(rings !== undefined ? { rings } : {}),
           rooms: roomsOut,
           ...(central !== undefined ? { central_broadcasts: central } : {}),
         });

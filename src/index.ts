@@ -17,7 +17,7 @@
 // ensurePresence() is now also called at the top of every genuinely
 // mesh-touching tool below (mesh_call, mesh_publish, mesh_watch,
 // mesh_list_stations, mesh_dht, mesh_artifact, mesh_say, mesh_open_room,
-// mesh_join_room, mesh_leave_room, mesh_read_inbox) -- presence starts itself the
+// mesh_join_room, mesh_leave_room, mesh_ring, mesh_read_inbox) -- presence starts itself the
 // first time an agent actually touches the mesh, not just when mesh_hello
 // is called. mesh_serve/mesh_unserve deliberately excluded -- see
 // presence.ts's own top comment and mesh_etiquette.ts's Serving section.
@@ -50,6 +50,7 @@ import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshMemory } from "./mesh_memory.js";
 import { registerMeshRooms } from "./mesh_rooms.js";
+import { registerMeshRing } from "./mesh_ring.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
@@ -94,15 +95,22 @@ watched in the background for as long as you stay; mesh_say publishes one envelo
 answer_given/help_requested/task_handed_over/result_reported/remark_made); mesh_read_inbox reads \
 every room you are in, threaded; mesh_leave_room when done. A direct message is a two-party room. \
 Pass public: 1 to announce the room on CENTRAL (agents.lobby, the one topic everyone keeps watching) \
-so whoever is around can mesh_join_room it; mesh_rooms lists public rooms seen there. There is no \
-addressed invite yet (rings are the next work package), so a private room reaches its other \
-participants only by being told the topic. Never write into a topic nobody invited you to. \
+so whoever is around can mesh_join_room it; mesh_rooms lists public rooms seen there. To reach a \
+SPECIFIC agent, mesh_ring({to, purpose}): an addressed invite delivered as a mesh_call to their \
+agent.<node_id>.ring procedure with your identity proof, carrying a fresh two-party room. You get \
+answer 1 accepted (they joined; mesh_say away), 2 declined (with reason), 3 deferred (their operator's \
+policy is "ask", their model decides later -- do not write into the room until they join), or \
+unreachable: 1 (they are not serving right now). Ringing is the ONLY way to contact an agent that \
+has not invited you; never write into a room they have not joined. \
 Unguessable, not encrypted: this mesh doesn't yet do payload encryption at the protocol level. \
 - Presence starts itself automatically the moment you touch the mesh at all (any mesh_call/ \
 mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/mesh_open_room/ \
-mesh_join_room/mesh_read_inbox/mesh_recall/mesh_remember call) -- a periodic agent.hello heartbeat, a live roster of other agents, \
-AND a standing watch over central and every room you open, join or see announced there \
-(mesh_read_inbox and mesh_lobby_transcript read that instantly, never block). No mesh_hello call needed. \
+mesh_join_room/mesh_ring/mesh_read_inbox/mesh_recall/mesh_remember call) -- a periodic agent.hello heartbeat, a live roster of other agents, \
+a standing watch over central and every room you open, join or see announced there \
+(mesh_read_inbox and mesh_lobby_transcript read that instantly, never block), AND your own ring \
+endpoint agent.<node_id>.ring, served so others can mesh_ring you. Your operator's contact policy \
+(MACULA_MCP_CONTACT_POLICY: open, ask (default), closed) answers rings; under "ask" they land in \
+mesh_read_inbox as pending for you to judge. MACULA_MCP_NO_RING=1 serves nothing. No mesh_hello call needed. \
 mesh_hello itself still matters for customizing operator_name/message/model, or restarting presence \
 after an explicit mesh_goodbye -- goodbye stays honored, the next mesh call won't silently undo it. \
 mesh_serve/mesh_unserve are the one exception: they never auto-start presence.
@@ -124,7 +132,9 @@ help directly (/mcp__macula__help and friends -- help_identity, help_wire_format
 help_presence, help_conversations, help_serve, help_install -- if their client supports MCP prompts).
 - mesh_serve registers a procedure other agents can call, answered by a local shell command run \
 per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. Never register a \
-command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
+command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop. The \
+ring endpoint above is the one procedure served without you asking; its handler ships in this package \
+and verifies the caller's proof before doing anything.`;
 
 const server = new McpServer(
   { name: "macula-mcp", version: serverVersion() },
@@ -163,6 +173,9 @@ registerMeshMemory(server);
 // (rooms.ts owns which rooms this agent is in; envelope.ts owns the
 // wire shape). See plans/PLAN_AGENT_CONVERSATIONS.md.
 registerMeshRooms(server);
+// mesh_ring: open (if needed), sign, call the callee's agent.<node_id>.ring,
+// then read the transcript for their participant_joined -- see mesh_ring.ts.
+registerMeshRing(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 

@@ -19,6 +19,7 @@ import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC, KINDS, TALK_KINDS } from "./envelope.js";
+import { ANSWER, listRings } from "./rings.js";
 
 const MAX_WAIT_SECONDS = 3600;
 
@@ -110,11 +111,18 @@ export function registerMeshRooms(server: McpServer): void {
     "mesh_rooms",
     "Rooms this agent is in (opened or joined this session, still being watched), with the participants " +
       "seen so far and how many facts arrived, plus public rooms announced on central that you have not " +
-      "joined. Instant, a local read, never blocks.",
+      "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks.",
     {},
     async () => {
       try {
-        return jsonContent(rooms.listRooms());
+        const awaiting = listRings({ direction: "out", answer: ANSWER.deferred, limit: 50 }).map((r) => ({
+          ring_id: r.ring_id,
+          to: r.peer,
+          purpose: r.purpose,
+          room_topic: r.room_topic,
+          rang_at: r.recorded_at,
+        }));
+        return jsonContent({ ...rooms.listRooms(), rings_awaiting_answer: awaiting });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));
       }

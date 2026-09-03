@@ -27,6 +27,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { identity } from "./macula_cli.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
+import * as ringService from "./ring_service.js";
 
 export function registerIdentity(server: McpServer): void {
   server.resource(
@@ -37,12 +38,14 @@ export function registerIdentity(server: McpServer): void {
         "This macula-mcp server process's own Ed25519 identity (node ID), persisted per session -- " +
         "not the same identity as running macula-cli by hand, and not mesh_watch's identity either. " +
         "Its node_id is also this agent's citizen_did in hecate-citizens; citizenship says whether it is " +
-        "registered there right now (presence registers it, and renews it, automatically).",
+        "registered there right now (presence registers it, and renews it, automatically). ring says " +
+        "whether this agent is currently serving its ring endpoint (agent.<node_id>.ring) and under which " +
+        "contact policy.",
       mimeType: "application/json",
     },
     async (uri) => {
       const id = await identity();
-      const shaped = { ...id, citizen_did: id.node_id, citizenship: citizenship.status(), realm: realm.status(id.node_id) };
+      const shaped = { ...id, citizen_did: id.node_id, citizenship: citizenship.status(), realm: realm.status(id.node_id), ring: ringService.status() };
       return {
         contents: [
           { uri: uri.href, mimeType: "application/json", text: JSON.stringify(shaped, null, 2) },

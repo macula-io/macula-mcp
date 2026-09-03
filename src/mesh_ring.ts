@@ -1,0 +1,148 @@
+// Tool: mesh_ring -- the addressed invite (PLAN_AGENT_CONVERSATIONS WP2).
+//
+// A ring is a mesh_call to the callee's own served procedure,
+// agent.<node_id>.ring (ring_service.ts on their side), carrying the
+// room to talk in and an ownership proof signed by this agent's default
+// identity. A call, not a publish, so the caller learns one of exactly
+// four things: accepted (they are joining the room), declined (with a
+// reason), deferred (their model will decide; the room stays open), or
+// unreachable (nobody is serving that procedure right now). Nothing
+// here writes into a topic the callee never agreed to watch.
+//
+// Composition of ordinary calls: open a room if none was given
+// (rooms.ts), sign (identitySign), call (plain, then direct-dial, the
+// same fallback citizenship.ts uses), then on acceptance read the
+// transcript for the callee's participant_joined, which their side
+// publishes BEFORE answering 1 -- so "joined" here means the room is
+// genuinely two-sided, not that a reply said so.
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { defaultStation, identity, identitySign } from "./macula_cli.js";
+import { callThenDirect, withIdentityProof } from "./citizenship.js";
+import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import * as presence from "./presence.js";
+import * as rooms from "./rooms.js";
+import { factsAfter, lastFactId } from "./lobby_transcript.js";
+import { parseEnvelope } from "./envelope.js";
+import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, RingError } from "./rings.js";
+
+const CALL_TIMEOUT_MS = 20_000;
+const DEFAULT_WAIT_JOIN_SECONDS = 30;
+const MAX_WAIT_JOIN_SECONDS = 600;
+
+const nodeIdSchema = z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex");
+
+async function waitForJoin(args: { room_topic: string; who: string; afterId: number; seconds: number }): Promise<0 | 1> {
+  const deadline = Date.now() + args.seconds * 1000;
+  let after = args.afterId;
+  while (Date.now() < deadline) {
+    const fresh = factsAfter({ topic: args.room_topic, afterId: after });
+    for (const f of fresh) {
+      after = f.id;
+      const env = parseEnvelope(JSON.parse(f.raw_json));
+      if (env && env.kind === "participant_joined" && env.from === args.who) return 1;
+    }
+    await new Promise((resolve) => setTimeout(resolve, rooms.REPLY_POLL_MS));
+  }
+  return 0;
+}
+
+export function registerMeshRing(server: McpServer): void {
+  server.tool(
+    "mesh_ring",
+    "Ring another agent: an addressed invite delivered as a mesh_call to their agent.<node_id>.ring " +
+      "procedure with your identity proof, carrying a room to talk in (a new one, opened for the two of " +
+      "you, unless you pass a room you are already in). You get exactly one of: answer 1 accepted (they " +
+      "join the room; this call then waits up to wait_join_seconds for their participant_joined, so " +
+      "joined: 1 means the room is genuinely two-sided), 2 declined (with their reason), 3 deferred " +
+      "(their operator's policy is \"ask\", their model decides later; the room stays open), or " +
+      "unreachable: 1 (nobody serves that procedure right now -- they are not present, or opted out). " +
+      "purpose is mandatory and short: a deferred ring is judged from it. This is the ONLY way to reach " +
+      "an agent that has not invited you; never write into a room they have not joined.",
+    {
+      to: nodeIdSchema.describe("The agent to ring: a node_id from mesh_agents."),
+      purpose: z.string().min(1).max(MAX_PURPOSE_CHARS).describe(`Why you are ringing, one line (max ${MAX_PURPOSE_CHARS} chars).`),
+      room_topic: z.string().optional().describe("A room you are already in to invite them into. Omit to open a fresh two-party room."),
+      wait_join_seconds: z
+        .number()
+        .min(0)
+        .max(MAX_WAIT_JOIN_SECONDS)
+        .optional()
+        .describe(`After an accepted answer, how long to wait for their participant_joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait).`),
+      host: z
+        .string()
+        .optional()
+        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
+    },
+    async ({ to, purpose, room_topic, wait_join_seconds, host }) => {
+      presence.ensurePresence(server);
+      try {
+        const me = presence.currentNodeId() ?? (await identity()).node_id;
+        if (to === me) return errorContent("mesh_ring: that is this agent's own node id.");
+        let roomTopic = room_topic;
+        if (roomTopic === undefined) {
+          roomTopic = (await rooms.openRoom({ host, purpose, participants: [to] })).room_topic;
+        } else if (!rooms.isJoined(roomTopic)) {
+          return errorContent(`mesh_ring: not in room ${roomTopic} -- open or join it first, or omit room_topic.`);
+        }
+        const ring = buildRingArgs({ from: me, to, purpose, room_topic: roomTopic });
+        const procedure = ringProcedure(to);
+        recordRing({ ...ring, direction: "out", peer: to });
+        const cursor = lastFactId(roomTopic);
+
+        let payload: unknown;
+        try {
+          const signed = await identitySign({ procedure });
+          const res = await callThenDirect({ host, procedure, callArgs: withIdentityProof({ ...ring }, signed), timeoutMs: CALL_TIMEOUT_MS });
+          payload = res.payload;
+        } catch (e) {
+          const reason = `unreachable: ${e instanceof Error ? e.message : String(e)}`;
+          answerRing(ring.ring_id, null, reason);
+          return jsonContent({
+            ring_id: ring.ring_id,
+            to,
+            room_topic: roomTopic,
+            unreachable: 1,
+            reason,
+            next_step: "They are not serving their ring endpoint right now (not present, or MACULA_MCP_NO_RING). The room stays open; ring again when mesh_agents shows them.",
+          });
+        }
+
+        const reply = parseRingReply(payload);
+        if (!reply) {
+          answerRing(ring.ring_id, null, "malformed reply");
+          return errorContent(`mesh_ring: ${procedure} answered with something that is not a ring reply: ${JSON.stringify(payload)}`);
+        }
+        answerRing(ring.ring_id, reply.answer, reply.reason);
+
+        let joined: 0 | 1 | undefined;
+        if (reply.answer === ANSWER.accepted) {
+          const seconds = wait_join_seconds ?? DEFAULT_WAIT_JOIN_SECONDS;
+          joined = seconds > 0 ? await waitForJoin({ room_topic: roomTopic, who: to, afterId: cursor, seconds }) : 0;
+        }
+        const nextStep =
+          reply.answer === ANSWER.accepted
+            ? joined === 1
+              ? "They are in the room. mesh_say on it; mesh_read_inbox to read."
+              : "Accepted, but their participant_joined was not seen in time. mesh_read_inbox will show it when it lands; you can mesh_say already."
+            : reply.answer === ANSWER.deferred
+              ? "Their model will answer later. The room stays open; mesh_rooms shows the ring as awaiting. Do not write into the room until they join."
+              : "Declined. Leave the room if you opened it for this.";
+        return jsonContent({
+          ring_id: ring.ring_id,
+          to,
+          room_topic: roomTopic,
+          answer: reply.answer,
+          answer_label: answerLabel(reply.answer),
+          ...(reply.reason !== undefined ? { reason: reply.reason } : {}),
+          ...(joined !== undefined ? { joined } : {}),
+          next_step: nextStep,
+        });
+      } catch (e) {
+        if (e instanceof RingError || e instanceof rooms.RoomError) return errorContent(`mesh_ring failed: ${e.message}`);
+        return errorContent(describeCliError("mesh_ring failed", e));
+      }
+    },
+  );
+}

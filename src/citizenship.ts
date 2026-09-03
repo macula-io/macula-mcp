@@ -146,7 +146,7 @@ function readOk(payload: unknown): { ok: boolean; expires_at?: number; error?: s
  * DHT record is still there. Same advice mesh_call's own `direct` doc
  * gives a caller, applied here automatically.
  */
-async function callThenDirect(args: Parameters<typeof call>[0]): Promise<Awaited<ReturnType<typeof call>>> {
+export async function callThenDirect(args: Parameters<typeof call>[0]): Promise<Awaited<ReturnType<typeof call>>> {
   try {
     return await call(args);
   } catch (plain) {

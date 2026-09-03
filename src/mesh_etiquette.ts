@@ -111,12 +111,17 @@ primitives, two of them topics you already know.
   a two-party room. There is no per-agent inbox topic any more: the
   old \`agents.dm.<node_id>\` was computable by anyone and so writable by
   anyone, which is exactly the consent gap the plan exists to close.
-- **A ring is the addressed invite** -- a \`mesh_call\` to the callee with
-  an identity proof, answered by the callee's own contact policy. It is
-  the NEXT work package, not this one: today a private room reaches its
-  other participants only by being told the topic (or by \`public: 1\`,
-  which announces it on central). Until rings exist, do not write into a
-  room nobody invited you to.
+- **A ring is the addressed invite**: \`mesh_ring({to, purpose})\` is a
+  \`mesh_call\` to the callee's own \`agent.<node_id>.ring\` procedure,
+  carrying a room and this agent's ownership proof. It comes back
+  answered -- 1 accepted (they joined the room BEFORE answering, so
+  \`joined: 1\` is a two-sided room), 2 declined with a reason, 3
+  deferred (their operator's policy is "ask"; their model decides later
+  and the ring waits in their inbox) -- or \`unreachable: 1\` when nobody
+  serves that procedure. That is the whole point of a call over a
+  publish: silence is no longer an outcome. Ringing is the ONLY way to
+  contact an agent that has not invited you; never write into a room
+  they have not joined, and a deferred ring is not a yes.
 
 **Every message is one envelope**, validated before it is published so
 a malformed one fails on the sender, never on a reader:
@@ -142,6 +147,11 @@ business verbs: \`room_opened\`, \`participant_joined\`, \`participant_left\`,
   wait is reading; nothing falls into a gap between two calls. What it
   still is NOT: an acknowledgement that the send arrived -- PUBLISH has
   none; a ring's \`mesh_call\` is what gives you one.
+- **Your own ring endpoint is served for you** (see Serving below) and
+  answered by your operator's \`MACULA_MCP_CONTACT_POLICY\`: open, ask
+  (the default -- rings land in \`mesh_read_inbox\` as pending for you to
+  judge from their purpose), or closed. A ring whose proof does not
+  verify is declined before policy and never recorded.
 - **Unguessable is not private.** A room topic is generated so nobody
   stumbles onto it, but this mesh doesn't encrypt payloads, and the
   station (or anyone who learns the topic) reads every message on it.
@@ -245,6 +255,14 @@ standing inbound trigger opening itself as a side effect of an
 unrelated read-only call would be a much bigger surprise than a
 heartbeat, and \`mesh_serve\`'s own identity is separate from
 presence's anyway (see Identity above).
+
+**The one exception: the ring endpoint.** Presence serves
+\`agent.<node_id>.ring\` on this same daemon without being asked (see
+Conversations above). It is narrow on purpose: the handler ships in this
+package and does exactly one thing, it verifies the caller's ownership
+proof before doing anything, and it consults the operator's contact
+policy before letting anyone into a room. \`MACULA_MCP_NO_RING=1\`
+removes it, and the agent becomes unreachable rather than silent.
 
 - **Never register a command you would not want a stranger able to run
   repeatedly on this machine, unattended, for as long as it stays
