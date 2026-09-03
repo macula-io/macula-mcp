@@ -35,6 +35,27 @@ function policyOf(contact_policy: Policy, allowlist: string[] = []): ContactPoli
 
 vi.mock("./serve.js", () => ({ serve: vi.fn(), unserve: vi.fn() }));
 vi.mock("./rooms.js", () => ({ joinRoom: vi.fn(), isJoined: vi.fn().mockReturnValue(false), joinedRoomCount: vi.fn().mockReturnValue(0) }));
+// Only for the socket tests below, which exercise the REAL serveConnection ->
+// handleRing() path with no injected `deps.sign` (that is the point: proving
+// the relay wiring itself works). Every test above passes its own
+// `sign`/`policy`/`joinRoom`, so this fixture never affects them -- but
+// without it, those two tests would shell out to the REAL macula-cli, which
+// CI's own test job deliberately does not install (see ci.yml's own comment
+// on why: every tool here shells out to macula-cli, and a unit-test job
+// shouldn't need it on PATH). Found live when this suite's own CI run failed
+// with ENOENT for exactly that reason.
+vi.mock("./macula_cli.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./macula_cli.js")>();
+  // A plain function, NOT vi.fn(): vi.resetAllMocks() in this file's own
+  // afterEach (needed for the explicit vi.fn() mocks like joinRoom/notify
+  // elsewhere in this suite) would otherwise wipe this fixture's return
+  // value back to undefined after the first test that exercises it,
+  // breaking every later test that hits the real (now-fixtured)
+  // identitySign path without noticing -- found live by exactly that
+  // failure, tests passing alone and failing only in file order.
+  const identitySign = async ({ procedure }: { procedure: string }) => ({ node_id: ME, timestamp: NOW, signature: `sig(${procedure})` });
+  return { ...actual, identitySign };
+});
 
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";
