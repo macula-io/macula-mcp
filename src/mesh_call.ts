@@ -13,7 +13,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation, identitySign, splitRealmPrefix } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation, identitySign, splitRealmPrefix, ucanPath } from "./macula_cli.js";
 import { call } from "./macula_ts_client.js";
 import { withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
@@ -24,7 +24,9 @@ export function registerMeshCall(server: McpServer): void {
     "mesh_call",
     "Invoke a procedure advertised on the mesh (build, test, search, deploy on commons hardware). " +
       "Macula RPC is procedure-addressed: the target station routes to a peer that advertises it. " +
-      `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given.`,
+      `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given. ` +
+      "If this server's own MACULA_MCP_UCAN is set, its token is attached to every call automatically " +
+      "(harmless against a procedure that isn't UCAN-gated).",
     {
       procedure: z
         .string()
@@ -73,8 +75,12 @@ export function registerMeshCall(server: McpServer): void {
             "(\"procedure has no direct-dial advertisement\"). Prefer this whenever a plain call fails " +
             "against a target you otherwise know is up. NOT CURRENTLY SUPPORTED: this server's in-process " +
             "@macula-io/ts client doesn't implement direct-dial yet, so setting this to true always throws " +
-            "before any call is attempted -- and since UCAN-gated capabilities require direct-dial, they " +
-            "aren't reachable through mesh_call at all right now.",
+            "before any call is attempted. In practice this also means a UCAN-gated capability generally " +
+            "isn't reachable through mesh_call yet either -- not because gating requires direct-dial at the " +
+            "protocol level (it doesn't; that's just how today's gated capabilities happen to be advertised), " +
+            "but because this client can't do the one-hop dial they're currently only reachable through. A " +
+            "MACULA_MCP_UCAN token still gets attached to an ordinary (non-direct) call regardless, and works " +
+            "fine against anything reachable that way.",
         ),
       prove_identity: z
         .boolean()
@@ -103,6 +109,7 @@ export function registerMeshCall(server: McpServer): void {
           realm,
           direct,
           identityPath: defaultIdentityPath(),
+          ucanPath: ucanPath(),
         });
         return jsonContent({ result: res.payload, duration_ms: res.duration_ms });
       } catch (e) {

@@ -128,6 +128,36 @@ function assertDirectNotRequested(direct: boolean | undefined, tool: string): vo
   }
 }
 
+/** Reads a UCAN token from `path` (MACULA_MCP_UCAN, same file-path convention
+ * macula_cli.ts's ucanPath() already established). Deliberately just an
+ * existence/non-empty sanity check -- NOT an identity-pairing check. An
+ * earlier draft of this feature (macula_cli.ts's assertUcanUsableWithIdentity,
+ * still uncommitted in this tree, not touched here) required MACULA_MCP_IDENTITY
+ * to point at the token's own <audience> on the premise that presenting a UCAN
+ * from any other identity "would never verify" -- a Fable review of this exact
+ * codebase traced the real verify chain (Erlang's authorize_policy +
+ * macula_ucan_nif:verify/2, identical across every SDK port) and found it
+ * checks ONLY the token's signature and expiry against its own issuer, never
+ * the caller's identity against `aud`. That check both rejected configurations
+ * that work fine on the wire and implied a security property the mesh doesn't
+ * enforce -- @macula-io/ts's own Session.callWithUcan is deliberately built
+ * without it (see its own module doc), and this function follows the same
+ * discipline: confirm the file is there and has something in it, attach
+ * whatever token it holds, nothing more. */
+function readUcanToken(path: string): string {
+  if (!existsSync(path)) {
+    throw new MaculaCliError(
+      `MACULA_MCP_UCAN is set to "${path}" but that file doesn't exist -- provision the token first ` +
+        "(macula-cli ucan mint ...) before making a call that needs it.",
+    );
+  }
+  const token = readFileSync(path, "utf8").trim();
+  if (!token) {
+    throw new MaculaCliError(`MACULA_MCP_UCAN's file ("${path}") is empty -- provision a real token there.`);
+  }
+  return token;
+}
+
 function toJsonValue(v: unknown): JsonValue {
   if (v === null || typeof v === "string" || typeof v === "number") return v;
   if (Array.isArray(v)) return v.map(toJsonValue);
@@ -163,14 +193,22 @@ export async function call(args: {
   realm?: string;
   direct?: boolean;
   identityPath: string;
+  /** MACULA_MCP_UCAN's file path, if set (see macula_cli.ts's ucanPath()) --
+   * when present, attaches the token there to this call via
+   * Session.callWithUcan instead of Session.call. Harmless to set against a
+   * procedure that isn't UCAN-gated (macula-go ignores an unneeded token on
+   * the wire, same as macula-cli's own -ucan flag always did). */
+  ucanPath?: string;
 }): Promise<TsCallResult> {
   assertRealmSupported(args.realm, "mesh_call");
   assertDirectNotRequested(args.direct, "mesh_call");
   const start = Date.now();
   return withSession(args.host, args.identityPath, async (session) => {
-    const payload = await session.call(args.procedure, toJsonValue(args.callArgs ?? {}), {
-      deadlineMs: args.timeoutMs,
-    });
+    const payload = args.ucanPath
+      ? await session.callWithUcan(args.procedure, toJsonValue(args.callArgs ?? {}), readUcanToken(args.ucanPath), {
+          deadlineMs: args.timeoutMs,
+        })
+      : await session.call(args.procedure, toJsonValue(args.callArgs ?? {}), { deadlineMs: args.timeoutMs });
     return { procedure: args.procedure, payload, duration_ms: Date.now() - start };
   });
 }
