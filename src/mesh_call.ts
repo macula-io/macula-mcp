@@ -24,9 +24,7 @@ export function registerMeshCall(server: McpServer): void {
     "mesh_call",
     "Invoke a procedure advertised on the mesh (build, test, search, deploy on commons hardware). " +
       "Macula RPC is procedure-addressed: the target station routes to a peer that advertises it. " +
-      `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given. ` +
-      "If this server's own MACULA_MCP_UCAN is set, its delegated authority is attached to every call " +
-      "automatically (see the direct field below for the flag reaching a gated capability actually needs).",
+      `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given.`,
     {
       procedure: z
         .string()
@@ -73,13 +71,10 @@ export function registerMeshCall(server: McpServer): void {
             "temporary_relay_failure) even though the target is live and reachable. direct-dial sidesteps " +
             "that gap, at the cost of failing outright if the provider only advertised the plain way " +
             "(\"procedure has no direct-dial advertisement\"). Prefer this whenever a plain call fails " +
-            "against a target you otherwise know is up. Required (set this true) to reach any UCAN-gated " +
-            "capability: those are advertised direct-dial only, so a plain call can never route to one even " +
-            "with a UCAN attached (see MACULA_MCP_UCAN in this server's own environment). As of this writing " +
-            "(2026-09-03), that combination -- this true, together with MACULA_MCP_UCAN set -- is refused " +
-            "outright, before any call is attempted: no released macula-cli can compose -direct with -ucan " +
-            "yet (the fix landed on macula-cli's master, unreleased). A plain (non-direct) call still carries " +
-            "MACULA_MCP_UCAN fine, for whatever that's worth against an ungated procedure.",
+            "against a target you otherwise know is up. NOT CURRENTLY SUPPORTED: this server's in-process " +
+            "@macula-io/ts client doesn't implement direct-dial yet, so setting this to true always throws " +
+            "before any call is attempted -- and since UCAN-gated capabilities require direct-dial, they " +
+            "aren't reachable through mesh_call at all right now.",
         ),
       prove_identity: z
         .boolean()
