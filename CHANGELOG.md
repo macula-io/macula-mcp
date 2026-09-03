@@ -39,6 +39,42 @@ fires on a `v*` tag push, not on every commit to `main`).
   (`~/.config/macula-mcp/identities/<kind>-<scopeKey>.seed`) via a new `loadOrGenerateIdentity()` helper —
   same load-or-generate policy, same per-kind identity separation, same node IDs a deployment already
   depends on.
+- **`presence.ts`'s `macula-cli daemon` replaced by two persistent `@macula-io/ts` Sessions**, backing
+  `mesh_hello`/`mesh_goodbye`/`mesh_agents`. TWO Sessions, not one: a Session allows only one active
+  `subscribe()` at a time (confirmed against `macula-go`'s own `connection.Session` — concurrent
+  subscriptions sharing one session corrupt the shared read loop), so `agent.hello` and `agent.goodbye`
+  each get their own. And TWO different identities, not the same one twice — a second connection under
+  the same node ID gets the FIRST one closed by the station (`macula_station_listener.erl`'s per-identity
+  peer dedupe), confirmed live during this cutover's own verification. New
+  `presenceGoodbyeIdentityPath()` / `MACULA_MCP_PRESENCE_GOODBYE_IDENTITY` (`macula_cli.ts`) is the sixth
+  identity this needs. Both subscription handlers now write directly into `roster.ts`, in-process — no
+  NDJSON feed, no separate daemon child process. The heartbeat stays a one-shot connect-publish-close via
+  `macula_ts_client.ts`'s `publish()` under the DEFAULT identity (unchanged from `macula-cli`'s own old
+  `publish()`) rather than riding either subscribe Session, which would turn it into a THIRD standing
+  connection sharing an identity with every ordinary one-shot `mesh_call`/`mesh_publish` — colliding with
+  them the same way two presence Sessions under one identity would collide with each other.
+- **Real reconnect, not just a connection**: each subscribe leg's `subscribe()` call is given an
+  `onClosed` hook — delivered by `@macula-io/ts`'s subscription-lifecycle fix from earlier this cycle,
+  which turned a silently-dead subscription into an actual signal — that reconnects and re-subscribes
+  with exponential backoff (1s base, doubling, capped at 30s) the moment that leg's connection dies for
+  any reason other than a deliberate `mesh_goodbye`. The heartbeat interval tolerates the same kind of
+  failure on its own terms: a failed publish tick is caught and logged, never thrown, and the next tick
+  tries fresh on its own. Verified live against the production fleet: dialing a second connection under
+  presence's own hello-leg identity forced the station to kick the first one mid-session (not a clean
+  `stop()`), and the leg reconnected and resumed delivering `agent.hello` events into `roster.ts` within
+  one backoff cycle. `mesh_serve`'s own cutover deliberately left this as a "known, honest gap" (see its
+  own doc comment in `serve.ts`) — presence needed it now, since a roster that silently stops updating was
+  the exact failure mode presence's old daemon existed to prevent. New `src/presence.test.ts` covers the
+  two-identity wiring, the roster handlers, heartbeat resilience, the reconnect/backoff sequence
+  (including a forced-mid-flight `stop()` racing an in-flight `onClosed`), and `stop()`'s teardown, all
+  mocked at the `macula_ts_client.ts` boundary the same way `ring_service.test.ts` mocks `serve.ts`.
+- `citizenship.ts` (presence's hecate-citizens registration, driven by `presence.start()`) is
+  **unaffected by this cutover, on purpose**: it still shells out to `macula-cli` for everything it does
+  (`call`, `identity sign`, realm discovery via `discoverProcedureRealm`), the same `@macula-io/ts` gaps
+  already listed above for `mesh_call`/`mesh_stations` — no non-default realm, no ownership-proof signing,
+  no direct-dial fallback. Presence's own two subscribe Sessions and heartbeat are fully in-process now;
+  the citizen-directory registration `presence.start()` also drives is not, and can't be until those
+  three capabilities land in `@macula-io/ts`.
 
 ### Known gaps (real, not hidden — see README.md)
 - `@macula-io/ts` does not yet support non-default realms or direct-dial. `mesh_call`'s `realm` and `direct`

@@ -221,7 +221,7 @@ const identityDir = join(homedir(), ".config", "macula-mcp", "identities");
  */
 const scopeKey = process.env.CLAUDE_CODE_SESSION_ID ?? `ppid-${process.ppid}`;
 
-function mintIdentityPath(kind: "default" | "watch" | "presence" | "serve" | "observe"): string {
+function mintIdentityPath(kind: "default" | "watch" | "presence" | "presence-goodbye" | "serve" | "observe"): string {
   mkdirSync(identityDir, { recursive: true });
   return join(identityDir, `${kind}-${scopeKey}.seed`);
 }
@@ -274,6 +274,31 @@ let cachedPresenceIdentityPath: string | undefined;
 export function presenceIdentityPath(): string {
   if (process.env.MACULA_MCP_PRESENCE_IDENTITY) return process.env.MACULA_MCP_PRESENCE_IDENTITY;
   return (cachedPresenceIdentityPath ??= mintIdentityPath("presence"));
+}
+
+let cachedPresenceGoodbyeIdentityPath: string | undefined;
+/**
+ * A SIXTH identity, dedicated to presence.ts's OWN second concurrent
+ * connection -- since 2026-09-04, presence holds two persistent
+ * @macula-io/ts Sessions open at once (one subscribed to agent.hello,
+ * one to agent.goodbye: a Session allows only one active subscribe()
+ * at a time, confirmed against macula-go's own connection.Session --
+ * see presence.ts's own doc comment), and two connections under the
+ * SAME node ID get the older one closed by the station the moment the
+ * second one completes its handshake (macula_station_listener.erl's
+ * per-identity peer dedupe: "on a duplicate dial from the same
+ * identity, the prior worker is sent a graceful close"). Without a
+ * distinct identity here, opening the goodbye subscription would kick
+ * the hello one straight back offline, and vice versa on every
+ * reconnect. This connection never publishes anything under its own
+ * identity -- it only reads agent.goodbye facts that name some OTHER
+ * node_id in their payload -- so, unlike presenceIdentityPath, nothing
+ * outside this file ever needs to recognize this identity's own
+ * node_id as "this agent".
+ */
+export function presenceGoodbyeIdentityPath(): string {
+  if (process.env.MACULA_MCP_PRESENCE_GOODBYE_IDENTITY) return process.env.MACULA_MCP_PRESENCE_GOODBYE_IDENTITY;
+  return (cachedPresenceGoodbyeIdentityPath ??= mintIdentityPath("presence-goodbye"));
 }
 
 let cachedWatchIdentityPath: string | undefined;

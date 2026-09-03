@@ -11,10 +11,10 @@
 // mesh_hello.ts/mesh_goodbye.ts/mesh_agents.ts are thin tool wrappers
 // around start()/stop()/roster reads; this module owns the actual
 // lifecycle -- lobby_observer.ts still owns ITS OWN lifecycle (own
-// daemon, own identity, own socket) and this module only calls its
-// start()/stop(), the same way mesh_observe_lobby.ts itself does, so
-// an agent that wants a bigger max_rooms or to opt back in after
-// mesh_unobserve_lobby can still call mesh_observe_lobby directly.
+// macula-cli daemon, own identity, own socket) and this module only
+// calls its start()/stop(), the same way mesh_observe_lobby.ts itself
+// does, so an agent that wants a bigger max_rooms or to opt back in
+// after mesh_unobserve_lobby can still call mesh_observe_lobby directly.
 //
 // (2026-08-31, later the same day) ensurePresence(): every genuinely
 // mesh-touching tool (mesh_call, mesh_publish, mesh_watch,
@@ -43,41 +43,76 @@
 // undo a real mesh_goodbye on the very next mesh tool call; only an
 // explicit mesh_hello does).
 //
-// mesh_watch.ts's own doc comment explains why a standing subscription
-// was deliberately NOT built before: macula-cli had no daemon, so
-// "macula-mcp itself becoming a stateful daemon" was a real fork not
-// taken. macula-cli has a real daemon now (serve/call/pubsub over a
-// persistent connection, see its own README's Daemon mode section) --
-// this module is macula-mcp finally taking that fork, scoped narrowly
-// to what presence needs: one internally-managed macula-cli daemon,
-// used ONLY to hold two durable subscriptions alive. The periodic
-// PUBLISH side does NOT need it -- macula-cli's daemon protocol has no
-// publish-via-daemon method (only call/serve/subscribe), so each
-// heartbeat is an ordinary one-shot `pubsub publish`, exactly like
-// mesh_publish already does.
+// (2026-09-04) In-process @macula-io/ts, not a macula-cli daemon: this
+// module used to hold one internally-managed macula-cli daemon
+// subprocess open (macula-cli's own "daemon start" plus two
+// `pubsub watch -daemon` children) purely to keep the HELLO_TOPIC/
+// GOODBYE_TOPIC subscriptions durable across tool calls. Now it holds
+// two @macula-io/ts Sessions directly, in-process, for the life of this
+// server process -- the same fork serve.ts already took for
+// mesh_serve (see its own doc comment for why the daemon existed only
+// to let separate one-shot subprocess invocations share one
+// connection, a reason that disappears once macula-ts is called
+// in-process). TWO Sessions, not one: a Session allows only one active
+// subscribe() at a time (confirmed against macula-go's own
+// connection.Session -- concurrent RunSubscriber calls sharing one
+// session corrupt the shared control stream's read loop), so
+// HELLO_TOPIC and GOODBYE_TOPIC each get their own Session. And two
+// DIFFERENT identities, not the same presence identity twice: a
+// second connection under the same node ID gets the FIRST one closed
+// by the station (macula_station_listener.erl's per-identity peer
+// dedupe -- "on a duplicate dial from the same identity, the prior
+// worker is sent a graceful close"), which would otherwise make the
+// hello and goodbye subscriptions take turns kicking each other
+// offline forever. See macula_cli.ts's presenceGoodbyeIdentityPath()
+// for the second identity this needs.
 //
-// serve.ts is the second module to take this fork, for mesh_serve --
-// it holds its OWN separate daemon (own identity, own socket name),
-// sharing only the generic "spawn a daemon and wait for readiness"
-// mechanics (macula_cli.ts's startDaemon), not the daemon instance
-// itself. Presence and serving are deliberately separate exposures:
-// presence is a heartbeat + read-only subscription, serving accepts
-// inbound calls that run a local command -- conflating the two under
-// one identity would make it harder to reason about (or revoke) either
-// capability independently.
+// The heartbeat stays a one-shot connect-publish-close (via
+// macula_ts_client's publish(), under defaultIdentityPath() --
+// unchanged from macula_cli.ts's own old publish(), which used the
+// same identity) rather than riding either subscribe Session: the
+// default identity is shared with every ordinary one-shot mesh_call/
+// mesh_publish/mesh_get, none of which hold it open -- turning the
+// heartbeat into a THIRD standing connection under that identity would
+// make presence's own heartbeat and an unrelated mesh_call kick each
+// other's connections, the exact anti-duplicate-session problem
+// presenceIdentityPath's own doc comment describes. A one-shot publish
+// has no connection to keep alive in the first place, so it needs no
+// reconnect logic of its own -- only a caught, logged failure so one
+// bad tick doesn't stop the next one (see beat()).
+//
+// Reconnect: each subscribe Session's subscribe() call is given an
+// onClosed hook (fired at most once, exactly when that Session's
+// connection dies for any reason other than a deliberate stop()) that
+// reconnects and re-subscribes with exponential backoff -- see
+// scheduleReconnect()/attachSession() below. This is the daemon's own
+// old reconnect/replay behavior, reimplemented on the signal
+// Session.subscribe() now provides instead of relying on a subprocess
+// staying alive. serve.ts's own cutover deliberately did NOT build this
+// yet (see its own doc comment, "known, honest gap") -- this module
+// does, since a roster that silently stops updating (found live
+// 2026-09-02, see watchForUnexpectedDeath's history in git blame) was
+// the exact failure mode presence's own daemon existed to prevent.
+//
+// serve.ts is the other module that took this fork, for mesh_serve --
+// it holds its OWN separate Session (own identity), sharing only
+// macula_ts_client.ts's connect/identity plumbing, not any Session
+// instance itself. Presence and serving are deliberately separate
+// exposures: presence is a heartbeat + read-only subscriptions, serving
+// accepts inbound calls that run a local command -- conflating the two
+// under one identity would make it harder to reason about (or revoke)
+// either capability independently.
 
-import { randomBytes } from "node:crypto";
-import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { Identity, PubsubEvent, Session } from "@macula-io/ts";
 import {
-  identity,
+  defaultIdentityPath,
   onShutdown,
+  presenceGoodbyeIdentityPath,
   presenceIdentityPath,
-  publish,
-  startDaemon,
   stationArgs,
-  watchTopicOnDaemon,
 } from "./macula_cli.js";
+import { connectWithFallback, loadOrGenerateIdentity, publish, toCliError, tsIdentity } from "./macula_ts_client.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import * as ringService from "./ring_service.js";
@@ -91,6 +126,121 @@ const DEFAULT_INTERVAL_SECONDS = 60;
 /** Never let a misconfigured caller hammer a shared demo station. */
 const MIN_INTERVAL_SECONDS = 10;
 
+/** Reconnect backoff for a subscribe leg (attachSession/scheduleReconnect below): starts at 1s, doubles, caps at 30s. */
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
+
+/**
+ * One durably-subscribed topic: its own identity/Session (see this
+ * module's own top comment for why two legs can never share either),
+ * its own current subscription's stop() function, and enough state to
+ * reconnect-with-backoff when that Session's connection dies.
+ * `identity` is loaded once and reused across every reconnect for this
+ * leg's whole life -- connect()ing again under the same Identity object
+ * is safe (it's read-only from the Go side, never consumed), and
+ * reloading the seed file from disk on every reconnect would be pure
+ * overhead for no behavior difference.
+ */
+interface Leg {
+  topic: string;
+  onEvent: (evt: PubsubEvent) => void;
+  /** The raw, possibly-undefined host override this leg was started with -- kept raw (not pre-resolved to a single primary) so every (re)connect attempt gets connectWithFallback's own multi-station fallback, matching citizenship.ts's identical discipline for the same reason. */
+  host?: string;
+  identity: Identity;
+  session: Session;
+  stopSubscription: () => Promise<void>;
+  reconnectAttempt: number;
+  retryTimer?: NodeJS.Timeout;
+  /** Set once stop()/stopSync() starts tearing this leg down -- suppresses any reconnect already scheduled or about to be scheduled, and tells a connect attempt still in flight to close what it just opened instead of subscribing on it. */
+  closing: boolean;
+}
+
+/**
+ * (Re)connects `leg` and re-subscribes, wiring a fresh onClosed hook
+ * that schedules the NEXT reconnect the moment this one's connection
+ * dies. Throws on failure -- the caller decides whether that's fatal
+ * (connectLeg's first attempt, below) or just another turn of the
+ * backoff loop (scheduleReconnect's retry, below); this function itself
+ * has no opinion on that.
+ */
+async function attachSession(leg: Leg): Promise<void> {
+  const session = await connectWithFallback(leg.identity, leg.host);
+  if (leg.closing) {
+    await session.close(leg.identity).catch(() => {});
+    return;
+  }
+  const stop = await session.subscribe(leg.topic, leg.onEvent, {
+    onClosed: (err) => {
+      console.error(`presence: ${leg.topic} subscription closed unexpectedly (${err.message}) -- reconnecting`);
+      scheduleReconnect(leg);
+    },
+  });
+  if (leg.closing) {
+    // stop() ran while subscribe() was still in flight -- tear this fresh one down too, nothing should be left listening.
+    await stop().catch(() => {});
+    await session.close(leg.identity).catch(() => {});
+    return;
+  }
+  leg.session = session;
+  leg.stopSubscription = stop;
+  leg.reconnectAttempt = 0; // a successful (re)connect resets backoff for the NEXT disconnect
+  leg.retryTimer = undefined;
+}
+
+/** Schedules attachSession() again after an exponential backoff, retrying itself on further failure until it succeeds or the leg starts closing. Never throws -- every failure just re-schedules. */
+function scheduleReconnect(leg: Leg): void {
+  if (leg.closing) return;
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** leg.reconnectAttempt);
+  leg.reconnectAttempt += 1;
+  console.error(`presence: ${leg.topic} reconnecting in ${delay}ms (attempt ${leg.reconnectAttempt})`);
+  const timer = setTimeout(() => {
+    void attachSession(leg).catch((e) => {
+      console.error(`presence: ${leg.topic} reconnect attempt failed: ${e instanceof Error ? e.message : String(e)}`);
+      scheduleReconnect(leg);
+    });
+  }, delay);
+  timer.unref(); // a pending reconnect attempt alone shouldn't keep the process alive
+  leg.retryTimer = timer;
+}
+
+/** Loads/mints `identityPath`'s identity and makes the FIRST connection -- throws if it fails, so a leg that can't even start doesn't silently report success (matching the old startDaemon()'s behavior, which rejected the same way). Every reconnect AFTER this first one goes through scheduleReconnect instead, which never throws. */
+async function connectLeg(host: string | undefined, identityPath: string, topic: string, onEvent: (evt: PubsubEvent) => void): Promise<Leg> {
+  const identity = loadOrGenerateIdentity(identityPath);
+  const leg: Leg = {
+    topic,
+    onEvent,
+    host,
+    identity,
+    session: undefined as unknown as Session,
+    stopSubscription: async () => {},
+    reconnectAttempt: 0,
+    closing: false,
+  };
+  try {
+    await attachSession(leg);
+  } catch (e) {
+    identity.dispose();
+    throw toCliError(e);
+  }
+  return leg;
+}
+
+/** Graceful async teardown: waits for the subscription to actually stop and the Session to actually close before disposing the identity. Used by stop() (mesh_goodbye), which can afford to await. */
+async function stopLeg(leg: Leg): Promise<void> {
+  leg.closing = true;
+  if (leg.retryTimer) clearTimeout(leg.retryTimer);
+  await leg.stopSubscription().catch(() => {});
+  await leg.session.close(leg.identity).catch(() => {});
+  leg.identity.dispose();
+}
+
+/** Synchronous best-effort teardown only -- what onShutdown registers, same reasoning as serve.ts's own stopSync: a SIGINT/SIGTERM handler cannot reliably wait on an async close. An abrupt process kill just drops the connection; disposing the identity handle is the only truly synchronous, safe cleanup available here. */
+function stopLegSync(leg: Leg): void {
+  leg.closing = true;
+  if (leg.retryTimer) clearTimeout(leg.retryTimer);
+  leg.identity.dispose();
+}
+
 interface PresenceState {
   nodeId: string;
   operatorName?: string;
@@ -98,9 +248,8 @@ interface PresenceState {
   model?: string;
   connectedVia?: string;
   host: string;
-  socketName: string;
-  daemon: ChildProcessWithoutNullStreams;
-  watchers: ChildProcessWithoutNullStreams[];
+  helloLeg: Leg;
+  goodbyeLeg: Leg;
   heartbeatTimer: NodeJS.Timeout;
 }
 
@@ -134,7 +283,7 @@ export function connectedViaLabel(server: McpServer): string | undefined {
  * environment-derived defaults, if it isn't already -- called at the
  * top of every genuinely mesh-touching tool (see this module's own top
  * comment). Deliberately does NOT await or block the caller: presence
- * startup (spawns a daemon, waits for it, publishes a hello, starts
+ * startup (opens two Sessions, waits for them, publishes a hello, starts
  * the lobby watch) can take real time, and the tool call that
  * triggered it shouldn't wait on it -- it kicks off in the background
  * and the roster/inbox/lobby watches land moments later. Errors are
@@ -198,10 +347,10 @@ export function currentNodeId(): string | undefined {
  * in MCP guarantees tool calls are strictly serialized), and the
  * fresh-start path below has several `await` points before `state` is
  * actually set -- without this guard, two concurrent callers would
- * both see `state === undefined`, both spawn their own daemon, and
- * whichever finished last would silently overwrite the other's
- * PresenceState, leaking the first daemon as an untracked orphan
- * process. `starting` makes every concurrent caller (this one
+ * both see `state === undefined`, both open their own pair of
+ * Sessions, and whichever finished last would silently overwrite the
+ * other's PresenceState, leaking the first pair as untracked orphan
+ * connections. `starting` makes every concurrent caller (this one
  * included, not just ensurePresence()) await the SAME in-flight
  * fresh-start instead.
  */
@@ -217,7 +366,7 @@ export function start(args: StartArgs): Promise<StartResult> {
 
 async function doStart(args: StartArgs): Promise<StartResult> {
   explicitlyLeft = false;
-  const { host, seedFlags } = stationArgs(args.host);
+  const { host } = stationArgs(args.host);
   const intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, args.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
 
   if (state) {
@@ -247,29 +396,31 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     };
   }
 
-  const { node_id: nodeId } = await identity();
-  const socketName = `presence-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const { node_id: nodeId } = tsIdentity(defaultIdentityPath());
 
-  const daemon = await startDaemon(host, seedFlags, presenceIdentityPath(), socketName);
-  const watchers = [
-    watchTopicOnDaemon(socketName, HELLO_TOPIC, (evt) => {
-      const payload = evt as Record<string, unknown>;
-      const seenNodeId = typeof payload.node_id === "string" ? payload.node_id : undefined;
-      if (!seenNodeId) return;
-      upsertAgent({
-        node_id: seenNodeId,
-        operator_name: typeof payload.operator_name === "string" ? payload.operator_name : undefined,
-        message: typeof payload.message === "string" ? payload.message : undefined,
-        model: typeof payload.model === "string" ? payload.model : undefined,
-        connected_via: typeof payload.connected_via === "string" ? payload.connected_via : undefined,
-        at: new Date().toISOString(),
-      });
-    }),
-    watchTopicOnDaemon(socketName, GOODBYE_TOPIC, (evt) => {
-      const payload = evt as Record<string, unknown>;
+  const helloLeg = await connectLeg(args.host, presenceIdentityPath(), HELLO_TOPIC, (evt) => {
+    const payload = evt.payload as Record<string, unknown>;
+    const seenNodeId = typeof payload.node_id === "string" ? payload.node_id : undefined;
+    if (!seenNodeId) return;
+    upsertAgent({
+      node_id: seenNodeId,
+      operator_name: typeof payload.operator_name === "string" ? payload.operator_name : undefined,
+      message: typeof payload.message === "string" ? payload.message : undefined,
+      model: typeof payload.model === "string" ? payload.model : undefined,
+      connected_via: typeof payload.connected_via === "string" ? payload.connected_via : undefined,
+      at: new Date().toISOString(),
+    });
+  });
+  let goodbyeLeg: Leg;
+  try {
+    goodbyeLeg = await connectLeg(args.host, presenceGoodbyeIdentityPath(), GOODBYE_TOPIC, (evt) => {
+      const payload = evt.payload as Record<string, unknown>;
       if (typeof payload.node_id === "string") removeAgent(payload.node_id);
-    }),
-  ];
+    });
+  } catch (e) {
+    await stopLeg(helloLeg).catch(() => {});
+    throw e;
+  }
   // Being reachable is the lobby observer's job now (started just below):
   // it taps central and every room this agent is in -- see rooms.ts.
 
@@ -293,14 +444,12 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     model: args.model,
     connectedVia: args.connectedVia,
     host,
-    socketName,
-    daemon,
-    watchers,
+    helloLeg,
+    goodbyeLeg,
     heartbeatTimer,
   };
   state = newState;
   onShutdown(stopSync);
-  watchForUnexpectedDeath(newState);
 
   // Ringable before visible: the one procedure presence serves
   // automatically (see ring_service.ts). Bounded by its own call
@@ -334,65 +483,37 @@ async function doStart(args: StartArgs): Promise<StartResult> {
 }
 
 /**
- * A daemon or watcher child dying on its own (crash, killed externally,
- * lost connection) used to leave `state` set with nothing to notice --
- * found live 2026-09-02: an agent's (then) inbox watcher died silently mid-
- * session, isActive()/already_active kept reporting true, and a real
- * message from another agent was simply never recorded, with no error
- * anywhere. The only fix the operator had was to notice independently
- * and run a full mesh_goodbye + mesh_hello -- which DID restart
- * delivery, confirming the daemon/watchers are what actually needed
- * restarting, not some deeper mesh issue. This wires that same recovery
- * automatically: exit/error on any constituent process clears `state`
- * via stopSync() (same teardown a deliberate goodbye uses, minus the
- * goodbye publish and explicitlyLeft flag -- an involuntary death isn't
- * "leaving", so ensurePresence()/the next mesh_hello should restart it
- * without the caller needing to notice or intervene).
- *
- * `forState` is closed over, not read from the module-level `state`
- * variable, so a handler registered against an OLD state -- already
- * superseded by a fresh start, or already torn down by a deliberate
- * stop() (whose own child.kill() calls also fire "exit") -- never acts
- * on a state that isn't current anymore.
- *
- * Residual gap, not addressed here: a watcher process that hangs
- * without actually exiting (connection wedged but the OS process
- * lingers) wouldn't fire "exit" and so wouldn't be caught by this --
- * no evidence yet that this is what actually happened, so not building
- * a liveness-ping mechanism against a failure mode that's still
- * hypothetical.
+ * Fire-and-forget on a timer, so never lets a transient failure crash
+ * the process or stop future heartbeats. A one-shot connect-publish-
+ * close (see this module's own top comment for why it isn't tied to
+ * either subscribe Session), so a failed tick has no connection state
+ * to clean up either -- the next tick tries fresh on its own, exactly
+ * the "tolerate a temporarily-broken connection" behavior the
+ * subscribe legs get from scheduleReconnect(), just without needing
+ * any reconnect machinery of its own.
  */
-function watchForUnexpectedDeath(forState: PresenceState): void {
-  const onDeath = (source: string) => {
-    if (state !== forState) return;
-    console.error(`presence: ${source} exited unexpectedly -- marking presence inactive so the next mesh_hello restarts it cleanly`);
-    stopSync();
-  };
-  forState.daemon.on("exit", () => onDeath("daemon"));
-  forState.daemon.on("error", () => onDeath("daemon"));
-  for (const w of forState.watchers) {
-    w.on("exit", () => onDeath("watcher"));
-    w.on("error", () => onDeath("watcher"));
-  }
-}
-
 async function beat(): Promise<void> {
   if (!state) return;
-  await publish({
-    host: state.host,
-    topic: HELLO_TOPIC,
-    fact: {
-      node_id: state.nodeId,
-      // The same key, named for the citizens directory, so a peer that
-      // heard this hello can look the agent up there without guessing.
-      citizen_did: state.nodeId,
-      ...(state.operatorName ? { operator_name: state.operatorName } : {}),
-      ...(state.message ? { message: state.message } : {}),
-      ...(state.model ? { model: state.model } : {}),
-      ...(state.connectedVia ? { connected_via: state.connectedVia } : {}),
-      at: new Date().toISOString(),
-    },
-  });
+  try {
+    await publish({
+      host: state.host,
+      topic: HELLO_TOPIC,
+      identityPath: defaultIdentityPath(),
+      fact: {
+        node_id: state.nodeId,
+        // The same key, named for the citizens directory, so a peer that
+        // heard this hello can look the agent up there without guessing.
+        citizen_did: state.nodeId,
+        ...(state.operatorName ? { operator_name: state.operatorName } : {}),
+        ...(state.message ? { message: state.message } : {}),
+        ...(state.model ? { model: state.model } : {}),
+        ...(state.connectedVia ? { connected_via: state.connectedVia } : {}),
+        at: new Date().toISOString(),
+      },
+    });
+  } catch (e) {
+    console.error(`presence: heartbeat publish failed, will retry next interval: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 export interface StopResult {
@@ -402,33 +523,38 @@ export interface StopResult {
 /** Publishes agent.goodbye, then tears everything down (including lobby observing -- goodbye means leaving entirely; mesh_goodbye.ts leaves rooms first), and marks explicitlyLeft so ensurePresence() won't silently restart it. No-op if not active. */
 export async function stop(): Promise<StopResult> {
   if (!state) return { said_goodbye: false };
-  const { nodeId, host } = state;
+  const { nodeId, host, helloLeg, goodbyeLeg, heartbeatTimer } = state;
   let saidGoodbye = false;
   try {
-    await publish({ host, topic: GOODBYE_TOPIC, fact: { node_id: nodeId, at: new Date().toISOString() } });
+    await publish({ host, topic: GOODBYE_TOPIC, identityPath: defaultIdentityPath(), fact: { node_id: nodeId, at: new Date().toISOString() } });
     saidGoodbye = true;
   } catch {
     // best effort -- still tear down locally even if the mesh is unreachable
   }
   await ringService.stop();
   lobbyObserver.stop();
-  stopSync();
-  // Set AFTER stopSync(), which itself only clears `state` -- a
-  // deliberate goodbye must stay honored by ensurePresence() until an
-  // explicit mesh_hello, not get silently undone by the very next
-  // mesh tool call (see this module's own top comment and start()'s).
+  clearInterval(heartbeatTimer);
+  await stopLeg(helloLeg);
+  await stopLeg(goodbyeLeg);
+  citizenship.stop();
+  state = undefined;
+  // Set AFTER teardown -- a deliberate goodbye must stay honored by
+  // ensurePresence() until an explicit mesh_hello, not get silently
+  // undone by the very next mesh tool call (see this module's own top
+  // comment and start()'s).
   explicitlyLeft = true;
   return { said_goodbye: saidGoodbye };
 }
 
 /**
- * Synchronous teardown only (kill child processes, clear the timer) --
- * this is what onShutdown registers, since a SIGINT/SIGTERM handler
- * cannot reliably wait on the async goodbye-publish above. The
- * explicit stop() (mesh_goodbye) is the reliable way to leave
- * gracefully; an abrupt process kill just stops heartbeating, and
- * everyone else's roster ages this node out on its own via
- * last_seen_at once the ordinary heartbeat stops arriving.
+ * Synchronous teardown only (dispose both legs' identity handles, clear
+ * the heartbeat timer) -- this is what onShutdown registers, since a
+ * SIGINT/SIGTERM handler cannot reliably wait on the async goodbye-
+ * publish above. The explicit stop() (mesh_goodbye) is the reliable way
+ * to leave gracefully; an abrupt process kill just stops heartbeating
+ * and drops both connections, and everyone else's roster ages this node
+ * out on its own via last_seen_at once the ordinary heartbeat stops
+ * arriving.
  *
  * Does NOT touch lobbyObserver here -- it registered its own
  * onShutdown(stopSync) when THIS module's start() called its start(),
@@ -440,7 +566,7 @@ function stopSync(): void {
   if (!state) return;
   citizenship.stop();
   clearInterval(state.heartbeatTimer);
-  state.daemon.kill();
-  for (const w of state.watchers) w.kill();
+  stopLegSync(state.helloLeg);
+  stopLegSync(state.goodbyeLeg);
   state = undefined;
 }
