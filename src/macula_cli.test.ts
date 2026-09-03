@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   LARGE_PAYLOAD_THRESHOLD_BYTES,
   MaculaCliError,
+  assertUcanDirectComposable,
+  assertUcanUsableWithIdentity,
   binPath,
   defaultIdentityPath,
   defaultStation,
@@ -18,6 +20,7 @@ import {
   resolveCallArgsFlags,
   serveIdentityPath,
   stationArgs,
+  ucanPath,
   watchIdentityPath,
 } from "./macula_cli.js";
 
@@ -293,5 +296,102 @@ describe("binPath", () => {
     process.env.MACULA_CLI_INSTALL_DIR = join(tmpdir(), "macula-mcp-binpath-nowhere");
     process.env.PATH = "";
     expect(binPath()).toBe("macula-cli");
+  });
+});
+
+describe("ucanPath", () => {
+  afterEach(() => {
+    delete process.env.MACULA_MCP_UCAN;
+  });
+
+  it("is undefined when unset -- nothing attached to a call", () => {
+    delete process.env.MACULA_MCP_UCAN;
+    expect(ucanPath()).toBeUndefined();
+  });
+
+  it("treats an empty string the same as unset, matching every other env var in this file", () => {
+    process.env.MACULA_MCP_UCAN = "";
+    expect(ucanPath()).toBeUndefined();
+  });
+
+  it("returns the pinned path when set", () => {
+    process.env.MACULA_MCP_UCAN = "/tmp/agent-delegation.ucan";
+    expect(ucanPath()).toBe("/tmp/agent-delegation.ucan");
+  });
+});
+
+describe("assertUcanUsableWithIdentity", () => {
+  // Guards PLAN_AGENT_IDENTITY_UCAN.md's startup check: a UCAN's
+  // <audience> is a specific node ID, so presenting one from the wrong
+  // identity (or from an identity that's about to be freshly minted) is
+  // a token that will never verify -- this must fail loudly, not
+  // silently attach a UCAN that can never work.
+  const saved = process.env.MACULA_MCP_IDENTITY;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.MACULA_MCP_IDENTITY;
+    else process.env.MACULA_MCP_IDENTITY = saved;
+  });
+
+  it("throws when MACULA_MCP_IDENTITY is not set at all", () => {
+    delete process.env.MACULA_MCP_IDENTITY;
+    expect(() => assertUcanUsableWithIdentity("/tmp/agent-delegation.ucan")).toThrow(MaculaCliError);
+    expect(() => assertUcanUsableWithIdentity("/tmp/agent-delegation.ucan")).toThrow(/MACULA_MCP_IDENTITY is not/);
+  });
+
+  it("throws when MACULA_MCP_IDENTITY points at a path that doesn't exist yet -- it would be freshly minted", () => {
+    const dir = join(tmpdir(), `macula-mcp-ucan-test-missing-${process.pid}-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    process.env.MACULA_MCP_IDENTITY = join(dir, "agent-identity.seed");
+    expect(() => assertUcanUsableWithIdentity("/tmp/agent-delegation.ucan")).toThrow(MaculaCliError);
+    expect(() => assertUcanUsableWithIdentity("/tmp/agent-delegation.ucan")).toThrow(/does not exist yet/);
+  });
+
+  it("throws when MACULA_MCP_IDENTITY points at a file that exists but isn't a real 32-byte seed", () => {
+    // An empty file used to pass this check (existsSync doesn't care
+    // what's inside) -- exactly the corrupt/stand-in file a stale or
+    // hand-created identity path would leave behind.
+    const dir = join(tmpdir(), `macula-mcp-ucan-test-corrupt-${process.pid}-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const identityPath = join(dir, "agent-identity.seed");
+    writeFileSync(identityPath, "");
+    process.env.MACULA_MCP_IDENTITY = identityPath;
+    expect(() => assertUcanUsableWithIdentity("/tmp/agent-delegation.ucan")).toThrow(MaculaCliError);
+    expect(() => assertUcanUsableWithIdentity("/tmp/agent-delegation.ucan")).toThrow(/not a valid identity seed/);
+  });
+
+  it("does not throw when MACULA_MCP_IDENTITY points at a real 32-byte seed file", () => {
+    const dir = join(tmpdir(), `macula-mcp-ucan-test-ok-${process.pid}-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const identityPath = join(dir, "agent-identity.seed");
+    writeFileSync(identityPath, Buffer.alloc(32, 0x42)); // stand-in seed, right size -- content doesn't matter here
+    process.env.MACULA_MCP_IDENTITY = identityPath;
+    expect(() => assertUcanUsableWithIdentity("/tmp/agent-delegation.ucan")).not.toThrow();
+  });
+
+  it("does not leak the UCAN or identity path into the thrown message", () => {
+    delete process.env.MACULA_MCP_IDENTITY;
+    try {
+      assertUcanUsableWithIdentity("/home/rl/.config/macula-cli/agent-delegation.ucan");
+      throw new Error("expected assertUcanUsableWithIdentity to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(MaculaCliError);
+      expect((e as Error).message).not.toContain("/home/rl/.config/macula-cli");
+    }
+  });
+});
+
+describe("assertUcanDirectComposable", () => {
+  // No released macula-cli can compose -direct with -ucan yet (see the
+  // function's own doc comment) -- this must fail loudly, before a
+  // doomed subprocess is ever spawned, rather than surfacing only as
+  // macula-cli's own raw refusal deep inside a call.
+  it("throws when direct is true", () => {
+    expect(() => assertUcanDirectComposable(true)).toThrow(MaculaCliError);
+    expect(() => assertUcanDirectComposable(true)).toThrow(/cannot be combined with this server's MACULA_MCP_UCAN/);
+  });
+
+  it("does not throw when direct is false or unset -- a plain call may still carry a UCAN", () => {
+    expect(() => assertUcanDirectComposable(false)).not.toThrow();
+    expect(() => assertUcanDirectComposable(undefined)).not.toThrow();
   });
 });

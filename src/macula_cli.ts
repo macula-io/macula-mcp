@@ -17,7 +17,7 @@
 // subprocess, point-in-time -- not a peer registry this file accumulates.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -243,6 +243,22 @@ let cachedDefaultIdentityPath: string | undefined;
 export function defaultIdentityPath(): string {
   if (process.env.MACULA_MCP_IDENTITY) return process.env.MACULA_MCP_IDENTITY;
   return (cachedDefaultIdentityPath ??= mintIdentityPath("default"));
+}
+
+/**
+ * A pre-minted UCAN delegation to attach to a gated mesh call, read the
+ * same way MACULA_MCP_IDENTITY is above -- but with no minting and no
+ * fallback: unlike the five identities in this file, there is nothing
+ * to lazily generate here. See PLAN_AGENT_IDENTITY_UCAN.md: a human
+ * mints this by hand, once per agent (`macula-cli identity` to learn
+ * the agent's node ID, then `macula-cli ucan mint ... --out <path>`
+ * against that exact node ID as `<audience>`); macula-mcp never mints
+ * or touches one itself. Undefined (nothing attached) unless set; an
+ * empty string is treated the same as unset, matching every other env
+ * var read in this file.
+ */
+export function ucanPath(): string | undefined {
+  return process.env.MACULA_MCP_UCAN || undefined;
 }
 
 let cachedPresenceIdentityPath: string | undefined;
@@ -767,6 +783,140 @@ export const splitRealmPrefix = (
   return { procedure: bare, realm: prefixed };
 };
 
+/** The exact byte length of an identity seed file (identity.go's Load: `ed25519.SeedSize`) -- see assertUcanUsableWithIdentity. */
+const IDENTITY_SEED_SIZE_BYTES = 32;
+
+/**
+ * Guards against presenting a UCAN from the wrong identity. A UCAN's
+ * <audience> is one specific node ID, fixed when a human mints it
+ * against a pre-existing, already-provisioned identity file (see
+ * PLAN_AGENT_IDENTITY_UCAN.md's provisioning steps) -- so attaching
+ * that UCAN to a call signed by any OTHER identity is a token that will
+ * never verify. Three ways `defaultIdentityPath()` can silently hand call()
+ * the wrong one: MACULA_MCP_IDENTITY isn't set at all, so this process
+ * signs with its own freshly-minted, per-scope throwaway instead; it IS
+ * set, but to a path nothing has provisioned yet -- macula-cli's own
+ * `identity` command mints a brand-new node ID into whatever path it's
+ * pointed at the moment it finds nothing there, so an as-yet-nonexistent
+ * MACULA_MCP_IDENTITY path is the same failure by a different route; or
+ * it names a file that exists but isn't a real seed at all (empty,
+ * truncated, hand-created by mistake) -- identity.Load rejects anything
+ * that isn't exactly IDENTITY_SEED_SIZE_BYTES, so this checks the same
+ * thing here rather than letting a bogus file pass an existsSync check
+ * and only fail once macula-cli itself tries to load it. Either way,
+ * without this check the failure is silent right up until a gated call
+ * actually needs the UCAN -- an ungated call succeeds either way,
+ * attached or not -- so this fails loudly instead, checked right before
+ * a call would actually attach one (not at module load, matching this
+ * file's existing "resolve lazily, at first use" style everywhere
+ * else), so a session that never sets MACULA_MCP_UCAN pays nothing.
+ *
+ * This still cannot tell a correctly-provisioned, right-SIZED identity
+ * file from a stale or otherwise-wrong one that merely happens to be a
+ * real 32-byte seed for a DIFFERENT node than the UCAN's <audience> --
+ * that would need decoding the UCAN's own audience claim (cheap, pure
+ * JSON -- see macula-go/ucan/ucan.go's JWT-shaped format) and comparing
+ * it against this seed's DERIVED public key, which needs either a real
+ * Ed25519 scalar-mult (not available as a pure, dependency-free
+ * operation here) or shelling out to `macula-cli identity` -- and this
+ * file's own tests, and its CI (ci.yml: "macula-cli ... isn't installed
+ * on this runner and shouldn't need to be for a unit-test job"),
+ * deliberately keep every function in this file that's reachable
+ * without a real macula-cli binary spawnable offline. So a
+ * right-sized-but-wrong seed still only gets caught by the mesh call
+ * itself (a BOLT#4 auth failure) -- narrower than "any stale file",
+ * but still real. Revisit if this file ever grows a dependency-free
+ * Ed25519 public-key derivation, or accepts paying a subprocess spawn
+ * here.
+ *
+ * Deliberately doesn't put ucan/pinned's own path VALUES into a thrown
+ * message -- this propagates verbatim into mesh_call's tool reply (see
+ * reply.ts's describeCliError), i.e. into agent-visible output, and a
+ * local filesystem path is nothing an agent session needs to see to
+ * act on this. The env var NAMES are enough for whoever set them to
+ * find and fix the actual value.
+ *
+ * Exported for tests: like resolveCallArgsFlags/splitRealmPrefix above,
+ * this is a pure decision (env var, plus existsSync and a stat'd file
+ * size) with nothing in it worth exercising by spawning a real
+ * macula-cli subprocess in a unit test.
+ */
+export function assertUcanUsableWithIdentity(ucan: string): void {
+  const pinned = process.env.MACULA_MCP_IDENTITY;
+  if (!pinned) {
+    throw new MaculaCliError(
+      `MACULA_MCP_UCAN is set but MACULA_MCP_IDENTITY is not -- this call would sign with a freshly-minted, ` +
+        `throwaway identity instead of the one this UCAN's <audience> was minted for, and the token would ` +
+        `never verify. Set MACULA_MCP_IDENTITY to the exact identity file used to mint this UCAN (see ` +
+        `PLAN_AGENT_IDENTITY_UCAN.md's provisioning steps) before making a call that needs it.`,
+    );
+  }
+  if (!existsSync(pinned)) {
+    throw new MaculaCliError(
+      `MACULA_MCP_UCAN is set but the identity named by MACULA_MCP_IDENTITY does not exist yet -- this call ` +
+        `would freshly mint a brand-new node ID there, which cannot be the one a human already minted this ` +
+        `UCAN's <audience> against. Provision the identity file first (macula-cli identity --identity ` +
+        `<that path>), read off its node ID, and mint the UCAN against that exact node ID (see ` +
+        `PLAN_AGENT_IDENTITY_UCAN.md) before making a call that needs it.`,
+    );
+  }
+  if (statSync(pinned).size !== IDENTITY_SEED_SIZE_BYTES) {
+    throw new MaculaCliError(
+      `MACULA_MCP_UCAN is set but the file named by MACULA_MCP_IDENTITY is not a valid identity seed (expected ` +
+        `exactly ${IDENTITY_SEED_SIZE_BYTES} bytes) -- empty, truncated, or otherwise not something ` +
+        `\`macula-cli identity\` ever wrote. Provision it properly first (macula-cli identity --identity ` +
+        `<that path>) before making a call that needs the UCAN this identity is supposed to pair with.`,
+    );
+  }
+}
+
+/**
+ * Fails loudly, before spawning a doomed subprocess, when a call is
+ * about to combine `direct` with a UCAN -- because, as of this writing
+ * (2026-09-03), NO released macula-cli can do that. `-ucan` only ever
+ * REACHES a gated capability over `-direct` (every currently-gated
+ * capability is advertised direct-dial only -- see call()'s own comment
+ * below), so this is the one combination MACULA_MCP_UCAN actually needs
+ * to work for the feature to be useful at all. The fix (macula-go's
+ * directdial.CallWithUCAN, consumed by macula-cli commits
+ * 52dec80/6e951fa) landed on macula-cli's master the same day, but
+ * v0.6.0 -- MIN_MACULA_CLI_VERSION, the newest TAGGED release, and the
+ * only one install.sh/install.ps1/this package's own postinstall will
+ * ever fetch -- still contains the explicit refusal those commits
+ * replaced ("-ucan cannot be combined with -direct"). Confirmed against
+ * macula-cli's own source and release history, not assumed.
+ *
+ * Deliberately NOT expressed as a MIN_MACULA_CLI_VERSION bump: every
+ * other entry on that constant's history names a version that had
+ * actually shipped by the time this file started depending on it --
+ * naming an unreleased one here would gate EVERY feature in this file,
+ * not just this one, on a version nobody can install yet, and
+ * checkCliVersion()/doctor/postinstall would never report green until
+ * one did. This check is unconditional (not a version comparison) for
+ * exactly that reason. Once macula-cli tags a release containing the
+ * fix, replace this whole function with a real version comparison
+ * against that tag and fold the requirement into MIN_MACULA_CLI_VERSION,
+ * same as every capability before it.
+ *
+ * Without this, the failure isn't silent -- macula-cli's own refusal
+ * still surfaces as a normal MaculaCliError -- but it's late: a
+ * subprocess gets spawned and connects before reporting that no working
+ * call was ever possible, for a combination this file already knows
+ * can't succeed against any binary a real user has installed.
+ */
+export function assertUcanDirectComposable(direct: boolean | undefined): void {
+  if (direct) {
+    throw new MaculaCliError(
+      "direct: true cannot be combined with this server's MACULA_MCP_UCAN yet -- no released macula-cli " +
+        "supports composing -direct with -ucan (the fix landed on macula-cli's master 2026-09-03, but is not " +
+        "in any tagged release as of this writing; v0.6.0, the newest release, still refuses the combination " +
+        "outright). Every UCAN-gated capability is direct-dial only, so this UCAN cannot reach one yet -- " +
+        "either drop direct (fine for an ungated capability, which never needed the UCAN anyway) or check " +
+        "whether macula-cli has since shipped a release containing the fix.",
+    );
+  }
+}
+
 export const call = async (rawArgs: {
   host?: string;
   procedure: string;
@@ -781,6 +931,23 @@ export const call = async (rawArgs: {
   if (args.timeoutMs) flags.push("--timeout", `${Math.max(1, Math.round(args.timeoutMs / 1000))}s`);
   if (args.realm) flags.push("--realm", args.realm);
   if (args.direct) flags.push("--direct");
+  // MACULA_MCP_UCAN, when set, is attached to every call -- gated or
+  // not (macula-cli ignores an unneeded token; see -ucan's own -help
+  // text). It only ever REACHES a gated capability over -direct, since
+  // every currently-gated capability (hecate-om's) is advertised
+  // direct-dial-only -- but see assertUcanDirectComposable's own doc:
+  // as of this writing, no released macula-cli can actually combine the
+  // two, so that's refused here before it's ever attempted, not just
+  // "on the caller to opt into". A UCAN can still legitimately ride
+  // along on an ordinary plain (non-direct) call to something that
+  // isn't gated at all -- that combination works today and isn't
+  // touched by this.
+  const ucan = ucanPath();
+  if (ucan) {
+    assertUcanDirectComposable(args.direct);
+    assertUcanUsableWithIdentity(ucan);
+    flags.push("--ucan", ucan);
+  }
   const positionals = [host, args.procedure];
 
   const { flags: argsFlags, cleanup } = await resolveCallArgsFlags(args.callArgs);
@@ -796,6 +963,16 @@ export interface PublishResult {
   seq: number;
   duration_ms: number;
 }
+/**
+ * Does NOT attach MACULA_MCP_UCAN, unlike call() above -- `macula-cli
+ * pubsub publish` has no -ucan flag at all today (checked against its
+ * source: only `call` and `call -via-daemon` accept one), so pushing
+ * `--ucan` onto every flags array here would fail every single publish
+ * with "flag provided but not defined: -ucan" the moment
+ * MACULA_MCP_UCAN is set, for a flag that doesn't exist to receive it.
+ * Revisit if/when macula-cli grows one (PLAN_AGENT_IDENTITY_UCAN.md
+ * only ever treated this as conditional -- "if publishing ever gates").
+ */
 export const publish = (args: {
   host?: string;
   topic: string;
