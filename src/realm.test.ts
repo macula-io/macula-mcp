@@ -67,10 +67,23 @@ describe("pure shapes", () => {
       cert_pem: "PEM",
       oauth_account: "a@b",
       oauth_provider: "hanko",
+      citizen_did: undefined,
+      ucan: undefined,
     });
     expect(realm.parseSessionStatus(410, { error: "session_expired" })).toEqual({ status: "expired" });
     expect(realm.parseSessionStatus(200, { error: "session_expired" })).toEqual({ status: "expired" });
     expect(realm.parseSessionStatus(404, { error: "session_not_found" }).status).toBe("error");
+  });
+
+  it("parseSessionStatus picks up citizen_did/ucan when the portal sends them", () => {
+    const confirmed = realm.parseSessionStatus(200, {
+      status: "confirmed",
+      refresh_token: "mrt_1",
+      org_identity: "mri:org:io.macula/raf",
+      citizen_did: NODE,
+      ucan: "eyJ.fake.token",
+    });
+    expect(confirmed).toMatchObject({ citizen_did: NODE, ucan: "eyJ.fake.token" });
   });
 
   it("handleOf takes the last segment of an org identity", () => {
@@ -100,6 +113,8 @@ describe("credential store", () => {
       cert_pem: "PEM",
       refresh_token: "mrt_1",
       joined_at: "2026-09-02T14:00:00Z",
+      citizen_did: NODE,
+      ucan: "eyJ.fake.token",
     });
     expect(path).toBe(join(dir, `${NODE}.json`));
     if (process.platform !== "win32") expect(((await stat(path)).mode & 0o777).toString(8)).toBe("600");
@@ -109,7 +124,26 @@ describe("credential store", () => {
     expect(s.joined).toBe(true);
     expect(s.handle).toBe("rgfaber");
     expect(s.credential_path).toBe(path);
+    expect(s.citizen_did).toBe(NODE);
+    expect(s.has_ucan).toBe(true);
     expect(JSON.parse(await readFile(path, "utf8")).cert_pem).toBe("PEM");
+    // the raw UCAN is never echoed back through status() -- it's a bearer
+    // credential, only has_ucan (a boolean) is
+    expect((s as Record<string, unknown>).ucan).toBeUndefined();
+  });
+
+  it("a credential from an older/unconfigured portal (no citizen_did/ucan) still reports joined, just without them", async () => {
+    realm.storeCredential({
+      node_id: NODE,
+      portal: "https://portal.test",
+      org_identity: "mri:org:io.macula/rgfaber",
+      refresh_token: "mrt_1",
+      joined_at: "2026-09-02T14:00:00Z",
+    });
+    const s = realm.status(NODE);
+    expect(s.joined).toBe(true);
+    expect(s.citizen_did).toBeUndefined();
+    expect(s.has_ucan).toBe(false);
   });
 
   it("an absent or unreadable credential is simply not joined", () => {
@@ -147,18 +181,45 @@ describe("join flow against a fake portal", () => {
     expect(portal.calls.length).toBe(1);
   });
 
-  it("waitForOutcome stores the credential once the person confirms", async () => {
+  it("waitForOutcome stores the credential once the person confirms, including the membership UCAN", async () => {
     const portal = fakePortal([
       { status: 201, body: { session_id: "s2", join_url: "https://portal.test/join/s2", expires_at: "2999-01-01T00:00:00Z" } },
       { status: 200, body: { status: "pending", expires_at: "2999-01-01T00:00:00Z" } },
-      { status: 200, body: { status: "confirmed", refresh_token: "mrt_2", org_identity: "mri:org:io.macula/rgfaber", cert_pem: "PEM", oauth_account: "a@b", oauth_provider: "hanko" } },
+      {
+        status: 200,
+        body: {
+          status: "confirmed",
+          refresh_token: "mrt_2",
+          org_identity: "mri:org:io.macula/rgfaber",
+          cert_pem: "PEM",
+          oauth_account: "a@b",
+          oauth_provider: "hanko",
+          citizen_did: NODE,
+          ucan: "eyJ.fake.token",
+        },
+      },
     ]);
     await realm.begin({ fetchImpl: portal.fetchImpl });
     const after = await realm.waitForOutcome(NODE, 30, portal.fetchImpl);
     expect(after.joined).toBe(true);
     expect(after.org_identity).toBe("mri:org:io.macula/rgfaber");
+    expect(after.citizen_did).toBe(NODE);
+    expect(after.has_ucan).toBe(true);
     expect(realm.loadCredential(NODE)?.cert_pem).toBe("PEM");
+    expect(realm.loadCredential(NODE)?.ucan).toBe("eyJ.fake.token");
     expect(realm.status(NODE).pending).toBeUndefined();
+  });
+
+  it("waitForOutcome against an older portal (no citizen_did/ucan in the confirm body) still joins cleanly", async () => {
+    const portal = fakePortal([
+      { status: 201, body: { session_id: "s2b", join_url: "https://portal.test/join/s2b", expires_at: "2999-01-01T00:00:00Z" } },
+      { status: 200, body: { status: "confirmed", refresh_token: "mrt_2b", org_identity: "mri:org:io.macula/rgfaber" } },
+    ]);
+    await realm.begin({ fetchImpl: portal.fetchImpl });
+    const after = await realm.waitForOutcome(NODE, 30, portal.fetchImpl);
+    expect(after.joined).toBe(true);
+    expect(after.has_ucan).toBe(false);
+    expect(realm.loadCredential(NODE)?.ucan).toBeUndefined();
   });
 
   it("an expired session is reported, not silently retried forever", async () => {

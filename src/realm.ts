@@ -58,6 +58,10 @@ export interface RealmCredential {
   cert_pem?: string;
   refresh_token: string;
   joined_at: string;
+  /** This device's own already-proof-of-possession-verified public key, hex -- stands in for a real citizen DID until macula-passport exists to hold one. Undefined against a portal that hasn't shipped UCAN minting yet. */
+  citizen_did?: string;
+  /** Membership UCAN (io.macula as issuer, citizen_did as audience) -- see citizen_did's own doc for why it names a device key today. Undefined against an older/unconfigured portal. */
+  ucan?: string;
 }
 
 export function loadCredential(nodeId: string): RealmCredential | undefined {
@@ -140,6 +144,8 @@ export type SessionStatus =
       cert_pem?: string;
       oauth_account?: string;
       oauth_provider?: string;
+      citizen_did?: string;
+      ucan?: string;
     }
   | { status: "expired" }
   | { status: "error"; message: string };
@@ -157,6 +163,8 @@ export function parseSessionStatus(httpStatus: number, body: unknown): SessionSt
       cert_pem: typeof b.cert_pem === "string" ? b.cert_pem : undefined,
       oauth_account: typeof b.oauth_account === "string" ? b.oauth_account : undefined,
       oauth_provider: typeof b.oauth_provider === "string" ? b.oauth_provider : undefined,
+      citizen_did: typeof b.citizen_did === "string" ? b.citizen_did : undefined,
+      ucan: typeof b.ucan === "string" ? b.ucan : undefined,
     };
   }
   const detail = typeof b.error === "string" ? b.error : JSON.stringify(body);
@@ -242,6 +250,10 @@ export interface RealmStatus {
   account?: string;
   joined_at?: string;
   credential_path?: string;
+  /** This device's own public key, hex -- see RealmCredential.citizen_did's own doc. */
+  citizen_did?: string;
+  /** Whether a membership UCAN was issued -- never the token itself here, that's a bearer credential and stays in the credential file only. */
+  has_ucan?: boolean;
   pending?: { session_id: string; join_url: string; expires_at: string };
   error?: string;
 }
@@ -259,6 +271,8 @@ export function status(nodeId: string | undefined): RealmStatus {
       account: cred.account,
       joined_at: cred.joined_at,
       credential_path: credentialPath(nodeId),
+      citizen_did: cred.citizen_did,
+      has_ucan: Boolean(cred.ucan),
     };
   }
   return {
@@ -290,6 +304,8 @@ async function pollOnce(fetchImpl: FetchLike): Promise<void> {
         cert_pem: outcome.cert_pem,
         refresh_token: outcome.refresh_token,
         joined_at: new Date().toISOString(),
+        citizen_did: outcome.citizen_did,
+        ucan: outcome.ucan,
       });
       lastError = undefined;
       clearPending();

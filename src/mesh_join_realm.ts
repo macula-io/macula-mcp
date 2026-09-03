@@ -44,12 +44,12 @@ export function registerMeshJoinRealm(server: McpServer): void {
     "mesh_join_realm",
     "Join the io.macula realm as this agent: bind this server's identity (its node_id / citizen_did) to a " +
       "person's account through the portal. Returns a link and a QR code the person opens or scans, signs in, " +
-      "and confirms; the portal then issues an org identity, a realm certificate and a portal token for this " +
-      "identity, stored under ~/.config/macula-mcp/realm/. Two-step by nature: the first call returns the link " +
-      "(and keeps polling in the background); a later call with wait_seconds picks up the outcome, which also " +
-      "shows in mesh://identity. Already joined: reports the membership. Nothing here changes what the mesh " +
-      "lets you do today -- it is attribution and a human vouching for this agent; realm-gated capabilities " +
-      "arrive with membership UCANs.",
+      "and confirms; the portal then issues an org identity, a realm certificate, a portal token, and a " +
+      "membership UCAN (io.macula as issuer, this identity as audience) for this identity, stored under " +
+      "~/.config/macula-mcp/realm/. Two-step by nature: the first call returns the link (and keeps polling in " +
+      "the background); a later call with wait_seconds picks up the outcome, which also shows in " +
+      "mesh://identity. Already joined: reports the membership. The UCAN is what a realm-gated capability " +
+      "checks -- older portals that haven't shipped it yet still complete the join, just without one.",
     {
       wait_seconds: z
         .number()
