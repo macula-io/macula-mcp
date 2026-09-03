@@ -8,9 +8,13 @@
 //
 //   node scripts/ring-two-process-check.mjs
 //
-// Every process gets its own identities (minted per process anyway) and
-// its own SQLite stores under a temp dir, so nothing here touches the
-// operator's ~/.macula-mcp. Exit code 0 only if every expectation held.
+// Every process gets its own identities (pinned per process: identities
+// are otherwise scoped per logical session, and three agents from one
+// shell would share a node id and get each other kicked) and its own
+// SQLite stores under a temp dir, so nothing here touches the operator's
+// ~/.macula-mcp. Needs macula-cli >= 0.5.1 for the direct-dial check
+// (MACULA_CLI_BIN points at a local build). Exit code 0 only if every
+// expectation held.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -114,7 +118,7 @@ async function orchestrate() {
     console.log(`caller ${me.node_id.slice(0, 12)}…`);
     const openReady = await withTimeout(open.next(), 60_000, "open callee start");
     const askReady = await withTimeout(ask.next(), 60_000, "ask callee start");
-    check("open callee serves agent.<id>.ring on another station", openReady.ring.serving === 1, `${openReady.node_id.slice(0, 12)}… ${openReady.ring.error ?? ""}`);
+    check("open callee serves agent.<id>.ring on another station, with a direct-dial record", openReady.ring.serving === 1 && openReady.ring.direct_dial === 1, `${openReady.node_id.slice(0, 12)}… ${openReady.ring.error ?? ""}`);
     check("ask callee serves agent.<id>.ring", askReady.ring.serving === 1, `${askReady.node_id.slice(0, 12)}… ${askReady.ring.error ?? ""}`);
     check("three distinct identities", new Set([me.node_id, openReady.node_id, askReady.node_id]).size === 3);
 

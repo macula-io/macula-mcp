@@ -148,7 +148,10 @@ describe("start / status / stop", () => {
     try {
       const st = await svc.start({ nodeId: ME, host: "station:4433" });
       expect(st).toMatchObject({ serving: 1, procedure: ringProcedure(ME), contact_policy: 2 });
-      expect(serveModule.serve).toHaveBeenCalledWith(expect.objectContaining({ procedure: ringProcedure(ME), host: "station:4433", execTimeoutSeconds: 30, exec: expect.stringContaining("ring_handler.js") }));
+      expect(serveModule.serve).toHaveBeenCalledWith(
+        expect.objectContaining({ procedure: ringProcedure(ME), host: "station:4433", execTimeoutSeconds: 30, exec: expect.stringContaining("ring_handler.js"), direct: true, ttlSeconds: 3600 }),
+      );
+      expect(st.direct_dial).toBe(1);
       expect(await svc.start({ nodeId: ME })).toMatchObject({ serving: 1 }); // idempotent
       expect(serveModule.serve).toHaveBeenCalledTimes(1);
     } finally {

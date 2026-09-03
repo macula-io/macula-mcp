@@ -73,6 +73,10 @@ export interface ServeArgs {
   exec: string;
   execTimeoutSeconds?: number;
   host?: string;
+  /** Also publish a direct-dial DHT advertisement (see macula_cli.ts's serveRegister) so callers on other stations can dial this one in one hop. */
+  direct?: boolean;
+  /** Lifetime of that advertisement; register again to renew. */
+  ttlSeconds?: number;
 }
 
 export interface ServeResult {
@@ -90,6 +94,8 @@ export async function serve(args: ServeArgs): Promise<ServeResult> {
     procedure: args.procedure,
     execCmd: args.exec,
     execTimeoutSeconds: args.execTimeoutSeconds,
+    direct: args.direct,
+    ttlSeconds: args.ttlSeconds,
   });
   const status = await daemonStatus({ socketName: s.socketName });
   return { procedure: registerResult.procedure, registered: registerResult.registered, serving: status.serving };

@@ -472,6 +472,13 @@ export function watchTopicOnDaemon(
  * (agent.hello, agent.goodbye) happened to stay under the boundary,
  * which is exactly why this went unnoticed until now.
  *
+ * Bumped to 0.5.1 for ring_service.ts's direct-dial registration
+ * (serveRegister's `direct`): every macula-cli release up to and
+ * including 0.5.0 published a daemon registration's direct-dial record
+ * over the session ServeForever was reading, so `serve -daemon -direct`
+ * always timed out (see serveRegister's own doc). 0.5.1 puts it over the
+ * daemon's calling session.
+ *
  * Bumped to 0.5.0 for call()'s large-payload fallback
  * (resolveCallArgsFlags, see PLAN_LARGE_PAYLOAD_CALLS.md): depends on
  * `call -args-file`, new in that release -- v0.4.x's `call` only
@@ -480,7 +487,7 @@ export function watchTopicOnDaemon(
  * hecate-rag.upload_knowledge with a real document) would fail on an
  * older binary once this fallback tries to use a flag it doesn't have.
  */
-export const MIN_MACULA_CLI_VERSION = "0.5.0";
+export const MIN_MACULA_CLI_VERSION = "0.5.1";
 
 export interface CliVersionCheck {
   ok: boolean;
@@ -725,25 +732,33 @@ export interface ServeRegisterResult {
 }
 /**
  * Registers `procedure` with the daemon at socketName -- serve.ts's own
- * daemon, not presence's. Deliberately WITHOUT macula-cli's `-direct`
- * (the direct-dial DHT advertisement): on the daemon path that flag's
- * put_record goes over the very session ServeForever is reading and
- * times out ("dht: put_record: connection: read stream: deadline
- * exceeded", seen live 2026-09-03 on every registration; the one-shot
- * `serve -direct` works). A macula-cli fix belongs in its daemon
- * Register (publish the record via callSession, advertise via
- * serveSession). Not needed for reach: advertise-gossip carries a
- * daemon-served procedure to every station within seconds (verified
- * live the same day, Paris-served, Frankfurt-called, 3 s).
+ * daemon, not presence's. With `direct`, the daemon also publishes a
+ * signed direct-dial `procedure_advertisement` record in the DHT
+ * (macula-cli's `serve -direct`), so a caller on ANY station can
+ * resolve this one and dial it in one hop instead of depending on
+ * advertise-gossip having carried a route. The record lives
+ * `ttlSeconds` (daemon default one hour) and the daemon does not renew
+ * it; registering again republishes it. Needs macula-cli >= 0.5.1: on
+ * 0.5.0 the daemon put the record over the session ServeForever was
+ * reading and every `serve -daemon -direct` timed out (found live
+ * 2026-09-03 wiring the ring endpoint; fixed in macula-cli the same
+ * day, hence MIN_MACULA_CLI_VERSION's bump). Not needed for reach --
+ * advertise-gossip carried a daemon-served procedure to another station
+ * within 3 s when measured -- but it makes a ring one hop instead of a
+ * bet on gossip.
  */
 export const serveRegister = (args: {
   socketName: string;
   procedure: string;
   execCmd: string;
   execTimeoutSeconds?: number;
+  direct?: boolean;
+  ttlSeconds?: number;
 }): Promise<ServeRegisterResult> => {
   const flags: string[] = ["-socket-name", args.socketName, "-exec", args.execCmd];
   if (args.execTimeoutSeconds) flags.push("-exec-timeout", `${Math.max(1, Math.round(args.execTimeoutSeconds))}s`);
+  if (args.direct) flags.push("-direct");
+  if (args.ttlSeconds) flags.push("-ttl", `${Math.max(1, Math.round(args.ttlSeconds))}s`);
   return run<ServeRegisterResult>(argv(["serve", "-daemon"], flags, [args.procedure]));
 };
 

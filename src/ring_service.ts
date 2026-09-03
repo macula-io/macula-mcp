@@ -43,11 +43,19 @@ export type Policy = (typeof POLICY)[keyof typeof POLICY];
 
 /** Generous: the relay round trip is local, but the room tap and publish inside it hit the mesh. */
 const HANDLER_TIMEOUT_SECONDS = 30;
-// Reach across stations comes from ordinary advertise-gossip: a procedure
-// served on one station was callable from another within 3 s (verified
-// live 2026-09-03). macula-cli's -direct (a direct-dial DHT record) is
-// deliberately not used -- see macula_cli.ts's serveRegister for the
-// daemon-path bug that makes it time out.
+/**
+ * The ring endpoint is also published as a direct-dial DHT record, so a
+ * caller on another station can resolve this agent's station and dial
+ * it in one hop (mesh_ring's callThenDirect falls back to exactly that
+ * when gossip has no route yet). Reach never depended on it -- gossip
+ * carried a daemon-served procedure across stations within 3 s when
+ * measured -- but a ring should be one hop, not a bet. The daemon
+ * publishes the record once per registration and never renews it, so
+ * the service re-registers well inside the TTL. Needs macula-cli >= 0.5.1
+ * (see macula_cli.ts's serveRegister).
+ */
+export const DIRECT_DIAL_TTL_SECONDS = 3600;
+export const DIRECT_DIAL_RENEW_SECONDS = 1200;
 
 /**
  * The operator's standing answer to a ring from a stranger. WP2 reads it
@@ -72,6 +80,7 @@ interface RingServiceState {
   procedure: string;
   socketPath: string;
   server: Server;
+  renewTimer: NodeJS.Timeout;
 }
 
 let state: RingServiceState | undefined;
@@ -79,6 +88,8 @@ let state: RingServiceState | undefined;
 export interface RingServiceStatus {
   serving: 0 | 1;
   procedure?: string;
+  /** 1 once the endpoint is also published as a direct-dial DHT record (renewed every DIRECT_DIAL_RENEW_SECONDS). */
+  direct_dial?: 0 | 1;
   contact_policy: Policy;
   /** Set when MACULA_MCP_NO_RING is on: nothing is served, rings to this agent fail as unreachable. */
   disabled?: 0 | 1;
@@ -91,7 +102,7 @@ export function status(): RingServiceStatus {
   if (disabled()) return { serving: 0, contact_policy: contactPolicy(), disabled: 1 };
   return {
     serving: state ? 1 : 0,
-    ...(state ? { procedure: state.procedure } : {}),
+    ...(state ? { procedure: state.procedure, direct_dial: 1 as const } : {}),
     contact_policy: contactPolicy(),
     ...(lastError ? { error: lastError } : {}),
   };
@@ -131,8 +142,9 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
   });
   server.unref();
   const procedure = ringProcedure(args.nodeId);
+  const registration = { procedure, exec: handlerCommand(socketPath), execTimeoutSeconds: HANDLER_TIMEOUT_SECONDS, host, direct: true, ttlSeconds: DIRECT_DIAL_TTL_SECONDS };
   try {
-    await serve.serve({ procedure, exec: handlerCommand(socketPath), execTimeoutSeconds: HANDLER_TIMEOUT_SECONDS, host });
+    await serve.serve(registration);
   } catch (e) {
     server.close();
     rmSync(socketPath, { force: true });
@@ -140,7 +152,14 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
     throw e;
   }
   lastError = undefined;
-  state = { nodeId: args.nodeId, host, procedure, socketPath, server };
+  const renewTimer = setInterval(() => {
+    void serve.serve(registration).catch((e) => {
+      lastError = `direct-dial renewal failed: ${e instanceof Error ? e.message : String(e)}`;
+      console.error(`ring service: ${lastError}`);
+    });
+  }, DIRECT_DIAL_RENEW_SECONDS * 1000);
+  renewTimer.unref();
+  state = { nodeId: args.nodeId, host, procedure, socketPath, server, renewTimer };
   onShutdown(stopSync);
   return status();
 }
@@ -226,6 +245,7 @@ export async function stop(): Promise<void> {
 
 function stopSync(): void {
   if (!state) return;
+  clearInterval(state.renewTimer);
   state.server.close();
   rmSync(state.socketPath, { force: true });
   state = undefined;

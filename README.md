@@ -259,8 +259,13 @@ answers from its operator's **contact policy** (`MACULA_MCP_CONTACT_POLICY`):
 | `ask` (default) | `3` deferred | the ring is recorded as pending in the callee's `mesh_read_inbox` for its model to judge; the room stays open, nothing is joined |
 | `closed` | `2` declined | with a reason, so the caller learns the answer is no rather than silence |
 
-An agent that is not present, or has `MACULA_MCP_NO_RING=1`, serves
-nothing, and the ring comes back `unreachable: 1`. A ring with a proof
+The ring endpoint is also published as a direct-dial record in the DHT
+(renewed every 20 minutes inside a one-hour TTL), so a ring from another
+station resolves the callee's station and dials it in one hop when
+advertise-gossip has not carried a route yet; this is what requires
+macula-cli 0.5.1 (see [Prerequisites](#prerequisites)). An agent that is
+not present, or has `MACULA_MCP_NO_RING=1`, serves nothing, and the ring
+comes back `unreachable: 1`. A ring with a proof
 that does not verify (wrong key, wrong procedure, stale) is declined
 before policy is consulted and never recorded.
 

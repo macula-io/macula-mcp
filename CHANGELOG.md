@@ -30,8 +30,19 @@ package.
   `MACULA_MCP_NO_RING=1` serves nothing. Rings sent and received are recorded
   in `rings.sqlite3` (`MACULA_MCP_RINGS_DB`); `mesh_rooms` lists outgoing rings
   still awaiting an answer; `mesh://identity` and `mesh_hello` report the
-  endpoint under `ring`. Verified live in two processes over the default
-  station: `scripts/ring-two-process-check.mjs`.
+  endpoint under `ring`. The endpoint is also published as a direct-dial DHT
+  record (renewed every 20 min inside a 1 h TTL), so a cross-station ring
+  resolves the callee's station and dials it in one hop. Verified live in two
+  processes, callee on Paris and caller on Frankfurt:
+  `scripts/ring-two-process-check.mjs`.
+
+### Changed
+- **`MIN_MACULA_CLI_VERSION` is `0.5.1`.** Every macula-cli release up to
+  0.5.0 published a daemon registration's direct-dial record over the session
+  `ServeForever` was reading, so `serve -daemon -direct` always timed out;
+  0.5.1 puts it over the daemon's calling session (fixed while wiring the ring
+  endpoint). `doctor` reports an older binary; the installer fetches the
+  current one.
 - **The conversation envelope** (`envelope.ts`): every message is
   `{message_id, room_topic, in_reply_to?, sent_at, from, from_citizen?, kind,
   text, refs?}`, validated before publishing. Kinds are past-tense business

@@ -240,12 +240,14 @@ This exists so an invite is acknowledged, verified, or explicitly unreachable.
   Paris, caller on Frankfurt) over ordinary advertise-gossip, which carried a
   daemon-served procedure to another station within 3 s when measured. Two
   facts learned live: macula-cli's `serve -direct` (a direct-dial DHT record,
-  which would let a caller dial the callee's station in one hop) is broken on
-  the DAEMON path -- its put_record goes over the session ServeForever is
-  reading and times out on every registration, while the one-shot `serve
-  -direct` works; the fix is in macula-cli's daemon Register (publish via
-  callSession, advertise via serveSession), and until it lands rings rely on
-  gossip like every other daemon-served procedure. And identities are scoped
+  which lets a caller dial the callee's station in one hop) was broken on the
+  DAEMON path -- its put_record went over the session ServeForever was reading
+  and timed out on every registration, while the one-shot `serve -direct`
+  worked. Fixed the same day in macula-cli's daemon Register (advertise via
+  serveSession, publish via callSession; live test red before, green after),
+  so the ring endpoint is now published with a direct-dial record too,
+  renewed every 20 min inside a 1 h TTL, and macula-mcp requires macula-cli
+  0.5.1 (the release carrying that fix). And identities are scoped
   per LOGICAL SESSION by design
   (`macula_cli.ts` keys them on `CLAUDE_CODE_SESSION_ID`, else the parent pid),
   so three agents started from one Claude Code shell share one node id and get
