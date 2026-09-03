@@ -14,7 +14,7 @@
 
 import Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { isRoomTopic } from "./envelope.js";
@@ -31,6 +31,57 @@ export function ringProcedure(nodeId: string): string {
 
 export function nodeIdFromRingProcedure(procedure: string): string | undefined {
   return RING_PROCEDURE.exec(procedure)?.[1];
+}
+
+// ---- what each proof is bound to
+//
+// macula-cli's `identity sign --procedure <string>` signs {node_id,
+// timestamp, <string>}; the string is opaque to it. Both ends of a ring
+// are this package, so the string can carry the KIND and the RING ID
+// (and the answer, where there is one) -- a proof for one ring is then
+// useless for any other ring, for a ring_answer, or for a reply, and a
+// reply is useless for any other answer. Found by the release review
+// 2026-09-03: with the bare procedure name, one proof verified for any
+// body within the 60 s window, and nothing proved who ANSWERED at all.
+
+/** Signed by the caller, verified by the callee: this ring, to this endpoint. */
+export function ringProofProcedure(callee: string, ringId: string): string {
+  return `${ringProcedure(callee)}#ring:${ringId}`;
+}
+/** Signed by the callee, verified by the caller: this answer to this ring, from the endpoint the caller rang. */
+export function ringReplyProofProcedure(callee: string, ringId: string, answer: Answer): string {
+  return `${ringProcedure(callee)}#reply:${ringId}:${answer}`;
+}
+/**
+ * Signed by the callee answering later, verified by the original
+ * caller: this answer to this ring, delivered to the caller's own
+ * endpoint. The acknowledgement the caller returns is NOT separately
+ * proven -- by the time it is sent, the callee's own answer is already
+ * recorded locally (answerPendingRing records before it calls out), so
+ * a forged ack can mislead this one telemetry field (caller_notified)
+ * but cannot make an unanswered ring look answered or vice versa.
+ */
+export function ringAnswerProofProcedure(caller: string, ringId: string, answer: 1 | 2): string {
+  return `${ringProcedure(caller)}#ring_answer:${ringId}:${answer}`;
+}
+
+export interface Proof {
+  timestamp: number;
+  signature: string;
+}
+
+/** The {citizen_did, proof} pair every ring-endpoint message carries, in both directions. */
+export interface Proven {
+  citizen_did: string;
+  proof: Proof;
+}
+
+export function parseProven(payload: Record<string, unknown>): Proven | undefined {
+  const p = payload.proof;
+  if (typeof payload.citizen_did !== "string" || typeof p !== "object" || p === null) return undefined;
+  const pp = p as Record<string, unknown>;
+  if (!Number.isInteger(pp.timestamp) || typeof pp.signature !== "string") return undefined;
+  return { citizen_did: payload.citizen_did, proof: { timestamp: pp.timestamp as number, signature: pp.signature } };
 }
 
 /** No booleans on the wire: the answer is one of these integers. */
@@ -179,30 +230,39 @@ export interface RingAnswerReply {
   received: 1;
   /** 1 when the caller had already recorded an answer for this ring; the first answer stands. */
   already_answered?: 1;
+  /** Not signed -- see ringAnswerProofProcedure's own doc comment for why. Reserved for a future release if that changes. */
+  proven?: Proven;
 }
 
 export function parseRingAnswerReply(payload: unknown): RingAnswerReply | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
   const p = payload as Record<string, unknown>;
   if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id) || p.received !== 1) return undefined;
-  return { ring_id: p.ring_id, received: 1, ...(p.already_answered === 1 ? { already_answered: 1 as const } : {}) };
+  const proven = parseProven(p);
+  return { ring_id: p.ring_id, received: 1, ...(p.already_answered === 1 ? { already_answered: 1 as const } : {}), ...(proven ? { proven } : {}) };
 }
 
 export interface RingReply {
-  ring_id: string;
+  /** Absent only on a decline the endpoint had to give before it could read a ring id (not JSON, service inactive, invalid args). */
+  ring_id?: string;
   answer: Answer;
   room_topic?: string;
   reason?: string;
+  /** The callee's proof over ringReplyProofProcedure; absent on the pre-validation declines above. */
+  proven?: Proven;
 }
 
 export function parseRingReply(payload: unknown): RingReply | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
   const p = payload as Record<string, unknown>;
-  if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id)) return undefined;
   if (p.answer !== 1 && p.answer !== 2 && p.answer !== 3) return undefined;
-  const reply: RingReply = { ring_id: p.ring_id, answer: p.answer };
+  if (p.ring_id !== undefined && (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id))) return undefined;
+  const reply: RingReply = { answer: p.answer };
+  if (typeof p.ring_id === "string") reply.ring_id = p.ring_id;
   if (typeof p.room_topic === "string") reply.room_topic = p.room_topic;
   if (typeof p.reason === "string") reply.reason = p.reason;
+  const proven = parseProven(p);
+  if (proven) reply.proven = proven;
   return reply;
 }
 
@@ -214,11 +274,21 @@ function dbPath(): string {
 
 let db: Database.Database | undefined;
 
+/** A pending ring older than this is neither shown nor answerable: the caller has long stopped waiting, and the room it names may be gone. */
+export const PENDING_RING_TTL_MS = 24 * 60 * 60 * 1000;
+
 function open(): Database.Database {
   if (db) return db;
   const path = dbPath();
-  mkdirSync(dirname(path), { recursive: true });
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   db = new Database(path);
+  if (path !== ":memory:") {
+    try {
+      chmodSync(path, 0o600); // ring purposes and peers are this operator's business, not every local user's
+    } catch {
+      // best effort (e.g. a filesystem without POSIX modes)
+    }
+  }
   db.pragma("journal_mode = WAL");
   db.exec(`
     CREATE TABLE IF NOT EXISTS rings (
@@ -234,7 +304,14 @@ function open(): Database.Database {
       answered_at TEXT
     )
   `);
+  // `self`: which agent (node id) this row belongs to. The file is one per
+  // machine while identities are one per logical session, so two sessions
+  // on one machine must not see or answer each other's rings. Added
+  // after the first schema; older rows have NULL and belong to nobody.
+  const cols = new Set((db.prepare("PRAGMA table_info(rings)").all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("self")) db.exec("ALTER TABLE rings ADD COLUMN self TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS rings_direction_idx ON rings (direction, recorded_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS rings_self_idx ON rings (self, direction)`);
   return db;
 }
 
@@ -242,6 +319,8 @@ export type Direction = "in" | "out";
 
 export interface RingRecord {
   ring_id: string;
+  /** The node id of the agent this record belongs to (null on rows from before the column existed). */
+  self: string | null;
   direction: Direction;
   /** The other agent: who rang (in) or who was rung (out). */
   peer: string;
@@ -257,6 +336,7 @@ export interface RingRecord {
 /** Records a ring once; answer may be given now (accepted/declined on the spot) or later via answerRing. Idempotent per ring_id. */
 export function recordRing(rec: {
   ring_id: string;
+  self: string;
   direction: Direction;
   peer: string;
   purpose: string;
@@ -268,12 +348,13 @@ export function recordRing(rec: {
   const now = new Date().toISOString();
   open()
     .prepare(
-      `INSERT INTO rings (ring_id, direction, peer, purpose, room_topic, sent_at, recorded_at, answer, reason, answered_at)
-       VALUES (@ring_id, @direction, @peer, @purpose, @room_topic, @sent_at, @now, @answer, @reason, @answered_at)
+      `INSERT INTO rings (ring_id, self, direction, peer, purpose, room_topic, sent_at, recorded_at, answer, reason, answered_at)
+       VALUES (@ring_id, @self, @direction, @peer, @purpose, @room_topic, @sent_at, @now, @answer, @reason, @answered_at)
        ON CONFLICT(ring_id) DO NOTHING`,
     )
     .run({
       ring_id: rec.ring_id,
+      self: rec.self.toLowerCase(),
       direction: rec.direction,
       peer: rec.peer,
       purpose: rec.purpose,
@@ -293,23 +374,38 @@ export function answerRing(ringId: string, answer: Answer | null, reason?: strin
     .run({ ring_id: ringId, answer, reason: reason ?? null, now: new Date().toISOString() });
 }
 
-export function getRing(ringId: string): RingRecord | undefined {
-  return open().prepare("SELECT * FROM rings WHERE ring_id = ?").get(ringId) as RingRecord | undefined;
+/** One ring by id, only if it belongs to `self` (rows from another session on this machine are invisible). */
+export function getRing(ringId: string, self: string): RingRecord | undefined {
+  return open().prepare("SELECT * FROM rings WHERE ring_id = ? AND self = ?").get(ringId, self.toLowerCase()) as RingRecord | undefined;
 }
 
-/** Most recent first. pendingOnly narrows to rings with no answer yet; answer narrows to one answer (e.g. 3 for outgoing rings still awaiting the callee's model). */
-export function listRings(args: { direction?: Direction; pendingOnly?: boolean; answer?: Answer; limit?: number } = {}): RingRecord[] {
-  const where: string[] = [];
+/** Most recent first, always scoped to `self`. pendingOnly narrows to rings with no answer yet; answer narrows to one answer (e.g. 3 for outgoing rings still awaiting the callee's model). */
+export function listRings(args: { self: string; direction?: Direction; pendingOnly?: boolean; answer?: Answer; limit?: number }): RingRecord[] {
+  const where: string[] = ["self = @self"];
   if (args.direction) where.push("direction = @direction");
-  if (args.pendingOnly) where.push("answer IS NULL AND reason IS NULL");
+  if (args.pendingOnly) where.push("answer IS NULL AND reason IS NULL AND recorded_at > @not_before");
   if (args.answer !== undefined) where.push("answer = @answer");
-  const sql = `SELECT * FROM rings ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY recorded_at DESC LIMIT @limit`;
-  return open().prepare(sql).all({ direction: args.direction ?? "", answer: args.answer ?? 0, limit: args.limit ?? 50 }) as RingRecord[];
+  const sql = `SELECT * FROM rings WHERE ${where.join(" AND ")} ORDER BY recorded_at DESC LIMIT @limit`;
+  return open()
+    .prepare(sql)
+    .all({
+      self: args.self.toLowerCase(),
+      direction: args.direction ?? "",
+      answer: args.answer ?? 0,
+      not_before: new Date(Date.now() - PENDING_RING_TTL_MS).toISOString(),
+      limit: args.limit ?? 50,
+    }) as RingRecord[];
 }
 
-/** Incoming rings the callee's model still has to answer (policy "ask"). */
-export function pendingIncoming(): RingRecord[] {
-  return listRings({ direction: "in", pendingOnly: true, limit: 100 });
+/** Incoming rings the callee's model still has to answer (policy "ask"), for `self`, younger than PENDING_RING_TTL_MS. */
+export function pendingIncoming(self: string): RingRecord[] {
+  return listRings({ self, direction: "in", pendingOnly: true, limit: 100 });
+}
+
+/** How many incoming rings for `self` are pending right now, and whether one from `peer` is among them -- the caps in ring_service.ts. */
+export function pendingSummary(self: string, peer: string): { count: number; from_peer: number } {
+  const rows = pendingIncoming(self);
+  return { count: rows.length, from_peer: rows.filter((r) => r.peer.toLowerCase() === peer.toLowerCase()).length };
 }
 
 /** Test/shutdown hook -- releases the file handle. Re-opens lazily on next use. */

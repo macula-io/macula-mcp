@@ -86,11 +86,11 @@ export function registerMeshReadInbox(server: McpServer): void {
           : threadEnvelopes(
               recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })),
             ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me);
-        const rings = room_topic
+        const rings = room_topic || !me
           ? undefined
           : {
-              pending: pendingIncoming().map(ringView),
-              recent: listRings({ limit: 20 }).filter((r) => r.answer !== null || r.reason !== null).map(ringView),
+              pending: pendingIncoming(me).map(ringView),
+              recent: listRings({ self: me, limit: 20 }).filter((r) => r.answer !== null || r.reason !== null).map(ringView),
             };
         return jsonContent({
           ...(rings !== undefined ? { rings } : {}),

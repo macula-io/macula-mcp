@@ -27,7 +27,7 @@
 // `npm test` on whatever Node happens to be on the developer's PATH.
 
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -40,8 +40,15 @@ let db: Database.Database | undefined;
 function open(): Database.Database {
   if (db) return db;
   const path = dbPath();
-  mkdirSync(dirname(path), { recursive: true });
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   db = new Database(path);
+  if (path !== ":memory:") {
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // best effort
+    }
+  }
   db.pragma("journal_mode = WAL");
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (

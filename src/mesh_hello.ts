@@ -65,7 +65,8 @@ export function registerMeshHello(server: McpServer): void {
       "mesh_lobby_transcript) -- being discoverable, reachable, and present on central are all the same " +
       "action now. You usually don't need to call this yourself: " +
       "any mesh_call/mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/" +
-      "mesh_open_room/mesh_join_room/mesh_read_inbox/mesh_recall/mesh_remember call already starts presence " +
+      "mesh_open_room/mesh_join_room/mesh_leave_room/mesh_rooms/mesh_ring/mesh_answer_ring/mesh_read_inbox/" +
+      "mesh_join_realm/mesh_recall/mesh_remember/mesh_remember_directory call already starts presence " +
       "automatically, with " +
       "operator_name/message/model taken from MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL if set. Call " +
       "mesh_hello directly to override those, or to see the banner/lobby_topic explicitly, or " +

@@ -26,9 +26,33 @@
 // publish all happen in this process, synchronously within the call.
 // If this process is gone, the relay fails, the call fails, and the
 // caller gets "unreachable" -- which is the truth.
+//
+// (2026-09-03, release review) THREE fixes on top of the shape above:
+//   1. Every reply this service gives is now itself SIGNED (proof over
+//      ringReplyProofProcedure/ringAnswerProofProcedure), and every
+//      ring/ring_answer's incoming proof is bound to that specific
+//      (kind, ring_id, answer) instead of the bare procedure name -- one
+//      proof no longer verifies for any body sent within the skew
+//      window, and mesh_ring.ts now REFUSES an unproven or mismatched
+//      reply rather than trusting whoever answered the CALL, closing the
+//      "any peer can serve agent.<victim>.ring" exposure a station-level
+//      registry bug made real (see mesh_ring.ts's own comment).
+//   2. Every ring row now carries `self` (rings.ts): which agent's rings
+//      these are. Identities are scoped per logical session
+//      (macula_cli.ts), but rings.sqlite3 is one file per MACHINE, so
+//      two sessions on one box used to see and could answer each
+//      other's rings. Every read here is scoped to this process's own
+//      node id.
+//   3. Real caps, not just a policy check: at most MAX_PENDING_PER_PEER
+//      pending rings from one `from` (a repeat while one is still
+//      pending is declined, not queued), a hard MAX_JOINED_ROOMS on how
+//      many rooms an accepted-or-answered ring may join, and a light
+//      per-`from` rate limit -- a caller (even one this agent's policy
+//      would otherwise accept) cannot make this agent spawn unbounded
+//      watcher processes or fill its disk.
 
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdirSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -47,10 +71,14 @@ import {
   parseRingAnswerArgs,
   parseRingAnswerReply,
   parseRingArgs,
+  pendingSummary,
   recordRing,
   ringAnswerProblems,
+  ringAnswerProofProcedure,
   ringProblems,
   ringProcedure,
+  ringProofProcedure,
+  ringReplyProofProcedure,
   type Answer,
   type RingAnswerReply,
   type RingReply,
@@ -75,6 +103,18 @@ export const DIRECT_DIAL_TTL_SECONDS = 3600;
 export const DIRECT_DIAL_RENEW_SECONDS = 1200;
 const NOTIFY_TIMEOUT_MS = 20_000;
 
+/** At most this many rings from one `from` may sit unanswered at once; a repeat while one is pending is declined, not queued. */
+export const MAX_PENDING_PER_PEER = 3;
+/** Hard cap on rooms an accept (or an answerPendingRing accept) may join, across every peer. */
+export const MAX_JOINED_ROOMS = 64;
+/** A second ring from the same `from` inside this window is declined as rate-limited, regardless of policy. */
+export const RING_RATE_LIMIT_MS = 2_000;
+
+/** Local socket hardening: a line longer than this, or a connection open longer than this with no complete line, is refused/closed. Not resource limits on the ring protocol itself -- limits on the trusted local relay talking to this process. */
+const SOCKET_MAX_LINE_BYTES = 64 * 1024;
+const SOCKET_IDLE_TIMEOUT_MS = 10_000;
+const SOCKET_MAX_CONNECTIONS = 64;
+
 /** The effective policy right now (policy.ts re-reads the file each time, so an operator's edit applies to the next ring). */
 export function contactPolicy(): Policy {
   return loadContactPolicy().contact_policy;
@@ -94,6 +134,8 @@ interface RingServiceState {
 }
 
 let state: RingServiceState | undefined;
+/** Last time a ring (not a ring_answer) was accepted from a given `from`, for the rate limit -- process-lifetime only, not persisted; a restart resets it, same as every other in-memory guard here. */
+const lastRingAt = new Map<string, number>();
 
 export interface RingServiceStatus {
   serving: 0 | 1;
@@ -140,10 +182,15 @@ export function isActive(): boolean {
   return state !== undefined;
 }
 
-/** The shell command the serve daemon runs per inbound ring: this same node binary, the shipped relay, the socket to reach us on. */
+/** The shell command the serve daemon runs per inbound ring: this same node binary, the shipped relay, the socket to reach us on. Each argument is single-quoted for POSIX sh (macula-cli runs `sh -c <this string>` -- see macula-cli's exec_handler.go) so a `$`, backtick or space anywhere in process.execPath, this package's install path, or MACULA_MCP_RING_SOCKET_DIR cannot be interpreted by the shell. */
 export function handlerCommand(socketPath: string): string {
   const handler = fileURLToPath(new URL("./ring_handler.js", import.meta.url));
-  return `"${process.execPath}" "${handler}" "${socketPath}"`;
+  return [process.execPath, handler, socketPath].map(shQuote).join(" ");
+}
+
+/** Single-quotes one argument for POSIX sh: wrap in `'...'`, and turn each literal `'` into `'\''` (close the quote, an escaped quote, reopen). Safe for any byte a filesystem path can contain. */
+function shQuote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
@@ -158,9 +205,10 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
   if (state) await stop();
   const host = args.host ?? defaultStation();
   const dir = process.env.MACULA_MCP_RING_SOCKET_DIR ?? join(homedir(), ".macula-mcp");
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const socketPath = join(dir, `ring-${process.pid}-${randomBytes(3).toString("hex")}.sock`);
-  const server = createServer((socket) => void serveConnection(socket));
+  const server = createServer((socket) => serveConnection(socket));
+  server.maxConnections = SOCKET_MAX_CONNECTIONS;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(socketPath, () => {
@@ -168,6 +216,11 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
       resolve();
     });
   });
+  try {
+    chmodSync(socketPath, 0o600); // the local relay is this process's own; nothing else on the machine needs to reach it
+  } catch {
+    // best effort (e.g. a filesystem without POSIX modes)
+  }
   server.unref();
   const procedure = ringProcedure(args.nodeId);
   const registration = { procedure, exec: handlerCommand(socketPath), execTimeoutSeconds: HANDLER_TIMEOUT_SECONDS, host, direct: true, ttlSeconds: DIRECT_DIAL_TTL_SECONDS };
@@ -192,12 +245,23 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
   return status();
 }
 
-/** One relayed ring per connection: a JSON line in, a JSON line out. Never lets an exception escape into the socket server. */
-async function serveConnection(socket: Socket): Promise<void> {
+/**
+ * One relayed ring per connection: a JSON line in, a JSON line out.
+ * Hardened against the local relay itself misbehaving or a stray local
+ * process connecting: an idle timeout, a capped line length (destroy,
+ * not just refuse, past the cap -- a line that big is never valid ring
+ * JSON), and never lets an exception escape into the socket server.
+ */
+function serveConnection(socket: Socket): void {
   let buf = "";
   socket.setEncoding("utf8");
+  socket.setTimeout(SOCKET_IDLE_TIMEOUT_MS, () => socket.destroy());
   socket.on("data", (chunk: string) => {
     buf += chunk;
+    if (buf.length > SOCKET_MAX_LINE_BYTES) {
+      socket.destroy();
+      return;
+    }
     const nl = buf.indexOf("\n");
     if (nl === -1) return;
     const line = buf.slice(0, nl);
@@ -221,6 +285,8 @@ export interface HandleDeps {
   policy?: ContactPolicy;
   now?: number;
   joinRoom?: (args: { host?: string; room_topic: string; openedBy?: string }) => Promise<unknown>;
+  /** Signs a reply's proof. Defaults to the real identitySign; tests substitute a fixture signer. */
+  sign?: (procedure: string) => Promise<{ node_id: string; timestamp: number; signature: string }>;
 }
 
 export type HandleReply = RingReply | RingAnswerReply | { answer: Answer; reason: string };
@@ -233,6 +299,7 @@ export type HandleReply = RingReply | RingAnswerReply | { answer: Answer; reason
 export async function handleRing(payload: unknown, deps: HandleDeps = {}): Promise<HandleReply> {
   const nodeId = deps.nodeId ?? state?.nodeId;
   if (!nodeId) return { answer: ANSWER.declined, reason: "ring service is not active" };
+  const sign = deps.sign ?? ((procedure) => identitySign({ procedure }));
   if (typeof payload === "object" && payload !== null && (payload as Record<string, unknown>).kind === "ring_answer") {
     return handleRingAnswer(payload, nodeId, deps);
   }
@@ -240,21 +307,51 @@ export async function handleRing(payload: unknown, deps: HandleDeps = {}): Promi
   if (problems.length > 0) return { answer: ANSWER.declined, reason: `invalid: ${problems.join("; ")}` };
   const ring = parseRingArgs(payload)!;
   const p = payload as Record<string, unknown>;
-  if (ring.to !== nodeId) return { ring_id: ring.ring_id, answer: ANSWER.declined, reason: "wrong callee: this ring names another node id" };
-  if (p.citizen_did !== ring.from) return { ring_id: ring.ring_id, answer: ANSWER.declined, reason: "unverified: citizen_did does not match from" };
-  const check = verifyOwnershipProof({ node_id: ring.from, proof: p.proof, procedure: ringProcedure(nodeId), now: deps.now });
-  if (check.ok === 0) return { ring_id: ring.ring_id, answer: ANSWER.declined, reason: `unverified: ${check.reason}` };
+
+  // Every reply from here on names a specific ring_id, so every one of
+  // them is signed -- INCLUDING a decline for a caller proof that failed
+  // to verify. There is nothing to protect by leaving these unsigned:
+  // this agent's own identity (nodeId) is already settled, so declining
+  // AS that identity is a perfectly good signed statement ("I am nodeId,
+  // and that ring did not check out"). The alternative -- an unsigned
+  // decline -- is indistinguishable, from the caller's side, from an
+  // impostor answering on nodeId's behalf, which is exactly what caused
+  // a real live ring to be reported as a possible hijack when it was
+  // just an honest rejection (found by the release review's own live
+  // check, 2026-09-03: the caller correctly refused to trust an unsigned
+  // decline, but the message it gave made an honest rejection look like
+  // an attack).
+  const provenReply = async (answer: Answer, extra: Partial<RingReply> = {}): Promise<RingReply> => {
+    const signed = await sign(ringReplyProofProcedure(nodeId, ring.ring_id, answer));
+    return { ring_id: ring.ring_id, answer, ...extra, proven: { citizen_did: signed.node_id, proof: { timestamp: signed.timestamp, signature: signed.signature } } };
+  };
+  const declineUnrecorded = (reason: string): Promise<RingReply> => provenReply(ANSWER.declined, { reason });
+  const decline = async (reason: string, recordedReason: string): Promise<RingReply> => {
+    recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at, answer: ANSWER.declined, reason: recordedReason });
+    return provenReply(ANSWER.declined, { reason });
+  };
+
+  if (ring.to !== nodeId) return declineUnrecorded("wrong callee: this ring names another node id");
+  if (p.citizen_did !== ring.from) return declineUnrecorded("unverified: citizen_did does not match from");
+  const check = verifyOwnershipProof({ node_id: ring.from, proof: p.proof, procedure: ringProofProcedure(nodeId, ring.ring_id), now: deps.now });
+  if (check.ok === 0) return declineUnrecorded(`unverified: ${check.reason}`);
+
+  const rateLimited = (lastRingAt.get(ring.from.toLowerCase()) ?? 0) + RING_RATE_LIMIT_MS > (deps.now ?? Date.now());
+  if (rateLimited) return decline("rate limited: try again shortly", "rate limited");
+  lastRingAt.set(ring.from.toLowerCase(), deps.now ?? Date.now());
+
+  const pending = pendingSummary(nodeId, ring.from);
+  if (pending.from_peer >= MAX_PENDING_PER_PEER) return decline("declined: you already have a pending ring with this agent", "too many pending from this peer");
 
   const policy = deps.policy ?? loadContactPolicy();
   const accept = async (): Promise<RingReply> => {
+    if (rooms.isJoined(ring.room_topic) === false && rooms.joinedRoomCount() >= MAX_JOINED_ROOMS) {
+      return decline("declined: this agent has reached its room limit", "too many joined rooms");
+    }
     const joinRoom = deps.joinRoom ?? rooms.joinRoom;
     await joinRoom({ host: state?.host, room_topic: ring.room_topic, openedBy: ring.from });
-    recordRing({ ...ring, direction: "in", peer: ring.from, answer: ANSWER.accepted });
-    return { ring_id: ring.ring_id, answer: ANSWER.accepted, room_topic: ring.room_topic };
-  };
-  const decline = (reason: string, recordedReason: string): RingReply => {
-    recordRing({ ...ring, direction: "in", peer: ring.from, answer: ANSWER.declined, reason: recordedReason });
-    return { ring_id: ring.ring_id, answer: ANSWER.declined, reason };
+    recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at, answer: ANSWER.accepted });
+    return provenReply(ANSWER.accepted, { room_topic: ring.room_topic });
   };
   switch (policy.contact_policy) {
     case POLICY.open:
@@ -264,10 +361,11 @@ export async function handleRing(payload: unknown, deps: HandleDeps = {}): Promi
     case POLICY.allowlist:
       if (isAllowlisted(policy, ring.from)) return accept();
       return decline("declined: not on this agent's allowlist", "not on allowlist");
-    default:
+    default: {
       // ask: this agent's model decides, later (mesh_answer_ring).
-      recordRing({ ...ring, direction: "in", peer: ring.from });
-      return { ring_id: ring.ring_id, answer: ANSWER.deferred, room_topic: ring.room_topic, reason: "deferred: this agent's model will answer" };
+      recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at });
+      return provenReply(ANSWER.deferred, { room_topic: ring.room_topic, reason: "deferred: this agent's model will answer" });
+    }
   }
 }
 
@@ -279,9 +377,9 @@ async function handleRingAnswer(payload: unknown, nodeId: string, deps: HandleDe
   const p = payload as Record<string, unknown>;
   if (ans.to !== nodeId) return { answer: ANSWER.declined, reason: "wrong callee: this answer names another node id" };
   if (p.citizen_did !== ans.from) return { answer: ANSWER.declined, reason: "unverified: citizen_did does not match from" };
-  const check = verifyOwnershipProof({ node_id: ans.from, proof: p.proof, procedure: ringProcedure(nodeId), now: deps.now });
+  const check = verifyOwnershipProof({ node_id: ans.from, proof: p.proof, procedure: ringAnswerProofProcedure(nodeId, ans.ring_id, ans.answer), now: deps.now });
   if (check.ok === 0) return { answer: ANSWER.declined, reason: `unverified: ${check.reason}` };
-  const ring = getRing(ans.ring_id);
+  const ring = getRing(ans.ring_id, nodeId);
   if (!ring || ring.direction !== "out" || ring.peer.toLowerCase() !== ans.from.toLowerCase() || ring.room_topic !== ans.room_topic) {
     return { answer: ANSWER.declined, reason: "unknown ring: no outgoing ring with that id to that agent in that room" };
   }
@@ -313,7 +411,8 @@ export interface AnswerPendingResult {
  * This agent's model answering a ring the policy deferred: on accept,
  * join the room first (tap + participant_joined) so the caller sees the
  * room become two-sided, record the answer, then carry it back to the
- * caller's own ring endpoint as a ring_answer with this agent's proof.
+ * caller's own ring endpoint as a ring_answer with this agent's proof
+ * (bound to this ring_id and this answer -- see ringAnswerProofProcedure).
  * A caller that has since gone is not an error here -- the answer is
  * recorded, and the offline path (WP6) is what reaches them later.
  */
@@ -327,10 +426,13 @@ export async function answerPendingRing(
 ): Promise<AnswerPendingResult> {
   const nodeId = deps.nodeId ?? state?.nodeId;
   if (!nodeId) throw new Error("ring service is not active -- presence has not started");
-  const ring = getRing(args.ring_id);
+  const ring = getRing(args.ring_id, nodeId);
   if (!ring || ring.direction !== "in") throw new Error(`no incoming ring ${args.ring_id}`);
   if (ring.answer !== null) throw new Error(`ring ${args.ring_id} was already answered (${ring.answer})`);
   if (args.answer === ANSWER.accepted) {
+    if (rooms.isJoined(ring.room_topic) === false && rooms.joinedRoomCount() >= MAX_JOINED_ROOMS) {
+      throw new Error(`this agent has reached its room limit (${MAX_JOINED_ROOMS}) -- decline instead, or leave a room first`);
+    }
     const joinRoom = deps.joinRoom ?? rooms.joinRoom;
     await joinRoom({ host: args.host ?? state?.host, room_topic: ring.room_topic, openedBy: ring.peer });
   }
@@ -341,7 +443,7 @@ export async function answerPendingRing(
   const notify =
     deps.notify ??
     (async (input) => {
-      const signed = await identitySign({ procedure: input.procedure });
+      const signed = await identitySign({ procedure: ringAnswerProofProcedure(ring.peer, ring.ring_id, args.answer) });
       const res = await callThenDirect({ host: input.host, procedure: input.procedure, callArgs: withIdentityProof(input.callArgs, signed), timeoutMs: NOTIFY_TIMEOUT_MS });
       return res.payload;
     });

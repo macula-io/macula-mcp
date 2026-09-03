@@ -186,18 +186,31 @@ export interface ObservedEnvelope extends Envelope {
   thread_root: string;
   /** 0 for a root, parent's depth + 1 for a reply. */
   depth: number;
+  /**
+   * 1 when the station-attested publisher of the fact is the node id the
+   * envelope claims in `from`; 0 when they differ or the publisher is
+   * unknown (a row from before publishers were recorded). `from` alone
+   * is a self-claim anyone can write; only attested messages count for
+   * anything that matters (who joined, who replied, who opened).
+   */
+  attested: 0 | 1;
+}
+
+/** Whether `from` is backed by the station's own record of who published the fact. */
+export function isAttested(from: string, publisher: string | null | undefined): boolean {
+  return typeof publisher === "string" && publisher.toLowerCase() === from.toLowerCase();
 }
 
 /**
- * Turns observed facts (in arrival order) into threaded envelopes. A
- * reply whose parent isn't in the window still threads under that
- * parent's id at depth 1 -- the window is a page of a transcript, not
- * the whole history. Facts that aren't envelopes are counted, not
- * dropped silently.
+ * Turns observed facts (in arrival order) into threaded envelopes. Two
+ * passes, so a reply that arrived BEFORE its parent (out-of-order
+ * delivery) still threads under the parent's root. A reply whose parent
+ * isn't in the window at all threads under that parent's id at depth 1
+ * -- the window is a page of a transcript, not the whole history. Facts
+ * that aren't envelopes are counted, not dropped silently.
  */
-export function threadEnvelopes(rows: { payload: unknown; observed_at: string }[]): { messages: ObservedEnvelope[]; unparsed: number } {
-  const byId = new Map<string, ObservedEnvelope>();
-  const messages: ObservedEnvelope[] = [];
+export function threadEnvelopes(rows: { payload: unknown; observed_at: string; publisher?: string | null }[]): { messages: ObservedEnvelope[]; unparsed: number } {
+  const parsed: { env: Envelope; observed_at: string; publisher?: string | null }[] = [];
   let unparsed = 0;
   for (const row of rows) {
     const env = parseEnvelope(row.payload);
@@ -205,15 +218,31 @@ export function threadEnvelopes(rows: { payload: unknown; observed_at: string }[
       unparsed += 1;
       continue;
     }
-    const parent = env.in_reply_to !== undefined ? byId.get(env.in_reply_to) : undefined;
-    const observed: ObservedEnvelope = {
-      ...env,
-      observed_at: row.observed_at,
-      thread_root: parent ? parent.thread_root : (env.in_reply_to ?? env.message_id),
-      depth: parent ? parent.depth + 1 : env.in_reply_to !== undefined ? 1 : 0,
-    };
-    byId.set(env.message_id, observed);
-    messages.push(observed);
+    parsed.push({ env, observed_at: row.observed_at, publisher: row.publisher });
   }
+  const byId = new Map<string, Envelope>();
+  for (const p of parsed) byId.set(p.env.message_id, p.env);
+  const resolve = (env: Envelope): { root: string; depth: number } => {
+    let root = env.message_id;
+    let depth = 0;
+    let cur: Envelope | undefined = env;
+    const seen = new Set<string>([env.message_id]);
+    while (cur?.in_reply_to !== undefined) {
+      depth += 1;
+      const parent = byId.get(cur.in_reply_to);
+      if (!parent || seen.has(parent.message_id)) {
+        root = cur.in_reply_to;
+        break;
+      }
+      seen.add(parent.message_id);
+      root = parent.message_id;
+      cur = parent;
+    }
+    return { root, depth };
+  };
+  const messages: ObservedEnvelope[] = parsed.map((p) => {
+    const { root, depth } = resolve(p.env);
+    return { ...p.env, observed_at: p.observed_at, thread_root: root, depth, attested: isAttested(p.env.from, p.publisher) ? 1 : 0 };
+  });
   return { messages, unparsed };
 }

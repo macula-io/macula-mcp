@@ -400,7 +400,7 @@ export function startDaemon(
 export function watchTopicOnDaemon(
   socketName: string,
   topic: string,
-  onEvent: (payload: unknown) => void,
+  onEvent: (payload: unknown, event: WatchEvent) => void,
 ): ChildProcessWithoutNullStreams {
   const child = spawn(binPath(), ["pubsub", "watch", "-daemon", "--json", "-socket-name", socketName, topic]) as ChildProcessWithoutNullStreams;
   // A held-open child process is ref'd by default and would keep this
@@ -419,7 +419,7 @@ export function watchTopicOnDaemon(
       buf = buf.slice(nl + 1);
       try {
         const evt = parseWatchLine(line);
-        if (evt) onEvent(evt.payload);
+        if (evt) onEvent(evt.payload, evt);
       } catch {
         // a trailing failure envelope on this line -- the connection is
         // presumably gone; nothing more will arrive on it, so just stop

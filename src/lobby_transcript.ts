@@ -19,7 +19,7 @@
 // need to fight over one file.
 
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -32,8 +32,15 @@ let db: Database.Database | undefined;
 function open(): Database.Database {
   if (db) return db;
   const path = dbPath();
-  mkdirSync(dirname(path), { recursive: true });
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   db = new Database(path);
+  if (path !== ":memory:") {
+    try {
+      chmodSync(path, 0o600); // room transcripts are this operator's, not every local user's
+    } catch {
+      // best effort
+    }
+  }
   db.pragma("journal_mode = WAL");
   db.exec(`
     CREATE TABLE IF NOT EXISTS observed_facts (
@@ -45,6 +52,11 @@ function open(): Database.Database {
       observed_at TEXT NOT NULL
     )
   `);
+  // `publisher`: the node id the STATION reports as the fact's publisher
+  // -- the one attribution that is not a self-claim. Added after the
+  // first schema; older rows have NULL, which reads as "not attested".
+  const cols = new Set((db.prepare("PRAGMA table_info(observed_facts)").all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("publisher")) db.exec("ALTER TABLE observed_facts ADD COLUMN publisher TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS observed_facts_topic_idx ON observed_facts (topic, observed_at)`);
   return db;
 }
@@ -56,6 +68,8 @@ export interface ObservedFact {
   text: string | null;
   raw_json: string;
   observed_at: string;
+  /** Station-attested publisher node id (hex), or null for rows recorded before it was kept. */
+  publisher: string | null;
 }
 
 /**
@@ -76,15 +90,15 @@ function extractSenderText(payload: unknown): { sender: string | null; text: str
   return { sender: p.from, text };
 }
 
-/** Records one observed fact. Never idempotent/deduped -- every arrival is its own row, a transcript, not a cache of latest state. */
-export function recordFact(rec: { topic: string; payload: unknown; at: string }): void {
+/** Records one observed fact. Never idempotent/deduped -- every arrival is its own row, a transcript, not a cache of latest state. `publisher` is what the station said, kept apart from anything the payload claims. */
+export function recordFact(rec: { topic: string; payload: unknown; at: string; publisher?: string }): void {
   const { sender, text } = extractSenderText(rec.payload);
   open()
     .prepare(
-      `INSERT INTO observed_facts (topic, sender, text, raw_json, observed_at)
-       VALUES (@topic, @sender, @text, @raw_json, @at)`,
+      `INSERT INTO observed_facts (topic, sender, text, raw_json, observed_at, publisher)
+       VALUES (@topic, @sender, @text, @raw_json, @at, @publisher)`,
     )
-    .run({ topic: rec.topic, sender, text, raw_json: JSON.stringify(rec.payload), at: rec.at });
+    .run({ topic: rec.topic, sender, text, raw_json: JSON.stringify(rec.payload), at: rec.at, publisher: rec.publisher ?? null });
 }
 
 export interface TranscriptPage {

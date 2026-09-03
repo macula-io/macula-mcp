@@ -13,18 +13,23 @@
 // the same way mesh_list_stations hides "this happens to be
 // hecate_stations today" behind its own name.
 //
-// Deliberately NOT wired into presence/ensurePresence's automatic
-// start the way the mesh-touching tools were: presence's auto-trigger
-// works because "should this agent be online" has one unconditional
-// answer the moment it touches the mesh at all. Memory has no such
-// unconditional trigger on either side -- a read needs a QUERY
-// (context this server never has access to, only the calling agent
-// does), and a write needs AUTHORED CONTENT (same reason: this server
-// sees tool args/results, never the model's own reasoning or the
-// human's messages, so it cannot generate "what's worth remembering"
-// itself). Both stay tools an agent calls deliberately -- these two
-// just remove the "which realm is hecate-rag on" step, the same
-// ergonomics gap mesh_list_stations already closed for stations.
+// This module calls ensurePresence(server) at its own entry point too
+// (2026-08-31, same as every other genuinely mesh-touching tool -- see
+// presence.ts) -- an agent that recalls or remembers something is
+// present the same way one that calls or publishes is. What is
+// deliberately NOT automatic is the OTHER direction: mesh_recall/
+// mesh_remember themselves never fire on their own the way presence
+// does. Presence's auto-trigger works because "should this agent be
+// online" has one unconditional answer the moment it touches the mesh
+// at all. Memory has no such unconditional trigger on either side -- a
+// read needs a QUERY (context this server never has access to, only
+// the calling agent does), and a write needs AUTHORED CONTENT (same
+// reason: this server sees tool args/results, never the model's own
+// reasoning or the human's messages, so it cannot generate "what's
+// worth remembering" itself). Both stay tools an agent calls
+// deliberately -- these two just remove the "which realm is hecate-rag
+// on" step, the same ergonomics gap mesh_list_stations already closed
+// for stations.
 //
 // mesh_remember calls hecate-rag's add_knowledge -- one mesh RPC, not
 // two. It used to sequence ingest_document then embed_document by hand

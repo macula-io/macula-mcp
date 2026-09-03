@@ -32,8 +32,10 @@ beforeEach(async () => {
   mocks.isTapped.mockReturnValue(true);
   let seq = 0;
   mocks.publish.mockImplementation(async ({ topic, fact }: { topic: string; fact: Record<string, unknown> }) => {
-    // the background watch would record this agent's own fact too
-    recordFact({ topic, payload: fact, at: new Date().toISOString() });
+    // the background watch would record this agent's own fact too, with the
+    // station's own attestation of who published it (the real `publish()`
+    // always uses the default identity, so publisher === fact.from here).
+    recordFact({ topic, payload: fact, at: new Date().toISOString(), publisher: fact.from as string });
     return { topic, seq: ++seq, duration_ms: 1 };
   });
   const { resetRoomsForTests } = await import("./rooms.js");
@@ -88,7 +90,7 @@ describe("joinRoom / leaveRoom", () => {
   it("learns the opener from a room_opened seen on central", async () => {
     const { joinRoom, listRooms } = await import("./rooms.js");
     const topic = `agents.room.${"2".repeat(32)}`;
-    recordFact({ topic: "agents.lobby", payload: { message_id: "f".repeat(32), room_topic: topic, sent_at: 1, from: THEM, kind: "room_opened", text: "", purpose: "pairing" }, at: "2026-09-03T00:00:00.000Z" });
+    recordFact({ topic: "agents.lobby", payload: { message_id: "f".repeat(32), room_topic: topic, sent_at: 1, from: THEM, kind: "room_opened", text: "", purpose: "pairing" }, at: "2026-09-03T00:00:00.000Z", publisher: THEM });
     expect(listRooms().seen_on_central).toEqual([expect.objectContaining({ room_topic: topic, opened_by: THEM, purpose: "pairing" })]);
     await joinRoom({ room_topic: topic });
     expect(listRooms().joined[0]).toMatchObject({ opened_by: THEM, opened_here: 0 });
@@ -114,11 +116,16 @@ describe("joinRoom / leaveRoom", () => {
     expect(listRooms().joined).toEqual([]);
   });
 
-  it("drops a room from the listing when the observer no longer taps it", async () => {
+  it("reports watched: 0, but keeps the room, when the observer no longer taps it", async () => {
+    // Release-review fix: this module's own membership (rooms.has) and the
+    // observer's tap can disagree after a crash/restart; the room stays in
+    // the listing (its record, self id and history are not lost) with
+    // watched: 0 so a caller knows to expect say()/ensureTapped() to re-tap
+    // it, rather than the room silently vanishing from mesh_rooms.
     const { openRoom, listRooms } = await import("./rooms.js");
-    await openRoom({});
+    const { room_topic } = await openRoom({});
     mocks.isTapped.mockReturnValue(false);
-    expect(listRooms().joined).toEqual([]);
+    expect(listRooms().joined).toEqual([expect.objectContaining({ room_topic, watched: 0 })]);
   });
 });
 
@@ -155,8 +162,8 @@ describe("say", () => {
     const { openRoom, say } = await import("./rooms.js");
     const { room_topic } = await openRoom({});
     mocks.publish.mockImplementationOnce(async ({ topic, fact }: { topic: string; fact: Record<string, unknown> }) => {
-      recordFact({ topic, payload: fact, at: new Date().toISOString() }); // own echo
-      recordFact({ topic, payload: { ...fact, message_id: "e".repeat(32), from: THEM, kind: "answer_given", in_reply_to: fact.message_id, text: "because" }, at: new Date().toISOString() });
+      recordFact({ topic, payload: fact, at: new Date().toISOString(), publisher: fact.from as string }); // own echo
+      recordFact({ topic, payload: { ...fact, message_id: "e".repeat(32), from: THEM, kind: "answer_given", in_reply_to: fact.message_id, text: "because" }, at: new Date().toISOString(), publisher: THEM });
       return { topic, seq: 9, duration_ms: 1 };
     });
     const res = await say({ room_topic, kind: "question_asked", text: "why?", waitReplySeconds: 5 });

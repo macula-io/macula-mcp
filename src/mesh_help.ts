@@ -10,7 +10,7 @@
 // what it already has loaded (tool descriptions, instructions,
 // mesh://etiquette), tailored to whichever topic was picked.
 //
-// Seven separate zero-argument prompts, not one `help` prompt with an
+// Eight separate zero-argument prompts, not one `help` prompt with an
 // optional `topic` argument -- found live: @modelcontextprotocol/sdk
 // 1.30.0 (the latest at the time) throws "Invalid arguments ... Required"
 // on getPrompt when a prompt's args are ALL optional and the caller
@@ -51,10 +51,12 @@ const TOPICS: HelpTopic[] = [
     ask:
       "Explain how identity works for the Macula mesh tools in this conversation: what " +
       "mesh://identity shows, why mesh_watch, presence (mesh_hello/mesh_agents/mesh_goodbye), " +
-      "and serving (mesh_serve/mesh_unserve) each use their own identity distinct from the other " +
-      "tools, and how to pin any of them to a fixed path with MACULA_MCP_IDENTITY / " +
-      "MACULA_MCP_WATCH_IDENTITY / MACULA_MCP_PRESENCE_IDENTITY / MACULA_MCP_SERVE_IDENTITY if a " +
-      "stable node ID across restarts is needed.",
+      "serving (mesh_serve/mesh_unserve) and observing (mesh_observe_lobby and friends) each use their " +
+      "own identity distinct from the other tools, that every one of the five is now PERSISTED per " +
+      "logical session (scoped by CLAUDE_CODE_SESSION_ID, else the parent pid) rather than a fresh " +
+      "temp file per process, and how to pin any of them to a fixed path instead with MACULA_MCP_IDENTITY " +
+      "/ MACULA_MCP_WATCH_IDENTITY / MACULA_MCP_PRESENCE_IDENTITY / MACULA_MCP_SERVE_IDENTITY / " +
+      "MACULA_MCP_OBSERVE_IDENTITY if a stable node ID across sessions is needed.",
   },
   {
     name: "help_wire_format",

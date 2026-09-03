@@ -25,9 +25,17 @@ import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { factsAfter, lastFactId } from "./lobby_transcript.js";
 import { parseEnvelope } from "./envelope.js";
-import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, RingError } from "./rings.js";
+import { verifyOwnershipProof } from "./ownership_proof.js";
+import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, ringProofProcedure, ringReplyProofProcedure, RingError } from "./rings.js";
 
-const CALL_TIMEOUT_MS = 20_000;
+// The callee's own handler (ring_service.ts, HANDLER_TIMEOUT_SECONDS=30,
+// plus the local relay's own 25 s budget) can legitimately take close to
+// 30 s to answer an accept -- it joins a room and publishes on the real
+// mesh inside the call. This timeout MUST stay comfortably above that,
+// or a slow-but-genuine accept is misreported as unreachable on the
+// caller's side while the callee has already joined (found by the
+// release review 2026-09-03: the two budgets used to be inverted).
+const CALL_TIMEOUT_MS = 40_000;
 const DEFAULT_WAIT_JOIN_SECONDS = 30;
 const MAX_WAIT_JOIN_SECONDS = 600;
 
@@ -78,12 +86,19 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   }
   const ring = buildRingArgs({ from: me, to: args.to, purpose: args.purpose, room_topic: roomTopic });
   const procedure = ringProcedure(args.to);
-  recordRing({ ...ring, direction: "out", peer: args.to });
+  recordRing({ ...ring, self: me, direction: "out", peer: args.to });
   const cursor = lastFactId(roomTopic);
 
   let payload: unknown;
   try {
-    const signed = await identitySign({ procedure });
+    // Signed over ringProofProcedure (bound to THIS ring id), never the
+    // bare `procedure` above -- `procedure` names the CALL's target and
+    // must stay the plain agent.<to>.ring the station routes on; the
+    // PROOF has to name the exact ring so it cannot be replayed against
+    // a different one. Conflating the two (found live by the release
+    // review, 2026-09-03: this call signed the bare name, ring_service.ts
+    // verified against the bound one) made every ring bad_signature.
+    const signed = await identitySign({ procedure: ringProofProcedure(args.to, ring.ring_id) });
     const res = await callThenDirect({ host: args.host, procedure, callArgs: withIdentityProof({ ...ring }, signed), timeoutMs: CALL_TIMEOUT_MS });
     payload = res.payload;
   } catch (e) {
@@ -100,9 +115,38 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   }
 
   const reply = parseRingReply(payload);
-  if (!reply) {
+  if (!reply || (reply.ring_id !== undefined && reply.ring_id !== ring.ring_id)) {
     answerRing(ring.ring_id, null, "malformed reply");
-    throw new RingError(`${procedure} answered with something that is not a ring reply: ${JSON.stringify(payload)}`);
+    throw new RingError(`${procedure} answered with something that is not a reply to this ring: ${JSON.stringify(payload)}`);
+  }
+  // A definitive answer (accepted or declined, as opposed to the
+  // pre-validation declines ring_service.ts gives before it can identify
+  // a ring at all) MUST be proven by the callee's own key, bound to THIS
+  // ring id and THIS answer -- see ring_service.ts's provenReply and
+  // ringReplyProofProcedure. Without this, whoever currently answers the
+  // procedure is believed regardless of who holds `to`'s key; found live
+  // by the release review 2026-09-03 as the way a hijacked or
+  // misdirected agent.<to>.ring registration could silently intercept
+  // every ring meant for `to`. An unproven or wrongly-proven definitive
+  // answer is treated the same as unreachable: this call learned
+  // something answered, but not verifiably `to`.
+  if (reply.ring_id !== undefined && (reply.answer === ANSWER.accepted || reply.answer === ANSWER.declined)) {
+    const proven =
+      reply.proven !== undefined &&
+      reply.proven.citizen_did.toLowerCase() === args.to.toLowerCase() &&
+      verifyOwnershipProof({ node_id: args.to, proof: reply.proven.proof, procedure: ringReplyProofProcedure(args.to, reply.ring_id, reply.answer) }).ok === 1;
+    if (!proven) {
+      const reason = `unreachable: an answer arrived for ${procedure} but was not verifiably signed by ${args.to}'s own key -- treating as unreachable rather than trusting it`;
+      answerRing(ring.ring_id, null, reason);
+      return {
+        ring_id: ring.ring_id,
+        to: args.to,
+        room_topic: roomTopic,
+        unreachable: 1,
+        reason,
+        next_step: "Someone answered on their behalf without proving it. Do not treat the room as joined; ring again once mesh_agents shows the real agent present.",
+      };
+    }
   }
   answerRing(ring.ring_id, reply.answer, reply.reason);
 
@@ -138,12 +182,13 @@ export function registerMeshRing(server: McpServer): void {
       "procedure with your identity proof, carrying a room to talk in (a new one, opened for the two of " +
       "you, unless you pass a room you are already in). You get exactly one of: answer 1 accepted (they " +
       "join the room; this call then waits up to wait_join_seconds for their participant_joined, so " +
-      "joined: 1 means the room is genuinely two-sided), 2 declined (with their reason), 3 deferred " +
-      "(their operator's policy is \"ask\", their model decides later and mesh_answer_ring carries the " +
-      "answer back to you; the room stays open), or unreachable: 1 (nobody serves that procedure right " +
-      "now -- they are not present, or opted out). purpose is mandatory and short: a deferred ring is " +
-      "judged from it. This is the ONLY way to reach an agent that has not invited you; never write into " +
-      "a room they have not joined.",
+      "joined: 1 means the room is genuinely two-sided and PROVEN -- an accepted or declined answer is " +
+      "verified against their own key before it is trusted, not just whoever answered), 2 declined " +
+      "(with their reason), 3 deferred (their operator's policy is \"ask\", their model decides later " +
+      "and mesh_answer_ring carries the answer back to you; the room stays open), or unreachable: 1 " +
+      "(nobody serves that procedure right now, or answered without proving they hold the key). purpose " +
+      "is mandatory and short: a deferred ring is judged from it. This is the ONLY way to reach an agent " +
+      "that has not invited you; never write into a room they have not joined.",
     {
       to: nodeIdSchema.describe("The agent to ring: a node_id from mesh_agents."),
       purpose: z.string().min(1).max(MAX_PURPOSE_CHARS).describe(`Why you are ringing, one line (max ${MAX_PURPOSE_CHARS} chars).`),

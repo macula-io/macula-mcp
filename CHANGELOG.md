@@ -5,12 +5,33 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.15.0] - 2026-09-03
 
-Work package 1 of [`plans/PLAN_AGENT_CONVERSATIONS.md`](plans/PLAN_AGENT_CONVERSATIONS.md):
-conversations get an envelope and rooms. The wire is broken, not versioned:
-nothing was in production, and both ends of every conversation are this
-package.
+Work packages 1 to 3 of [`plans/PLAN_AGENT_CONVERSATIONS.md`](plans/PLAN_AGENT_CONVERSATIONS.md):
+conversations get an envelope, rooms, rings and a consent policy. The wire is
+broken, not versioned: nothing was in production, and both ends of every
+conversation are this package.
+
+**Breaking**, not additive: `mesh_send_chat` and `mesh_open_lobby_session` are
+gone, along with the deterministic `agents.dm.<node_id>` inbox topic. A
+0.14.0 caller of either tool gets a normal MCP unknown-tool error, not a
+silent behavior change. See Removed below.
+
+**Requires macula-cli 0.5.1 or newer**, released alongside this version:
+0.5.0 and earlier publish a daemon registration's direct-dial record over the
+session `ServeForever` is reading, so the ring endpoint's registration always
+times out on those binaries. `doctor`/the installer fetch the current release.
+
+Before this release is tagged, an adversarial review (five lenses over the
+new code, three release audits, every finding checked by three independent
+refuters) found and this version fixes: a hijack where an unproven reply let
+any peer serving `agent.<victim>.ring` intercept a ring meant for someone
+else; a race that could start two lobby-observer daemons under one identity;
+no detection of a crashed room tap or observer daemon; rings and room
+transcripts stored per machine while identities are scoped per session;
+unbounded pending rings and joined rooms; a shell-quoting gap in the ring
+handler's command line; and a caller timeout shorter than the callee's own
+handler budget. Full detail in the sections below.
 
 ### Added
 - **Rings** (`mesh_ring`, `rings.ts`, `ring_service.ts`, `ownership_proof.ts`;
@@ -95,6 +116,68 @@ package.
   presence's watch over it: anyone who knew a node id could write into it,
   which is the consent gap the plan exists to close. A ring (WP2) replaces
   it.
+
+### Fixed
+
+Found by an adversarial review before this version was tagged (five review
+lenses, three release audits, three refuters per finding).
+
+- **Ring hijack.** A ring's reply carried no proof from the callee, so
+  whoever currently served `agent.<to>.ring` was believed regardless of
+  whether it held `to`'s key. Every ring and ring_answer proof is now bound
+  to its exact `(kind, ring_id, answer)`, not the bare procedure name; every
+  reply the ring service gives is itself signed; `mesh_ring` refuses an
+  unproven or mismatched accept/decline and reports `unreachable` instead of
+  trusting it.
+- **Lobby observer race.** `lobbyObserver.start()` had no in-flight guard, so
+  a fresh session's first room tool and `ensurePresence`'s own background
+  start could both see no state and each spawn a daemon; the second silently
+  overwrote the first, leaking a daemon and its taps. Guarded the same way
+  `presence.ts` already guards its own start.
+- **Silent tap and daemon death.** Neither the lobby observer's daemon nor
+  any individual room-tap child had an exit/error handler, so a crash left
+  `isTapped()` reporting true and `mesh_say`'s reply wait polling a
+  transcript nothing was feeding. A dead daemon now tears the observer down
+  so the next `mesh_hello` rebuilds it; a dead single tap is removed from the
+  tap set so `mesh_rooms`/`say()` re-tap on next use.
+- **Rings and transcripts scoped per machine, not per session.** Identities
+  are deliberately scoped per logical session, but `rings.sqlite3` was one
+  file per machine with no owner column, so two sessions on one box could see
+  and answer each other's rings. Every ring row now carries `self`; every
+  read is scoped to it.
+- **No caps.** A caller under an accepting policy could make the callee
+  spawn unbounded room watchers and fill its rings store. Added
+  `MAX_PENDING_PER_PEER`, `MAX_JOINED_ROOMS` and a per-`from` rate limit,
+  and a 24-hour TTL on pending rings.
+- **Shell-unsafe command construction.** The ring handler's command line was
+  built with double-quoted paths, inside which `sh` still expands `$` and
+  backticks. Every argument is now single-quoted for POSIX `sh`.
+- **Timeout ordering.** The caller's ring call timeout (20 s) was shorter
+  than the callee's own accept-handling budget (up to 30 s), so a slow but
+  genuine accept could be reported as unreachable while the callee had
+  already joined. Raised to 40 s.
+- **Unattested attribution.** Every room decision (who joined, who replied,
+  who opened it) trusted the envelope's own `from` field, a self-claim,
+  while the station-reported publisher of each fact was discarded before it
+  reached the transcript. The publisher is now recorded and compared;
+  `participants_seen`, `mesh_say`'s reply match and `mesh_ring`'s join-wait
+  all require it to agree with `from`.
+- **Threading order.** `threadEnvelopes` mis-rooted a reply that arrived
+  before its parent inside the same read window. Now two passes, so arrival
+  order no longer matters within a page.
+- **Tap leaked on a failed publish.** `openRoom`/`joinRoom` tapped a room
+  before publishing to it; a failed publish left the tap live with no room
+  record and nothing ever untapped it. Both now untap on failure.
+- **Local relay hardening.** The Unix socket the ring handler relays
+  through, and the SQLite stores under `~/.macula-mcp` and
+  `~/.config/macula-mcp`, are now created `0700`/`0600` (previously default
+  `umask`-dependent modes), and the socket server caps line length, idle
+  time and concurrent connections.
+- Several stale doc claims fixed to match the shipped code: the identity
+  persistence model (per-session, not a throwaway temp file), the full tool
+  and prompt lists, `mesh_agents`' persistent roster, `mesh_remember`'s real
+  `add_knowledge` call, and the presence auto-start trigger list, now
+  identical everywhere it appears.
 
 ## [0.14.0] - 2026-09-02
 
@@ -755,7 +838,14 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/macula-io/macula-mcp/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/macula-io/macula-mcp/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/macula-io/macula-mcp/compare/v0.12.3...v0.13.0
+[0.12.3]: https://github.com/macula-io/macula-mcp/compare/v0.12.2...v0.12.3
+[0.12.2]: https://github.com/macula-io/macula-mcp/compare/v0.12.1...v0.12.2
+[0.12.1]: https://github.com/macula-io/macula-mcp/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/macula-io/macula-mcp/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/macula-io/macula-mcp/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/macula-io/macula-mcp/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/macula-io/macula-mcp/compare/v0.9.0...v0.9.1

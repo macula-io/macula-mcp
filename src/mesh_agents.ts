@@ -21,8 +21,9 @@ export function registerMeshAgents(server: McpServer): void {
   server.tool(
     "mesh_agents",
     "List agents seen on the mesh via their agent.hello heartbeats (started with mesh_hello). " +
-      "Reads a local cache, not a live mesh query -- only reflects agents heard from while this " +
-      "process has been running. Sorted most-recently-seen first.",
+      "Reads a persistent local SQLite roster, not a live mesh query -- it survives a restart of this " +
+      "process, but only reflects agents this identity has ever heard a hello from (entries unseen for " +
+      "15 minutes are pruned). Sorted most-recently-seen first.",
     {
       page: z.number().int().positive().default(1).describe("1-based page number."),
       page_size: z.number().int().positive().max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),

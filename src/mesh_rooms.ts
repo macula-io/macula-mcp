@@ -1,10 +1,10 @@
 // Tools: mesh_open_room / mesh_join_room / mesh_leave_room / mesh_rooms /
-// mesh_say -- the room half of PLAN_AGENT_CONVERSATIONS.md (WP1). The
-// ring half (an addressed invite delivered as a mesh_call with an
-// identity proof, answered by the callee's contact policy) is WP2 and
-// WP3; until it lands, a room reaches its other participants by being
-// announced publicly on central (public: 1) or by its topic being
-// passed along out of band.
+// mesh_say -- rooms, central and their bookkeeping. Reaching a SPECIFIC
+// agent is mesh_ring.ts (mesh_ring), an addressed invite delivered as a
+// mesh_call with an identity proof, answered by the callee's contact
+// policy (see policy.ts). A room can still be announced publicly on
+// central (public: 1) or its topic passed along out of band, for
+// whoever shows up rather than one named agent.
 //
 // Every one of these is a composition of ordinary calls (identity, then
 // publish) plus rooms.ts's own bookkeeping over lobby_observer.ts's
@@ -17,6 +17,7 @@ import { z } from "zod";
 import { defaultStation } from "./macula_cli.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
+import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC, KINDS, TALK_KINDS } from "./envelope.js";
 import { ANSWER, listRings } from "./rings.js";
@@ -115,13 +116,16 @@ export function registerMeshRooms(server: McpServer): void {
     {},
     async () => {
       try {
-        const awaiting = listRings({ direction: "out", answer: ANSWER.deferred, limit: 50 }).map((r) => ({
-          ring_id: r.ring_id,
-          to: r.peer,
-          purpose: r.purpose,
-          room_topic: r.room_topic,
-          rang_at: r.recorded_at,
-        }));
+        const me = presence.currentNodeId();
+        const awaiting = me
+          ? listRings({ self: me, direction: "out", answer: ANSWER.deferred, limit: 50 }).map((r) => ({
+              ring_id: r.ring_id,
+              to: r.peer,
+              purpose: r.purpose,
+              room_topic: r.room_topic,
+              rang_at: r.recorded_at,
+            }))
+          : [];
         return jsonContent({ ...rooms.listRooms(), rings_awaiting_answer: awaiting });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));

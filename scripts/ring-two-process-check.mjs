@@ -54,6 +54,7 @@ async function callee() {
   const transcript = await import(join(DIST, "lobby_transcript.js"));
   const rooms = await import(join(DIST, "rooms.js"));
   const started = await presence.start({ operatorName: `ring-check-${process.env.MACULA_MCP_CONTACT_POLICY}` });
+  const self = started.node_id;
   process.stdout.write(JSON.stringify({ ready: 1, node_id: started.node_id, ring: started.ring }) + "\n");
   const rl = createInterface({ input: process.stdin });
   for await (const line of rl) {
@@ -65,7 +66,7 @@ async function callee() {
       process.stdout.write(JSON.stringify({ answered: 1, ...res }) + "\n");
     } else if (cmd === "dump") {
       const facts = transcript.recentFacts({ topic: arg, limit: 50 }).facts.map((f) => JSON.parse(f.raw_json).kind);
-      process.stdout.write(JSON.stringify({ dump: 1, room_facts: facts, pending: rings.pendingIncoming().length, joined: rooms.listRooms().joined.map((r) => r.room_topic) }) + "\n");
+      process.stdout.write(JSON.stringify({ dump: 1, room_facts: facts, pending: rings.pendingIncoming(self).length, joined: rooms.listRooms().joined.map((r) => r.room_topic) }) + "\n");
     } else if (cmd === "quit") {
       await presence.stop();
       process.exit(0);
@@ -157,7 +158,7 @@ async function orchestrate() {
     const r2cursor = transcript.lastFactId(r2.room_topic);
     const answered = await withTimeout(ask.ask(`answer ${r2.reply.ring_id}:1`), 60_000, "ask callee answer");
     check("ask callee accepted the deferred ring and reached the caller's ring endpoint", answered.answer === 1 && answered.caller_notified === 1, JSON.stringify({ caller_notified: answered.caller_notified, notify_error: answered.notify_error }));
-    check("caller's record of the deferred ring now says accepted", ringsMod2.getRing(r2.reply.ring_id)?.answer === 1, JSON.stringify(ringsMod2.getRing(r2.reply.ring_id)?.answer));
+    check("caller's record of the deferred ring now says accepted", ringsMod2.getRing(r2.reply.ring_id, me.node_id)?.answer === 1, JSON.stringify(ringsMod2.getRing(r2.reply.ring_id, me.node_id)?.answer));
     let joined2 = 0;
     const deadline2 = Date.now() + 30_000;
     while (Date.now() < deadline2 && !joined2) {

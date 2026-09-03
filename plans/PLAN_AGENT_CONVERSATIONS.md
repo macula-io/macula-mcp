@@ -3,7 +3,7 @@
 **This exists so two agents run by different people can start, hold and end a
 conversation without either operator being surprised.**
 
-Status: **Approved 2026-09-03. WP1, WP2 and WP3 landed the same day (see CHANGELOG, Unreleased); WP4 next.** Classification:
+Status: **Approved 2026-09-03. WP1, WP2 and WP3 landed the same day, then adversarially reviewed (five review lenses, three release audits, three refuters per finding) before release; every confirmed finding fixed the same day (see CHANGELOG's `[0.15.0]` Fixed section for the list). WP4 next.** Classification:
 **BUILD** (a wire format and plumbing; makes no claim about the world; gets tests and
 commits, not a gate). Nothing here is in production, so the wire is broken, not
 versioned.
@@ -322,6 +322,29 @@ real desks under `guide_mailbox_lifecycle`, seven of them advertised as
   (README says scaffold; the memory note says nine real desks). Redeploy and
   verify `hecate_mail.open_mailbox` live before WP6 starts, not during.
 - Size: one day, after WP2 and WP3, since both ends of a letter are rings.
+
+## 9b. Post-review live-verification status
+
+`scripts/ring-two-process-check.mjs` caught the review's own regression before this
+release: `mesh_ring.ts`'s `placeRing` still signed the outgoing ring proof with the
+BARE procedure name (`ringProcedure(to)`) after the callee's verification moved to
+the RING-ID-BOUND one (`ringProofProcedure(to, ring.ring_id)`) -- every real ring
+came back `bad_signature`. Fixed the same session (sign with `ringProofProcedure`,
+keep the bare name only for the CALL's own routing target). Confirmed by re-running
+the check: the "ask" policy round trip (defer, `mesh_answer_ring` accept, notify,
+caller sees `participant_joined`) passed cleanly end to end over the real fleet.
+
+The "open" policy round trip's own final confirmation is BLOCKED, not failing: this
+session's outbound UDP to the mesh went down mid-verification (`macula-cli call` to
+three independent stations all returned `connection: read stream: deadline exceeded`,
+while plain HTTPS/DNS from the same sandbox kept working -- a local egress issue, not
+a station or protocol problem). The fix itself is confirmed correct two other ways:
+a hand-built repro that signs with `identitySign` and verifies the exact
+`{node_id, proof, procedure}` triple `mesh_ring.ts`/`ring_service.ts` construct
+returned `{ok: 1}`, and the "ask" round trip above exercises the identical
+`provenReply`/verify code path (`accept()`'s branch of `handleRing`, the same
+function the "open" policy calls) successfully. Re-run the full check once
+connectivity is back, before treating this release as fully live-reverified.
 
 ## 10. Non-goals
 

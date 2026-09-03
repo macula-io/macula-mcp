@@ -592,7 +592,7 @@ with NO argument schema at all skips that parse path entirely (`if
 (prompt.argsSchema) { ...parse... } else { cb(extra) }`), so zero-arg
 prompts sidestep the bug rather than trigger it. Verified live: calling
 every prompt above via a real MCP `Client`, passing no `arguments` field
-at all (the exact shape that failed before), all seven respond correctly
+at all (the exact shape that failed before), all eight respond correctly
 — re-verified again when `help_serve` was added, same result.
 
 ---

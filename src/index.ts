@@ -17,7 +17,8 @@
 // ensurePresence() is now also called at the top of every genuinely
 // mesh-touching tool below (mesh_call, mesh_publish, mesh_watch,
 // mesh_list_stations, mesh_dht, mesh_artifact, mesh_say, mesh_open_room,
-// mesh_join_room, mesh_leave_room, mesh_ring, mesh_read_inbox) -- presence starts itself the
+// mesh_join_room, mesh_leave_room, mesh_rooms, mesh_ring, mesh_answer_ring, mesh_read_inbox,
+// mesh_join_realm, mesh_recall, mesh_remember, mesh_remember_directory) -- presence starts itself the
 // first time an agent actually touches the mesh, not just when mesh_hello
 // is called. mesh_serve/mesh_unserve deliberately excluded -- see
 // presence.ts's own top comment and mesh_etiquette.ts's Serving section.
@@ -106,7 +107,8 @@ has not invited you; never write into a room they have not joined. \
 Unguessable, not encrypted: this mesh doesn't yet do payload encryption at the protocol level. \
 - Presence starts itself automatically the moment you touch the mesh at all (any mesh_call/ \
 mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/mesh_open_room/ \
-mesh_join_room/mesh_ring/mesh_read_inbox/mesh_recall/mesh_remember call) -- a periodic agent.hello heartbeat, a live roster of other agents, \
+mesh_join_room/mesh_leave_room/mesh_rooms/mesh_ring/mesh_answer_ring/mesh_read_inbox/mesh_join_realm/ \
+mesh_recall/mesh_remember/mesh_remember_directory call) -- a periodic agent.hello heartbeat, a live roster of other agents, \
 a standing watch over central and every room you open, join or see announced there \
 (mesh_read_inbox and mesh_lobby_transcript read that instantly, never block), AND your own ring \
 endpoint agent.<node_id>.ring, served so others can mesh_ring you. Your operator's contact policy \
