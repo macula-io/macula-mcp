@@ -58,7 +58,12 @@ async function callee() {
   const rl = createInterface({ input: process.stdin });
   for await (const line of rl) {
     const [cmd, arg] = line.trim().split(" ");
-    if (cmd === "dump") {
+    if (cmd === "answer") {
+      const [ringId, answer] = arg.split(":");
+      const ringService = await import(join(DIST, "ring_service.js"));
+      const res = await ringService.answerPendingRing({ ring_id: ringId, answer: answer === "2" ? 2 : 1, reason: "two-process check" });
+      process.stdout.write(JSON.stringify({ answered: 1, ...res }) + "\n");
+    } else if (cmd === "dump") {
       const facts = transcript.recentFacts({ topic: arg, limit: 50 }).facts.map((f) => JSON.parse(f.raw_json).kind);
       process.stdout.write(JSON.stringify({ dump: 1, room_facts: facts, pending: rings.pendingIncoming().length, joined: rooms.listRooms().joined.map((r) => r.room_topic) }) + "\n");
     } else if (cmd === "quit") {
@@ -122,27 +127,19 @@ async function orchestrate() {
     check("ask callee serves agent.<id>.ring", askReady.ring.serving === 1, `${askReady.node_id.slice(0, 12)}… ${askReady.ring.error ?? ""}`);
     check("three distinct identities", new Set([me.node_id, openReady.node_id, askReady.node_id]).size === 3);
 
+    const { placeRing } = await import(join(DIST, "mesh_ring.js"));
+    // The real code path mesh_ring runs, not a copy of it: open a room,
+    // record the outgoing ring, sign, call, record the answer, wait for
+    // participant_joined on acceptance.
     async function ring(to, purpose) {
-      const { room_topic } = await rooms.openRoom({ purpose, participants: [to] });
-      const args = ringsMod.buildRingArgs({ from: me.node_id, to, purpose, room_topic });
-      const procedure = ringsMod.ringProcedure(to);
-      const cursor = transcript.lastFactId(room_topic);
-      const signed = await cli.identitySign({ procedure });
-      const res = await citizenship.callThenDirect({ procedure, callArgs: citizenship.withIdentityProof({ ...args }, signed), timeoutMs: 20_000 });
-      return { room_topic, cursor, reply: ringsMod.parseRingReply(res.payload), raw: res.payload };
+      const res = await placeRing({ to, purpose, waitJoinSeconds: 30 });
+      return { room_topic: res.room_topic, ring_id: res.ring_id, unreachable: res.unreachable ?? 0, joined: res.joined ?? 0, reply: res.unreachable ? undefined : { answer: res.answer, room_topic: res.room_topic, ring_id: res.ring_id, reason: res.reason }, raw: res };
     }
 
     // 1. open policy: accepted, callee joins the room before answering
     const r1 = await withTimeout(ring(openReady.node_id, "two-process check, open policy"), 60_000, "ring open callee");
     check("open callee answers 1 accepted with the same room", r1.reply?.answer === 1 && r1.reply.room_topic === r1.room_topic, JSON.stringify(r1.raw));
-    let joined = 0;
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline && !joined) {
-      const fresh = transcript.factsAfter({ topic: r1.room_topic, afterId: r1.cursor });
-      if (fresh.some((f) => { const e = envelope.parseEnvelope(JSON.parse(f.raw_json)); return e && e.kind === "participant_joined" && e.from === openReady.node_id; })) joined = 1;
-      else await new Promise((r) => setTimeout(r, 250));
-    }
-    check("caller saw the callee's participant_joined in the room", joined === 1);
+    check("caller saw the callee's participant_joined in the room (mesh_ring's own wait)", r1.joined === 1);
     await rooms.say({ room_topic: r1.room_topic, kind: "question_asked", text: "did you get this?" });
     await new Promise((r) => setTimeout(r, 3_000));
     const dump1 = await withTimeout(open.ask(`dump ${r1.room_topic}`), 10_000, "open callee dump");
@@ -154,11 +151,28 @@ async function orchestrate() {
     const dump2 = await withTimeout(ask.ask(`dump ${r2.room_topic}`), 10_000, "ask callee dump");
     check("deferred ring is pending in the ask callee's inbox, room not joined", dump2.pending === 1 && !dump2.joined.includes(r2.room_topic), JSON.stringify(dump2));
 
+    // 2b. the ask callee's model answers the deferred ring: it joins the room, then the
+    //     answer comes back as a proven ring_answer to THIS process's own ring endpoint.
+    const ringsMod2 = ringsMod;
+    const r2cursor = transcript.lastFactId(r2.room_topic);
+    const answered = await withTimeout(ask.ask(`answer ${r2.reply.ring_id}:1`), 60_000, "ask callee answer");
+    check("ask callee accepted the deferred ring and reached the caller's ring endpoint", answered.answer === 1 && answered.caller_notified === 1, JSON.stringify({ caller_notified: answered.caller_notified, notify_error: answered.notify_error }));
+    check("caller's record of the deferred ring now says accepted", ringsMod2.getRing(r2.reply.ring_id)?.answer === 1, JSON.stringify(ringsMod2.getRing(r2.reply.ring_id)?.answer));
+    let joined2 = 0;
+    const deadline2 = Date.now() + 30_000;
+    while (Date.now() < deadline2 && !joined2) {
+      const fresh = transcript.factsAfter({ topic: r2.room_topic, afterId: r2cursor });
+      if (fresh.some((f) => { const e = envelope.parseEnvelope(JSON.parse(f.raw_json)); return e && e.kind === "participant_joined" && e.from === askReady.node_id; })) joined2 = 1;
+      else await new Promise((r) => setTimeout(r, 250));
+    }
+    check("caller saw the ask callee's participant_joined after the accept", joined2 === 1);
+    const dump2b = await withTimeout(ask.ask(`dump ${r2.room_topic}`), 10_000, "ask callee dump after answer");
+    check("ask callee is in the room and has no pending rings left", dump2b.joined.includes(r2.room_topic) && dump2b.pending === 0, JSON.stringify(dump2b));
+
     // 3. nobody serving: unreachable, not silence
     const ghost = "f".repeat(63) + "0";
-    let unreachable = 0; let reason = "";
-    try { await withTimeout(ring(ghost, "two-process check, ghost"), 60_000, "ring ghost"); } catch (e) { unreachable = 1; reason = e.message; }
-    check("ringing a node nobody serves fails loudly", unreachable === 1, reason.slice(0, 120));
+    const ghostRes = await withTimeout(ring(ghost, "two-process check, ghost"), 60_000, "ring ghost");
+    check("ringing a node nobody serves comes back unreachable, not silent", ghostRes.unreachable === 1, String(ghostRes.raw.reason).slice(0, 120));
 
     // 4. a forged proof is declined before policy
     const r4room = (await rooms.openRoom({ purpose: "forged" })).room_topic;

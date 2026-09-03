@@ -1,16 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   answerRing,
+  buildRingAnswerArgs,
   buildRingArgs,
   closeRings,
   getRing,
   listRings,
   nodeIdFromRingProcedure,
+  parseRingAnswerArgs,
+  parseRingAnswerReply,
   parseRingArgs,
   parseRingReply,
   pendingIncoming,
   recordRing,
   RingError,
+  ringAnswerProblems,
   ringProblems,
   ringProcedure,
 } from "./rings.js";
@@ -49,14 +53,31 @@ describe("buildRingArgs / ringProblems", () => {
   });
 
   it("refuses a room topic that is not a room, and booleans anywhere", () => {
-    expect(ringProblems({ ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: "agents.lobby", sent_at: 1 })).toEqual([expect.stringContaining("room_topic")]);
-    expect(ringProblems({ ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: ROOM, sent_at: 1, urgent: false })).toEqual([expect.stringContaining('boolean at "urgent"')]);
+    expect(ringProblems({ kind: "ring", ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: "agents.lobby", sent_at: 1 })).toEqual([expect.stringContaining("room_topic")]);
+    expect(ringProblems({ kind: "ring", ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: ROOM, sent_at: 1, urgent: false })).toEqual([expect.stringContaining('boolean at "urgent"')]);
+    expect(ringProblems({ ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: ROOM, sent_at: 1 })).toEqual(['kind must be "ring"']);
   });
 
   it("parses only valid args, and keeps proof fields out of the parsed shape", () => {
-    const parsed = parseRingArgs({ ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: ROOM, sent_at: 1, citizen_did: ME, proof: {} });
-    expect(parsed).toEqual({ ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: ROOM, sent_at: 1 });
+    const parsed = parseRingArgs({ kind: "ring", ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: ROOM, sent_at: 1, citizen_did: ME, proof: {} });
+    expect(parsed).toEqual({ kind: "ring", ring_id: "f".repeat(32), from: ME, to: THEM, purpose: "p", room_topic: ROOM, sent_at: 1 });
     expect(parseRingArgs({ from: ME })).toBeUndefined();
+  });
+});
+
+describe("ring answers", () => {
+  it("builds and parses an answer, and refuses a deferral as an answer", () => {
+    const a = buildRingAnswerArgs({ from: THEM, to: ME, ring_id: "f".repeat(32), answer: 2, room_topic: ROOM, reason: "busy" });
+    expect(a).toMatchObject({ kind: "ring_answer", answer: 2, reason: "busy" });
+    expect(parseRingAnswerArgs({ ...a, citizen_did: THEM, proof: {} })).toEqual(a);
+    expect(ringAnswerProblems({ ...a, answer: 3 })).toEqual([expect.stringContaining("answer must be 1")]);
+    expect(ringAnswerProblems({ ...a, kind: "ring" })).toEqual(['kind must be "ring_answer"']);
+  });
+
+  it("parses the caller's acknowledgement", () => {
+    expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: 1 })).toEqual({ ring_id: "f".repeat(32), received: 1 });
+    expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: 1, already_answered: 1 })).toMatchObject({ already_answered: 1 });
+    expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: true })).toBeUndefined();
   });
 });
 

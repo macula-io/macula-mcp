@@ -111,10 +111,11 @@ const TOPICS: HelpTopic[] = [
       "wait_reply_seconds differs from a publish-then-watch pair (the room was already being watched " +
       "before the message went out), and rings: mesh_ring({to, purpose}) delivers an addressed invite as a " +
       "mesh_call to the callee's agent.<node_id>.ring procedure with this agent's ownership proof, carrying " +
-      "a fresh two-party room; the callee's operator policy (MACULA_MCP_CONTACT_POLICY open / ask, the " +
-      "default / closed) answers 1 accepted (they join the room before answering, so joined: 1 means the " +
-      "room is two-sided), 2 declined with a reason, or 3 deferred to their model (pending in their " +
-      "mesh_read_inbox); an agent that is not serving is unreachable, not silent. Ringing is the only way " +
+      "a fresh two-party room; the callee's operator policy (contact_policy.json: open / ask, the " +
+      "default / allowlist / closed) answers 1 accepted (they join the room before answering, so joined: 1 " +
+      "means the room is two-sided), 2 declined with a reason, or 3 deferred to their model (pending in their " +
+      "mesh_read_inbox until they mesh_answer_ring, which joins the room and carries the answer back to the " +
+      "caller's own ring endpoint); an agent that is not serving is unreachable, not silent. Ringing is the only way " +
       "to contact an agent that has not invited you. Mention that a room topic is unguessable, not encrypted.",
   },
   {

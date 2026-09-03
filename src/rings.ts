@@ -40,7 +40,11 @@ export function answerLabel(a: Answer): keyof typeof ANSWER {
   return a === 1 ? "accepted" : a === 2 ? "declined" : "deferred";
 }
 
+/** What travels to agent.<node_id>.ring: a ring (the invite) or, later, the answer to a deferred one. */
+export type RingKind = "ring" | "ring_answer";
+
 export interface RingArgs {
+  kind: "ring";
   ring_id: string;
   from: string;
   to: string;
@@ -53,6 +57,7 @@ export class RingError extends Error {}
 
 export function buildRingArgs(input: { from: string; to: string; purpose: string; room_topic: string }): RingArgs {
   const args: RingArgs = {
+    kind: "ring",
     ring_id: randomBytes(16).toString("hex"),
     from: input.from,
     to: input.to,
@@ -73,6 +78,7 @@ export function ringProblems(payload: unknown): string[] {
   for (const [key, value] of Object.entries(p)) {
     if (typeof value === "boolean") problems.push(`boolean at "${key}" -- the wire has no bool type, use 0/1`);
   }
+  if (p.kind !== "ring") problems.push('kind must be "ring"');
   if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id)) problems.push("ring_id must be 32 lowercase hex chars");
   if (typeof p.from !== "string" || !HEX64.test(p.from)) problems.push("from must be a 64-hex node id");
   if (typeof p.to !== "string" || !HEX64.test(p.to)) problems.push("to must be a 64-hex node id");
@@ -88,6 +94,7 @@ export function parseRingArgs(payload: unknown): RingArgs | undefined {
   if (ringProblems(payload).length > 0) return undefined;
   const p = payload as Record<string, unknown>;
   return {
+    kind: "ring",
     ring_id: p.ring_id as string,
     from: p.from as string,
     to: p.to as string,
@@ -95,6 +102,90 @@ export function parseRingArgs(payload: unknown): RingArgs | undefined {
     room_topic: p.room_topic as string,
     sent_at: p.sent_at as number,
   };
+}
+
+/**
+ * The answer to a DEFERRED ring, travelling back the same way the ring
+ * came: a call to the original caller's own agent.<node_id>.ring with
+ * the callee's ownership proof. Only 1 accepted and 2 declined make
+ * sense here -- deferring a deferral is not an answer.
+ */
+export interface RingAnswerArgs {
+  kind: "ring_answer";
+  ring_id: string;
+  /** The callee answering. */
+  from: string;
+  /** The original caller. */
+  to: string;
+  answer: 1 | 2;
+  room_topic: string;
+  reason?: string;
+  sent_at: number;
+}
+
+export function buildRingAnswerArgs(input: { from: string; to: string; ring_id: string; answer: 1 | 2; room_topic: string; reason?: string }): RingAnswerArgs {
+  const args: RingAnswerArgs = {
+    kind: "ring_answer",
+    ring_id: input.ring_id,
+    from: input.from,
+    to: input.to,
+    answer: input.answer,
+    room_topic: input.room_topic,
+    ...(input.reason !== undefined ? { reason: input.reason } : {}),
+    sent_at: Date.now(),
+  };
+  const problems = ringAnswerProblems(args);
+  if (problems.length > 0) throw new RingError(problems.join("; "));
+  return args;
+}
+
+export function ringAnswerProblems(payload: unknown): string[] {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return ["not an object"];
+  const p = payload as Record<string, unknown>;
+  const problems: string[] = [];
+  for (const [key, value] of Object.entries(p)) {
+    if (typeof value === "boolean") problems.push(`boolean at "${key}" -- the wire has no bool type, use 0/1`);
+  }
+  if (p.kind !== "ring_answer") problems.push('kind must be "ring_answer"');
+  if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id)) problems.push("ring_id must be 32 lowercase hex chars");
+  if (typeof p.from !== "string" || !HEX64.test(p.from)) problems.push("from must be a 64-hex node id");
+  if (typeof p.to !== "string" || !HEX64.test(p.to)) problems.push("to must be a 64-hex node id");
+  if (p.answer !== 1 && p.answer !== 2) problems.push("answer must be 1 (accepted) or 2 (declined)");
+  if (typeof p.room_topic !== "string" || !isRoomTopic(p.room_topic)) problems.push("room_topic must be agents.room.<32 hex>");
+  if (p.reason !== undefined && typeof p.reason !== "string") problems.push("reason, when present, must be a string");
+  if (!Number.isInteger(p.sent_at) || (p.sent_at as number) < 0) problems.push("sent_at must be a non-negative integer (unix ms)");
+  return problems;
+}
+
+export function parseRingAnswerArgs(payload: unknown): RingAnswerArgs | undefined {
+  if (ringAnswerProblems(payload).length > 0) return undefined;
+  const p = payload as Record<string, unknown>;
+  const args: RingAnswerArgs = {
+    kind: "ring_answer",
+    ring_id: p.ring_id as string,
+    from: p.from as string,
+    to: p.to as string,
+    answer: p.answer as 1 | 2,
+    room_topic: p.room_topic as string,
+    sent_at: p.sent_at as number,
+  };
+  if (typeof p.reason === "string") args.reason = p.reason;
+  return args;
+}
+
+/** What the original caller's ring endpoint replies to a ring_answer. */
+export interface RingAnswerReply {
+  ring_id: string;
+  received: 1;
+  /** 1 when the caller had already recorded an answer for this ring; the first answer stands. */
+  already_answered?: 1;
+}
+
+export function parseRingAnswerReply(payload: unknown): RingAnswerReply | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const p = payload as Record<string, unknown>;
+  if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id) || p.received !== 1) return undefined;
+  return { ring_id: p.ring_id, received: 1, ...(p.already_answered === 1 ? { already_answered: 1 as const } : {}) };
 }
 
 export interface RingReply {

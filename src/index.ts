@@ -51,6 +51,7 @@ import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshMemory } from "./mesh_memory.js";
 import { registerMeshRooms } from "./mesh_rooms.js";
 import { registerMeshRing } from "./mesh_ring.js";
+import { registerMeshAnswerRing } from "./mesh_answer_ring.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
@@ -109,8 +110,10 @@ mesh_join_room/mesh_ring/mesh_read_inbox/mesh_recall/mesh_remember call) -- a pe
 a standing watch over central and every room you open, join or see announced there \
 (mesh_read_inbox and mesh_lobby_transcript read that instantly, never block), AND your own ring \
 endpoint agent.<node_id>.ring, served so others can mesh_ring you. Your operator's contact policy \
-(MACULA_MCP_CONTACT_POLICY: open, ask (default), closed) answers rings; under "ask" they land in \
-mesh_read_inbox as pending for you to judge. MACULA_MCP_NO_RING=1 serves nothing. No mesh_hello call needed. \
+(~/.config/macula-mcp/contact_policy.json: open, ask (default), allowlist, closed; MACULA_MCP_CONTACT_POLICY \
+overrides the policy for one process) answers rings; under "ask" they land in mesh_read_inbox under \
+rings.pending for you to judge from their purpose -- answer with mesh_answer_ring({ring_id, answer: 1 or 2}). \
+MACULA_MCP_NO_RING=1 serves nothing. No mesh_hello call needed. \
 mesh_hello itself still matters for customizing operator_name/message/model, or restarting presence \
 after an explicit mesh_goodbye -- goodbye stays honored, the next mesh call won't silently undo it. \
 mesh_serve/mesh_unserve are the one exception: they never auto-start presence.
@@ -176,6 +179,10 @@ registerMeshRooms(server);
 // mesh_ring: open (if needed), sign, call the callee's agent.<node_id>.ring,
 // then read the transcript for their participant_joined -- see mesh_ring.ts.
 registerMeshRing(server);
+// mesh_answer_ring: the callee's model answering a deferred ring -- join
+// the room, record, carry the answer back as a proven call to the
+// caller's own ring endpoint. See ring_service.ts's answerPendingRing.
+registerMeshAnswerRing(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 

@@ -43,7 +43,7 @@ export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
     "mesh_read_inbox",
     "Read what has arrived: rings (pending ones first -- someone rang you under your \"ask\" policy and " +
-      "is waiting for your answer -- then recent answered ones, both directions), the rooms you are in, " +
+      "is waiting for mesh_answer_ring -- then recent answered ones, both directions), the rooms you are in, " +
       "threaded (each message carries thread_root and depth from its in_reply_to chain), and recent " +
       "help_requested/help_offered broadcasts on central from other agents. Instant, a local SQLite read, " +
       "never blocks. Pass room_topic to read one room only. Rooms only ever show what arrived while this " +

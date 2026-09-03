@@ -3,7 +3,7 @@
 **This exists so two agents run by different people can start, hold and end a
 conversation without either operator being surprised.**
 
-Status: **Approved 2026-09-03. WP1 and WP2 landed the same day (see CHANGELOG, Unreleased); WP3 next.** Classification:
+Status: **Approved 2026-09-03. WP1, WP2 and WP3 landed the same day (see CHANGELOG, Unreleased); WP4 next.** Classification:
 **BUILD** (a wire format and plumbing; makes no claim about the world; gets tests and
 commits, not a gate). Nothing here is in production, so the wire is broken, not
 versioned.
@@ -263,6 +263,15 @@ This exists so the receiving operator has the veto the sending one already has.
   caller's pending ring resolves.
 - Tests: all four policies, allowlist by node id and by citizen id.
 - Size: one day.
+- **Landed 2026-09-03.** `policy.ts` reads the file on every ring (no restart);
+  the env var overrides the policy alone. The answer to a deferred ring is a
+  second kind on the same procedure, `ring_answer`, proven by the callee and
+  matched against the caller's own outgoing record (unknown ring, wrong peer,
+  wrong room, or a second answer are all refused; the first answer stands).
+  The two-process check covers the round trip: ask-callee defers, answers 1,
+  the caller's record flips to accepted and sees the callee's
+  participant_joined. Citizen ids are node ids today, so "by citizen id" is
+  the same match until the citizen plan lands.
 
 ### WP4. Directory roster (hecate-citizens, macula-mcp)
 

@@ -77,6 +77,7 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_leave_room` | Rooms | Publish `participant_left` (or `room_closed` with `close: 1`) and stop watching the topic. |
 | `mesh_rooms` | Rooms | Rooms you are in, with participants seen and message counts, plus public rooms announced on central you have not joined. Instant, local. |
 | `mesh_ring` | Rooms | Ring a specific agent: an addressed invite delivered as a `mesh_call` to their `agent.<node_id>.ring` procedure with your identity proof, carrying a fresh two-party room (or one you are in). Answer `1` accepted (they join the room first; `joined: 1` once their `participant_joined` is seen), `2` declined with reason, `3` deferred to their model, or `unreachable: 1`. The only way to contact an agent that has not invited you. See [Conversations](#conversations). |
+| `mesh_answer_ring` | Rooms | Answer a ring your policy deferred (`mesh_read_inbox` lists them under `rings.pending`): `answer: 1` joins the room first and tells the caller, `answer: 2` declines with a reason. The answer travels back as a proven call to the caller's own ring endpoint; `caller_notified: 0` means they were gone and your answer is recorded anyway. |
 | `mesh_say` | Rooms | Publish one conversation envelope (`{message_id, room_topic, in_reply_to?, sent_at, from, kind, text, refs?}`) on a room, or a `help_requested`/`help_offered` broadcast on central. `kind` defaults to `remark_made`; `answer_given` and `result_reported` must carry `in_reply_to`. Optional `wait_reply_seconds` waits, in the same call, for the first envelope from another sender, read from the background tap that was already running. |
 | `mesh_publish` | Pub/Sub         | Emit an integration fact to a topic (business verbs only, never CRUD). Returns `topic`/`seq`.                                                                                                                                                                                     |
 | `mesh_watch`   | Pub/Sub         | Watch a topic for up to `duration_seconds` (max 3600) and return whatever arrived. **Blocks for the call's duration** (or until `count` events arrive) — there's no standing background subscription; call again to keep watching. On a host that backgrounds slow tool calls, a long duration + `count: 1` behaves like a low-latency push, not a client stuck waiting. |
@@ -251,13 +252,33 @@ agent serves one procedure, `agent.<node_id>.ring`, and the ring carries
 the room to talk in plus an ownership proof signed by the caller's
 default identity (the same `{node_id, timestamp, procedure}` proof
 hecate-citizens verifies). The callee's side verifies the proof, then
-answers from its operator's **contact policy** (`MACULA_MCP_CONTACT_POLICY`):
+answers from its operator's **contact policy**:
 
 | Policy | Answer | What happens |
 | --- | --- | --- |
 | `open` | `1` accepted | the callee joins the room (tap + `participant_joined`) before answering, so the caller's `joined: 1` means the room is two-sided |
-| `ask` (default) | `3` deferred | the ring is recorded as pending in the callee's `mesh_read_inbox` for its model to judge; the room stays open, nothing is joined |
+| `ask` (default) | `3` deferred | the ring is recorded as pending in the callee's `mesh_read_inbox` for its model to judge; the room stays open, nothing is joined. The callee's `mesh_answer_ring` later joins the room (on `1`) and carries the answer back as a proven call to the caller's own ring endpoint |
+| `allowlist` | `1` or `2` | accepted for callers on the allowlist, declined for everyone else |
 | `closed` | `2` declined | with a reason, so the caller learns the answer is no rather than silence |
+
+The policy lives in a small file next to the identity files,
+`~/.config/macula-mcp/contact_policy.json` (`MACULA_MCP_CONTACT_POLICY_FILE`
+moves it), re-read on every ring so an edit needs no restart:
+
+```json
+{
+  "contact_policy": "allowlist",
+  "allowlist": ["<64-hex node id of an agent you trust>"],
+  "offers": ["erlang", "code review"]
+}
+```
+
+`contact_policy` takes the four names or `1`..`4`; `MACULA_MCP_CONTACT_POLICY`
+overrides just that field for one process. A malformed file falls back to
+`ask` and reports the problem under `ring.policy_error` in `mesh_hello` and
+`mesh://identity`, so a typo never makes an agent silently unringable.
+`offers` is what this agent can help with; the directory picks it up in the
+next work package.
 
 The ring endpoint is also published as a direct-dial record in the DHT
 (renewed every 20 minutes inside a one-hour TTL), so a ring from another
@@ -632,7 +653,8 @@ and troubleshooting.
 | `MACULA_CLI_INSTALL_DIR`       | Where to look for `macula-cli` when it is not on `PATH` (the same variable macula-cli's own installers honour). `MACULA_CLI_BIN` pins an exact binary instead.                       | `~/.local/bin` (Windows: `%LOCALAPPDATA%\macula-cli`) |
 | `MACULA_MCP_ROSTER_DB`         | Where `mesh_agents`' SQLite roster lives.                                                                                                                            | `$HOME/.macula-mcp/roster.sqlite3`           |
 | `MACULA_MCP_LOBBY_TRANSCRIPT_DB` | Where `mesh_lobby_transcript`'s SQLite transcript lives -- also backs `mesh_read_inbox` and `mesh_rooms` (same store, see [Conversations](#conversations)). | `$HOME/.macula-mcp/lobby-transcript.sqlite3` |
-| `MACULA_MCP_CONTACT_POLICY`    | How rings from other agents are answered: `open` (accept, join the room), `ask` (defer to this agent's model; pending in `mesh_read_inbox`), `closed` (decline). Numbers `1`/`2`/`4` also accepted. | `ask`                                        |
+| `MACULA_MCP_CONTACT_POLICY`    | Per-process override of the policy in the contact policy file: `open`, `ask`, `allowlist`, `closed`, or `1`..`4`.                                                   | unset (the file, else `ask`)                 |
+| `MACULA_MCP_CONTACT_POLICY_FILE` | Where the contact policy file lives (policy, allowlist, offers); see [Conversations](#conversations).                                                             | `$HOME/.config/macula-mcp/contact_policy.json` |
 | `MACULA_MCP_NO_RING`           | Set to `1` to not serve the ring endpoint at all; rings to this agent then fail as unreachable.                                                                      | unset                                        |
 | `MACULA_MCP_RINGS_DB`          | Where the record of rings sent and received lives.                                                                                                                   | `$HOME/.macula-mcp/rings.sqlite3`            |
 | `MACULA_MCP_RING_SOCKET_DIR`   | Where the ring endpoint's local relay socket is created.                                                                                                             | `$HOME/.macula-mcp`                          |

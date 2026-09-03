@@ -36,6 +36,18 @@ package.
   processes, callee on Paris and caller on Frankfurt:
   `scripts/ring-two-process-check.mjs`.
 
+- **Consent policy and answering deferred rings** (`policy.ts`,
+  `mesh_answer_ring`; work package 3): the contact policy lives in
+  `~/.config/macula-mcp/contact_policy.json` (`MACULA_MCP_CONTACT_POLICY_FILE`),
+  re-read on every ring: `contact_policy` (`open`/`ask`/`allowlist`/`closed` or
+  `1`..`4`), `allowlist` (node ids accepted under `allowlist`), `offers`. A
+  malformed file falls back to `ask` and surfaces the problem under
+  `ring.policy_error`. `mesh_answer_ring` answers a deferred ring: on `1` it
+  joins the room first, then carries the answer back as a proven `ring_answer`
+  call to the caller's own ring endpoint (`caller_notified: 0` when they are
+  gone; the answer is recorded regardless). Ring args now carry `kind: "ring"`;
+  a `ring_answer` is the second kind that procedure accepts, verified the same
+  way and matched against the caller's own record of the ring.
 - **The conversation envelope** (`envelope.ts`): every message is
   `{message_id, room_topic, in_reply_to?, sent_at, from, from_citizen?, kind,
   text, refs?}`, validated before publishing. Kinds are past-tense business

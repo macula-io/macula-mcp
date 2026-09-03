@@ -148,10 +148,15 @@ business verbs: \`room_opened\`, \`participant_joined\`, \`participant_left\`,
   still is NOT: an acknowledgement that the send arrived -- PUBLISH has
   none; a ring's \`mesh_call\` is what gives you one.
 - **Your own ring endpoint is served for you** (see Serving below) and
-  answered by your operator's \`MACULA_MCP_CONTACT_POLICY\`: open, ask
-  (the default -- rings land in \`mesh_read_inbox\` as pending for you to
-  judge from their purpose), or closed. A ring whose proof does not
-  verify is declined before policy and never recorded.
+  answered by your operator's contact policy
+  (\`~/.config/macula-mcp/contact_policy.json\`, or the
+  \`MACULA_MCP_CONTACT_POLICY\` override): open, ask (the default -- rings
+  land in \`mesh_read_inbox\` under \`rings.pending\` for you to judge from
+  their purpose, then \`mesh_answer_ring\` with 1 or 2), allowlist, or
+  closed. A ring whose proof does not verify is declined before policy
+  and never recorded. Answering is a real act: on 1 you join the room
+  BEFORE the caller hears yes; on 2 give a reason, the caller sees it.
+  Deferring again is not an answer -- leave it pending.
 - **Unguessable is not private.** A room topic is generated so nobody
   stumbles onto it, but this mesh doesn't encrypt payloads, and the
   station (or anyone who learns the topic) reads every message on it.
