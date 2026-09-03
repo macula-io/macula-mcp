@@ -7,12 +7,11 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
-**Not yet requiring a new macula-cli minimum**: this depends on macula-cli's
-own `-seed` flag (pushed to macula-cli's `master`, not yet tagged/released as
-of this entry). `MIN_MACULA_CLI_VERSION` stays at 0.5.1 until a macula-cli
-release actually ships `-seed` -- bumping it early would tell fresh installs
-to fetch a "latest" release that still doesn't have it, then fail the version
-check again right after "fixing" it.
+**Requires macula-cli 0.6.0 or newer** (`MIN_MACULA_CLI_VERSION` bumped from
+0.5.1), released alongside this entry: 0.5.1 and earlier don't recognize the
+`-seed` flag at all, so any of this server's own `-seed` args against an
+older binary fails with "flag provided but not defined: -seed" the moment
+`MACULA_MESH_STATIONS` names more than one station.
 
 ### Added
 - `MACULA_MESH_STATIONS` (comma-separated): every direct-dial tool call and

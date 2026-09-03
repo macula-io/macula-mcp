@@ -551,8 +551,19 @@ export function watchTopicOnDaemon(
  * crosses LARGE_PAYLOAD_THRESHOLD_BYTES (e.g.
  * hecate-rag.upload_knowledge with a real document) would fail on an
  * older binary once this fallback tries to use a flag it doesn't have.
+ *
+ * Bumped to 0.6.0 for stationArgs()'s -seed fallback flags (this file)
+ * and startDaemon()'s seedFlags parameter: every -seed flag this
+ * server now attaches to a direct-dial call or a `daemon start` is new
+ * in that release -- an older binary's flag parser doesn't know -seed
+ * at all and would fail every such call with "flag provided but not
+ * defined: -seed" the moment MACULA_MESH_STATIONS names more than one
+ * station. 0.6.0 also fixed daemon start to redial and replay its own
+ * state (advertisements, subscriptions) instead of going deaf when its
+ * connection dies -- the actual point of setting more than one station
+ * in the first place.
  */
-export const MIN_MACULA_CLI_VERSION = "0.5.1";
+export const MIN_MACULA_CLI_VERSION = "0.6.0";
 
 export interface CliVersionCheck {
   ok: boolean;

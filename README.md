@@ -473,7 +473,7 @@ heartbeat, and it uses its own separate identity anyway (see
 [Environment](#environment)). `-exec`, the only registration mode that
 computes a reply per call instead of a fixed one, needed macula-cli
 >= 0.3.0 when it shipped; the package's actual floor today is the
-0.5.1 the ring endpoint below requires (see [Status](#status)).
+0.6.0 -seed/reconnect support requires (see [Status](#status)).
 
 **The one procedure served without asking.** Presence serves
 `agent.<node_id>.ring`, this agent's ring endpoint (see
@@ -563,7 +563,7 @@ For a HUMAN in the conversation, not the agent — surfaces as a slash command i
 
 - Node.js 20+ (the one thing the installer below checks but won't install for
   you — get it from [nodejs.org](https://nodejs.org), nvm, fnm, or volta).
-- `macula-cli` 0.5.1 or newer — the installer below fetches it if it's missing
+- `macula-cli` 0.6.0 or newer — the installer below fetches it if it's missing
   or too old (see [Status](#status)); an older binary is unringable, silently,
   until `mesh_hello` reports it under `ring.error`.
 
@@ -672,7 +672,10 @@ and troubleshooting.
 
 ## Status
 
-**Current release: v0.15.0.** Requires macula-cli **0.5.1** or newer — `mesh_call` transparently falls back to a
+**Current release: v0.15.0.** Requires macula-cli **0.6.0** or newer — every direct-dial tool call and the
+internal presence/serve/lobby-observer daemons now dial a primary station plus fallbacks
+(`MACULA_MESH_STATIONS`) instead of exactly one with no recourse if it's down; a daemon also redials and
+replays its own state if its connection dies. `mesh_call` also transparently falls back to a
 temp-file `--args-file` for any payload at or above 32KB (needed for
 `hecate-rag.upload_knowledge`'s raw document text, which can exceed a
 safe command-line length), and `mesh_remember_directory` ingests every
