@@ -33,7 +33,7 @@
 // Opt out with MACULA_MCP_NO_CITIZENSHIP=1: registering puts this agent
 // in a public directory, same category of decision as presence's own
 // agent.hello broadcast (see presence.ts on why that is on by default).
-import { call, defaultStation, discoverProcedureRealm, identitySign } from "./macula_cli.js";
+import { call, discoverProcedureRealm, identitySign } from "./macula_cli.js";
 
 export const REGISTER_PROCEDURE = "hecate_citizens.register_presence";
 export const CITIZEN_KIND = "agent";
@@ -60,7 +60,13 @@ export interface CitizenshipStatus {
 }
 
 interface CitizenshipState {
-  host: string;
+  // Deliberately the ORIGINAL possibly-undefined override, not
+  // resolved via defaultStation() here -- discoverProcedureRealm/call's
+  // own stationArgs() resolution needs the real absence of a host to
+  // attach -seed fallbacks to each periodic renewal; a pre-resolved
+  // string looks exactly like an explicit override and would silently
+  // lose them.
+  host?: string;
   nodeId: string;
   displayName: string;
   realm?: string;
@@ -161,7 +167,7 @@ export async function callThenDirect(args: Parameters<typeof call>[0]): Promise<
 }
 
 /** One registration attempt against the directory. Throws on any failure; callers record, never propagate. */
-export async function register(input: { host: string; nodeId: string; displayName: string }): Promise<{ realm: string; expires_at?: number }> {
+export async function register(input: { host?: string; nodeId: string; displayName: string }): Promise<{ realm: string; expires_at?: number }> {
   const realm = await discoverProcedureRealm({ host: input.host, procedure: REGISTER_PROCEDURE });
   const signed = await identitySign({ procedure: REGISTER_PROCEDURE });
   if (signed.node_id !== input.nodeId) {
@@ -223,7 +229,7 @@ export async function start(input: {
   }
   stop();
   const renewSeconds = Math.max(30, input.renewSeconds ?? DEFAULT_RENEW_SECONDS);
-  state = { host: input.host ?? defaultStation(), nodeId: input.nodeId, displayName: input.displayName, renewSeconds, inFlight: false };
+  state = { host: input.host, nodeId: input.nodeId, displayName: input.displayName, renewSeconds, inFlight: false };
   await withTimeout(attempt(), FIRST_ATTEMPT_TIMEOUT_MS);
   const timer = setInterval(() => void attempt(), renewSeconds * 1000);
   timer.unref();

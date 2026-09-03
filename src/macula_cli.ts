@@ -22,9 +22,67 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-/** The station this server targets when a tool call doesn't override it. */
+/**
+ * Fallback stations used when neither MACULA_MESH_STATIONS nor the
+ * older MACULA_MESH_STATION is set -- the existing default first, then
+ * two more spanning both providers in the demo fleet's own topology
+ * (topologies/eu/stations.csv in macula-demo), per this project's own
+ * "at least 3 seeds" convention for anything that needs to stay
+ * reachable.
+ */
+const DEFAULT_STATIONS = [
+  "station-de-frankfurt.macula.io:4433",
+  "station-de-nuremberg.macula.io:4433",
+  "station-de-falkenstein.macula.io:4433",
+];
+
+/**
+ * The stations this server dials when a tool call doesn't override
+ * `host` -- the first entry is the primary (what shows up in every
+ * tool schema's "Defaults to X" text and in defaultStation() below),
+ * the rest are fallbacks macula-cli tries in order, via its own
+ * -seed flag, if the primary doesn't answer (see stationArgs). Reads
+ * MACULA_MESH_STATIONS (comma-separated) first; the older singular
+ * MACULA_MESH_STATION still works as a one-element list, so nothing
+ * that already sets it breaks.
+ */
+export function defaultStations(): string[] {
+  const list = process.env.MACULA_MESH_STATIONS;
+  if (list) {
+    const parsed = list
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (parsed.length > 0) return parsed;
+  }
+  const single = process.env.MACULA_MESH_STATION;
+  if (single) return [single];
+  return DEFAULT_STATIONS;
+}
+
+/** The single station this server targets when a tool call doesn't override it -- defaultStations()[0]. */
 export function defaultStation(): string {
-  return process.env.MACULA_MESH_STATION ?? "station-de-frankfurt.macula.io:4433";
+  return defaultStations()[0];
+}
+
+/**
+ * Resolves one direct-dial command's host positional plus its -seed
+ * fallback flags. An explicit host (the caller passed one, however it
+ * got there -- a tool argument, or another module's own already-
+ * resolved default) is used exactly as given, with no fallback
+ * attached, matching macula-cli's own single-host behavior when a
+ * user passes a host by hand. Otherwise the primary of
+ * defaultStations() becomes the positional and every remaining entry
+ * becomes a -seed flag.
+ *
+ * seedFlags MUST land in argv()'s `flags` array, never `positionals`
+ * -- -seed is a flag, and argv()'s own doc explains why a flag placed
+ * after the first positional is silently dropped by Go's flag package.
+ */
+export function stationArgs(host?: string): { host: string; seedFlags: string[] } {
+  if (host) return { host, seedFlags: [] };
+  const [primary, ...fallbacks] = defaultStations();
+  return { host: primary, seedFlags: fallbacks.flatMap((s) => ["-seed", s]) };
 }
 
 /**
@@ -320,15 +378,21 @@ function execFile(
 
 /**
  * Starts a `macula-cli daemon start` child process and resolves once it
- * reports readiness -- shared between presence.ts and serve.ts, the two
- * modules that each hold one such daemon open for as long as they need
- * their own standing capability (subscriptions, or served procedures).
- * Each caller passes its OWN identity path and socket name; this
- * function has no opinion on either, matching the existing "identity
- * per concern" pattern the rest of this file already establishes.
+ * reports readiness -- shared between presence.ts, serve.ts, and
+ * lobby_observer.ts, the modules that each hold one such daemon open
+ * for as long as they need their own standing capability
+ * (subscriptions, or served procedures). Each caller passes its OWN
+ * identity path and socket name; this function has no opinion on
+ * either, matching the existing "identity per concern" pattern the
+ * rest of this file already establishes. seedFlags (from stationArgs)
+ * are macula-cli's own -seed fallback stations, so THIS daemon --
+ * which stays open indefinitely, unlike a one-shot command -- can
+ * redial and keep running if its current station goes down instead of
+ * silently going deaf until something restarts it by hand.
  */
 export function startDaemon(
   host: string,
+  seedFlags: string[],
   identityPath: string,
   socketName: string,
 ): Promise<ChildProcessWithoutNullStreams> {
@@ -341,6 +405,7 @@ export function startDaemon(
       identityPath,
       "-socket-name",
       socketName,
+      ...seedFlags,
       host,
     ]) as ChildProcessWithoutNullStreams;
 
@@ -593,14 +658,18 @@ export const identitySign = (args: { procedure: string }): Promise<IdentitySignR
  * other way to learn its realm than from its own advertisement.
  */
 export async function discoverProcedureRealm(args: { host?: string; procedure: string }): Promise<string> {
-  const host = args.host ?? defaultStation();
-  const discovered = await findRecordsByType({ host, recordType: "procedure_advertisement" });
+  // args.host is passed through as-is (not pre-resolved via
+  // defaultStation()) so findRecordsByType's own stationArgs()
+  // resolution attaches -seed fallbacks when the caller didn't ask for
+  // a specific host -- an explicit override still behaves exactly as
+  // before.
+  const discovered = await findRecordsByType({ host: args.host, recordType: "procedure_advertisement" });
   const match = discovered.records.find((r) => r.procedure_advertisement?.procedure === args.procedure);
   const realm = match?.procedure_advertisement?.realm;
   if (!realm) {
     throw new Error(
       `${args.procedure} is not currently advertised on the mesh (checked ${discovered.count} procedure_advertisement ` +
-        `record(s) visible from ${host})`,
+        `record(s) visible from ${args.host ?? defaultStation()})`,
     );
   }
   return realm;
@@ -696,11 +765,12 @@ export const call = async (rawArgs: {
   direct?: boolean;
 }): Promise<CallResult> => {
   const args = { ...rawArgs, ...splitRealmPrefix(rawArgs.procedure, rawArgs.realm) };
-  const flags: string[] = ["--identity", defaultIdentityPath()];
+  const { host, seedFlags } = stationArgs(args.host);
+  const flags: string[] = ["--identity", defaultIdentityPath(), ...seedFlags];
   if (args.timeoutMs) flags.push("--timeout", `${Math.max(1, Math.round(args.timeoutMs / 1000))}s`);
   if (args.realm) flags.push("--realm", args.realm);
   if (args.direct) flags.push("--direct");
-  const positionals = [args.host ?? defaultStation(), args.procedure];
+  const positionals = [host, args.procedure];
 
   const { flags: argsFlags, cleanup } = await resolveCallArgsFlags(args.callArgs);
   try {
@@ -721,9 +791,10 @@ export const publish = (args: {
   fact: Record<string, unknown>;
   realm?: string;
 }): Promise<PublishResult> => {
-  const flags: string[] = ["--identity", defaultIdentityPath(), "--payload", JSON.stringify(args.fact)];
+  const { host, seedFlags } = stationArgs(args.host);
+  const flags: string[] = ["--identity", defaultIdentityPath(), "--payload", JSON.stringify(args.fact), ...seedFlags];
   if (args.realm) flags.push("--realm", args.realm);
-  return run<PublishResult>(argv(["pubsub", "publish"], flags, [args.host ?? defaultStation(), args.topic]));
+  return run<PublishResult>(argv(["pubsub", "publish"], flags, [host, args.topic]));
 };
 
 export interface ServeRegisterResult {
@@ -854,10 +925,11 @@ export const watch = async (args: {
   count?: number;
   realm?: string;
 }): Promise<WatchEvent[]> => {
-  const flags = ["--identity", watchIdentityPath(), "--duration", `${Math.max(1, Math.round(args.durationSeconds))}s`];
+  const { host, seedFlags } = stationArgs(args.host);
+  const flags = ["--identity", watchIdentityPath(), "--duration", `${Math.max(1, Math.round(args.durationSeconds))}s`, ...seedFlags];
   if (args.count) flags.push("--count", String(args.count));
   if (args.realm) flags.push("--realm", args.realm);
-  const full = argv(["pubsub", "watch"], flags, [args.host ?? defaultStation(), args.topic]);
+  const full = argv(["pubsub", "watch"], flags, [host, args.topic]);
 
   const { stdout, stderr, code } = await execFile(binPath(), full);
   const events = parseWatchOutput(stdout);
@@ -901,20 +973,24 @@ export interface FindRecordResult {
   found: boolean;
   record?: DhtRecord;
 }
-export const findRecord = (args: { host?: string; keyHex: string }): Promise<FindRecordResult> =>
-  run<FindRecordResult>(
-    argv(["dht", "find-record"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), args.keyHex]),
+export const findRecord = (args: { host?: string; keyHex: string }): Promise<FindRecordResult> => {
+  const { host, seedFlags } = stationArgs(args.host);
+  return run<FindRecordResult>(
+    argv(["dht", "find-record"], ["--identity", defaultIdentityPath(), ...seedFlags], [host, args.keyHex]),
   );
+};
 
 export interface FindRecordsResult {
   host: string;
   count: number;
   records: DhtRecord[];
 }
-export const findRecords = (args: { host?: string; keyHex: string }): Promise<FindRecordsResult> =>
-  run<FindRecordsResult>(
-    argv(["dht", "find-records"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), args.keyHex]),
+export const findRecords = (args: { host?: string; keyHex: string }): Promise<FindRecordsResult> => {
+  const { host, seedFlags } = stationArgs(args.host);
+  return run<FindRecordsResult>(
+    argv(["dht", "find-records"], ["--identity", defaultIdentityPath(), ...seedFlags], [host, args.keyHex]),
   );
+};
 
 export interface FindRecordsByTypeResult {
   host: string;
@@ -922,14 +998,16 @@ export interface FindRecordsByTypeResult {
   count: number;
   records: DhtRecord[];
 }
-export const findRecordsByType = (args: { host?: string; recordType: string }): Promise<FindRecordsByTypeResult> =>
-  run<FindRecordsByTypeResult>(
+export const findRecordsByType = (args: { host?: string; recordType: string }): Promise<FindRecordsByTypeResult> => {
+  const { host, seedFlags } = stationArgs(args.host);
+  return run<FindRecordsByTypeResult>(
     argv(
       ["dht", "find-records-by-type"],
-      ["--identity", defaultIdentityPath()],
-      [args.host ?? defaultStation(), args.recordType],
+      ["--identity", defaultIdentityPath(), ...seedFlags],
+      [host, args.recordType],
     ),
   );
+};
 
 export interface ArtifactPutResult {
   mcid_hex: string;
@@ -939,12 +1017,13 @@ export const artifactPut = async (args: {
   host?: string;
   contentBase64: string;
 }): Promise<ArtifactPutResult> => {
+  const { host, seedFlags } = stationArgs(args.host);
   const dir = await mkdtemp(join(tmpdir(), "macula-mcp-put-"));
   const filePath = join(dir, "artifact");
   try {
     await writeFile(filePath, Buffer.from(args.contentBase64, "base64"));
     const result = await run<{ host: string; mcid: string; size_bytes: number; duration_ms: number }>(
-      argv(["content", "put"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), filePath]),
+      argv(["content", "put"], ["--identity", defaultIdentityPath(), ...seedFlags], [host, filePath]),
     );
     return { mcid_hex: result.mcid, size_bytes: result.size_bytes };
   } finally {
@@ -957,13 +1036,14 @@ export interface ArtifactGetResult {
   size_bytes: number;
 }
 export const artifactGet = async (args: { host?: string; mcidHex: string }): Promise<ArtifactGetResult> => {
+  const { host, seedFlags } = stationArgs(args.host);
   const result = await run<{
     host: string;
     mcid: string;
     size_bytes: number;
     content_base64?: string;
     duration_ms: number;
-  }>(argv(["content", "get"], ["--identity", defaultIdentityPath()], [args.host ?? defaultStation(), args.mcidHex]));
+  }>(argv(["content", "get"], ["--identity", defaultIdentityPath(), ...seedFlags], [host, args.mcidHex]));
   if (!result.content_base64) {
     throw new MaculaCliUnavailable("macula-cli content get returned no content_base64 (unexpected)");
   }

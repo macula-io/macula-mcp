@@ -25,12 +25,12 @@ import { randomBytes } from "node:crypto";
 import {
   daemonStatus,
   daemonStop,
-  defaultStation,
   onShutdown,
   serveIdentityPath,
   serveRegister,
   serveUnregister,
   startDaemon,
+  stationArgs,
 } from "./macula_cli.js";
 
 interface ServeState {
@@ -45,13 +45,37 @@ export function isActive(): boolean {
   return state !== undefined;
 }
 
-async function ensureDaemon(host: string): Promise<ServeState> {
+async function ensureDaemon(host: string, seedFlags: string[]): Promise<ServeState> {
   if (state) return state;
   const socketName = `mcp-serve-${process.pid}-${randomBytes(4).toString("hex")}`;
-  const daemon = await startDaemon(host, serveIdentityPath(), socketName);
-  state = { host, socketName, daemon };
+  const daemon = await startDaemon(host, seedFlags, serveIdentityPath(), socketName);
+  const newState: ServeState = { host, socketName, daemon };
+  state = newState;
   onShutdown(stopSync);
+  watchForUnexpectedDeath(newState);
   return state;
+}
+
+/**
+ * The daemon dying on its own (crash, killed externally, lost
+ * connection with no seed able to recover it) used to leave `state`
+ * set with nothing to notice -- presence.ts's own watchForUnexpectedDeath
+ * hit exactly this for its daemon/watchers (2026-09-02); this is the
+ * same fix, applied here too. Clears `state` via stopSync() so the
+ * next mesh_serve call starts a fresh daemon instead of talking to a
+ * control socket nothing is listening on anymore. `forState` is closed
+ * over, not read from the module-level `state`, so a handler
+ * registered against an OLD state never acts on one that's already
+ * been superseded or deliberately stopped.
+ */
+function watchForUnexpectedDeath(forState: ServeState): void {
+  const onDeath = () => {
+    if (state !== forState) return;
+    console.error("serve: daemon exited unexpectedly -- marking serve inactive so the next mesh_serve restarts it cleanly");
+    stopSync();
+  };
+  forState.daemon.on("exit", onDeath);
+  forState.daemon.on("error", onDeath);
 }
 
 /**
@@ -87,8 +111,8 @@ export interface ServeResult {
 
 /** Registers procedure against this process's own serve-daemon, starting it first if needed. */
 export async function serve(args: ServeArgs): Promise<ServeResult> {
-  const host = args.host ?? defaultStation();
-  const s = await ensureDaemon(host);
+  const { host, seedFlags } = stationArgs(args.host);
+  const s = await ensureDaemon(host, seedFlags);
   const registerResult = await serveRegister({
     socketName: s.socketName,
     procedure: args.procedure,

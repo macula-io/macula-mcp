@@ -55,7 +55,7 @@
 
 import { randomBytes } from "node:crypto";
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
-import { defaultStation, identity, observeIdentityPath, onShutdown, startDaemon, watchTopicOnDaemon } from "./macula_cli.js";
+import { identity, observeIdentityPath, onShutdown, startDaemon, stationArgs, watchTopicOnDaemon } from "./macula_cli.js";
 import { recordFact } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "./envelope.js";
 
@@ -129,12 +129,12 @@ function doStartAlreadyActive(args: StartArgs): StartResult {
 
 async function doStart(args: StartArgs): Promise<StartResult> {
   if (state) return doStartAlreadyActive(args);
-  const host = args.host ?? defaultStation();
+  const { host, seedFlags } = stationArgs(args.host);
   const maxRooms = Math.max(1, args.maxRooms ?? DEFAULT_MAX_ROOMS);
 
   const { node_id: nodeId } = await identity();
   const socketName = `observe-${process.pid}-${randomBytes(4).toString("hex")}`;
-  const daemon = await startDaemon(host, observeIdentityPath(), socketName);
+  const daemon = await startDaemon(host, seedFlags, observeIdentityPath(), socketName);
   const roomTaps = new Map<string, RoomTap>();
 
   // Built before `state` exists, same order presence.ts uses for its own

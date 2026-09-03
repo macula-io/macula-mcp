@@ -223,7 +223,14 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
   }
   server.unref();
   const procedure = ringProcedure(args.nodeId);
-  const registration = { procedure, exec: handlerCommand(socketPath), execTimeoutSeconds: HANDLER_TIMEOUT_SECONDS, host, direct: true, ttlSeconds: DIRECT_DIAL_TTL_SECONDS };
+  // registration.host is args.host (the original, possibly undefined
+  // override), not the locally-resolved `host` above -- serve.serve's
+  // own stationArgs() resolution needs the real absence of an override
+  // to attach its own -seed fallbacks; a pre-resolved string looks
+  // exactly like an explicit one and would silently lose them. Both
+  // resolve to the identical primary station either way (stationArgs
+  // is a pure function of the same env vars `host` above already read).
+  const registration = { procedure, exec: handlerCommand(socketPath), execTimeoutSeconds: HANDLER_TIMEOUT_SECONDS, host: args.host, direct: true, ttlSeconds: DIRECT_DIAL_TTL_SECONDS };
   try {
     await serve.serve(registration);
   } catch (e) {

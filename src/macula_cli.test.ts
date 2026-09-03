@@ -9,12 +9,15 @@ import {
   MaculaCliError,
   binPath,
   defaultIdentityPath,
+  defaultStation,
+  defaultStations,
   installedCliCandidates,
   extractSemver,
   isOlder,
   parseWatchOutput,
   resolveCallArgsFlags,
   serveIdentityPath,
+  stationArgs,
   watchIdentityPath,
 } from "./macula_cli.js";
 
@@ -192,6 +195,70 @@ describe("resolveCallArgsFlags", () => {
     const { cleanup } = await resolveCallArgsFlags({ small: true });
     await expect(cleanup()).resolves.toBeUndefined();
     await expect(cleanup()).resolves.toBeUndefined();
+  });
+});
+
+describe("defaultStations / stationArgs", () => {
+  const saved = { list: process.env.MACULA_MESH_STATIONS, single: process.env.MACULA_MESH_STATION };
+  afterEach(() => {
+    for (const [k, v] of [["MACULA_MESH_STATIONS", saved.list], ["MACULA_MESH_STATION", saved.single]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("falls back to the built-in 3-station default when neither env var is set", () => {
+    delete process.env.MACULA_MESH_STATIONS;
+    delete process.env.MACULA_MESH_STATION;
+    const stations = defaultStations();
+    expect(stations).toHaveLength(3);
+    expect(stations[0]).toBe("station-de-frankfurt.macula.io:4433");
+    expect(defaultStation()).toBe(stations[0]);
+  });
+
+  it("MACULA_MESH_STATIONS (comma-separated) is preferred and parsed in order", () => {
+    process.env.MACULA_MESH_STATIONS = "a.example:4433, b.example:4433 ,c.example:4433";
+    delete process.env.MACULA_MESH_STATION;
+    expect(defaultStations()).toEqual(["a.example:4433", "b.example:4433", "c.example:4433"]);
+    expect(defaultStation()).toBe("a.example:4433");
+  });
+
+  it("the older singular MACULA_MESH_STATION still works as a one-element list", () => {
+    delete process.env.MACULA_MESH_STATIONS;
+    process.env.MACULA_MESH_STATION = "legacy.example:4433";
+    expect(defaultStations()).toEqual(["legacy.example:4433"]);
+    expect(defaultStation()).toBe("legacy.example:4433");
+  });
+
+  it("MACULA_MESH_STATIONS takes priority over the older singular var when both are set", () => {
+    process.env.MACULA_MESH_STATIONS = "a.example:4433,b.example:4433";
+    process.env.MACULA_MESH_STATION = "legacy.example:4433";
+    expect(defaultStations()).toEqual(["a.example:4433", "b.example:4433"]);
+  });
+
+  it("an empty MACULA_MESH_STATIONS falls through to MACULA_MESH_STATION rather than resolving to []", () => {
+    process.env.MACULA_MESH_STATIONS = "";
+    process.env.MACULA_MESH_STATION = "legacy.example:4433";
+    expect(defaultStations()).toEqual(["legacy.example:4433"]);
+  });
+
+  it("stationArgs with no explicit host uses the primary as the positional and every remaining station as a -seed flag", () => {
+    process.env.MACULA_MESH_STATIONS = "a.example:4433,b.example:4433,c.example:4433";
+    delete process.env.MACULA_MESH_STATION;
+    expect(stationArgs(undefined)).toEqual({
+      host: "a.example:4433",
+      seedFlags: ["-seed", "b.example:4433", "-seed", "c.example:4433"],
+    });
+  });
+
+  it("stationArgs with a single configured station attaches no -seed flags", () => {
+    process.env.MACULA_MESH_STATIONS = "only.example:4433";
+    expect(stationArgs(undefined)).toEqual({ host: "only.example:4433", seedFlags: [] });
+  });
+
+  it("stationArgs with an explicit host override attaches no fallback, even with multiple stations configured", () => {
+    process.env.MACULA_MESH_STATIONS = "a.example:4433,b.example:4433,c.example:4433";
+    expect(stationArgs("explicit.example:4433")).toEqual({ host: "explicit.example:4433", seedFlags: [] });
   });
 });
 

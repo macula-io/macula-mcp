@@ -5,6 +5,33 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+**Not yet requiring a new macula-cli minimum**: this depends on macula-cli's
+own `-seed` flag (pushed to macula-cli's `master`, not yet tagged/released as
+of this entry). `MIN_MACULA_CLI_VERSION` stays at 0.5.1 until a macula-cli
+release actually ships `-seed` -- bumping it early would tell fresh installs
+to fetch a "latest" release that still doesn't have it, then fail the version
+check again right after "fixing" it.
+
+### Added
+- `MACULA_MESH_STATIONS` (comma-separated): every direct-dial tool call and
+  the internal presence/serve/lobby-observer daemons now dial a primary
+  station plus fallbacks (macula-cli's own `-seed`), instead of exactly one
+  station with no recourse if it's down. The older singular
+  `MACULA_MESH_STATION` still works, treated as a one-element list. Default,
+  when neither is set, is the existing primary plus two more from the demo
+  fleet spanning both providers (frankfurt, nuremberg, falkenstein).
+  Presence/serve/lobby-observer's daemons benefit the most: macula-cli's
+  `daemon start` now redials and replays (re-advertises registered
+  procedures, re-subscribes topics) if its connection dies, so a station
+  restart no longer silently takes one of these off the mesh until
+  something restarts it by hand.
+- `serve.ts` now notices its daemon dying unexpectedly and marks itself
+  inactive so the next `mesh_serve` call restarts it cleanly, mirroring the
+  fix `presence.ts`'s own `watchForUnexpectedDeath` already had (2026-09-02)
+  -- serve.ts was missing the equivalent listener entirely.
+
 ## [0.15.0] - 2026-09-03
 
 Work packages 1 to 3 of [`plans/PLAN_AGENT_CONVERSATIONS.md`](plans/PLAN_AGENT_CONVERSATIONS.md):

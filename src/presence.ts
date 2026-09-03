@@ -70,12 +70,12 @@ import { randomBytes } from "node:crypto";
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
-  defaultStation,
   identity,
   onShutdown,
   presenceIdentityPath,
   publish,
   startDaemon,
+  stationArgs,
   watchTopicOnDaemon,
 } from "./macula_cli.js";
 import { removeAgent, upsertAgent } from "./roster.js";
@@ -217,7 +217,7 @@ export function start(args: StartArgs): Promise<StartResult> {
 
 async function doStart(args: StartArgs): Promise<StartResult> {
   explicitlyLeft = false;
-  const host = args.host ?? defaultStation();
+  const { host, seedFlags } = stationArgs(args.host);
   const intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, args.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
 
   if (state) {
@@ -250,7 +250,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   const { node_id: nodeId } = await identity();
   const socketName = `presence-${process.pid}-${randomBytes(4).toString("hex")}`;
 
-  const daemon = await startDaemon(host, presenceIdentityPath(), socketName);
+  const daemon = await startDaemon(host, seedFlags, presenceIdentityPath(), socketName);
   const watchers = [
     watchTopicOnDaemon(socketName, HELLO_TOPIC, (evt) => {
       const payload = evt as Record<string, unknown>;
@@ -278,8 +278,13 @@ async function doStart(args: StartArgs): Promise<StartResult> {
 
   // Own daemon, own identity, own socket (see lobby_observer.ts) --
   // this just starts and stops it alongside presence's own lifecycle,
-  // the same way mesh_observe_lobby.ts itself would.
-  await lobbyObserver.start({ host });
+  // the same way mesh_observe_lobby.ts itself would. Passes args.host
+  // through as-is (not the already-resolved `host` above) so lobby
+  // observer's own stationArgs() resolution attaches its own -seed
+  // fallbacks when no explicit override was given -- stationArgs is a
+  // pure function of the same env vars, so this resolves to the
+  // identical primary either way, just with fallback flags attached.
+  await lobbyObserver.start({ host: args.host });
 
   const newState: PresenceState = {
     nodeId,
@@ -302,7 +307,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   // timeouts and never fatal -- an agent that cannot be rung is still
   // present, and mesh_hello reports why under `ring`.
   try {
-    await ringService.start({ host, nodeId });
+    await ringService.start({ host: args.host, nodeId });
   } catch (e) {
     console.error(`presence: ring service failed to start: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -311,7 +316,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   // Visible (hello) first, then a citizen: registration is bounded and
   // never fails presence -- see citizenship.ts.
   const citizen = await citizenship.start({
-    host,
+    host: args.host,
     nodeId,
     displayName: citizenship.displayName(args.operatorName, args.connectedVia, realm.orgHandle(nodeId)),
   });
