@@ -9,11 +9,16 @@
 // that runs the same installer the top-level bootstrapper already uses.
 //
 // DOESN'T RUN AT ALL on npm v12+ unless the install itself passed
-// `--allow-scripts=@macula-io/mcp,better-sqlite3` -- npm v12 (2026-07) disabled
+// `--allow-scripts=@macula-io/mcp` -- npm v12 (2026-07) disabled
 // install-time lifecycle scripts by default, silently: no error, this
 // file just never executes. install.sh/install.ps1 pass the flag; a
 // manual `npm install -g @macula-io/mcp` needs it added by hand. See
 // guides/HOWTO.md's "Troubleshooting the install" section.
+//
+// (better-sqlite3 used to be named in this same flag too, for its own
+// native-module install script -- gone since the 0.17.0 migration to
+// node:sqlite, Node's own built-in binding, which has no install script
+// of its own to unblock. See CHANGELOG.md.)
 //
 // Committed as plain JS, not compiled from src/ -- this must run before
 // `npm run build` has ever produced dist/ (this repo's own `npm ci` hits

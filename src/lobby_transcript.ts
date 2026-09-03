@@ -18,22 +18,22 @@
 // somewhere read-only for audit, transcript still writable) shouldn't
 // need to fight over one file.
 
-import Database from "better-sqlite3";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 function dbPath(): string {
   return process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB ?? join(homedir(), ".macula-mcp", "lobby-transcript.sqlite3");
 }
 
-let db: Database.Database | undefined;
+let db: DatabaseSync | undefined;
 
-function open(): Database.Database {
+function open(): DatabaseSync {
   if (db) return db;
   const path = dbPath();
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  db = new Database(path);
+  db = new DatabaseSync(path);
   if (path !== ":memory:") {
     try {
       chmodSync(path, 0o600); // room transcripts are this operator's, not every local user's
@@ -41,7 +41,13 @@ function open(): Database.Database {
       // best effort
     }
   }
-  db.pragma("journal_mode = WAL");
+  db.exec("PRAGMA journal_mode = WAL");
+  // better-sqlite3 defaulted its busy timeout to 5000ms; node:sqlite
+  // defaults to 0, which throws "database is locked" immediately on any
+  // write collision instead of waiting -- a real regression, since
+  // multiple room/lobby watchers on this process (and on other sessions
+  // sharing this machine) can record a fact at the same instant.
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS observed_facts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,12 +122,17 @@ export interface TranscriptPage {
 export function recentFacts(args: { topic?: string; limit: number }): TranscriptPage {
   const d = open();
   const where = args.topic ? "WHERE topic = @topic" : "";
+  // node:sqlite rejects a bind object carrying a named parameter that
+  // isn't in the SQL text (better-sqlite3 silently ignored it) -- so
+  // @topic is only bound when the WHERE clause that references it is
+  // actually present, instead of always passing it as "".
+  const topicParam: Record<string, string> = args.topic ? { topic: args.topic } : {};
   const total = (
-    d.prepare(`SELECT COUNT(*) AS n FROM observed_facts ${where}`).get({ topic: args.topic ?? "" }) as { n: number }
+    d.prepare(`SELECT COUNT(*) AS n FROM observed_facts ${where}`).get(topicParam) as { n: number }
   ).n;
   const rows = d
     .prepare(`SELECT * FROM (SELECT * FROM observed_facts ${where} ORDER BY id DESC LIMIT @limit) ORDER BY id ASC`)
-    .all({ topic: args.topic ?? "", limit: args.limit }) as ObservedFact[];
+    .all({ ...topicParam, limit: args.limit }) as unknown as ObservedFact[];
   return { total, facts: rows };
 }
 
@@ -135,7 +146,7 @@ export function lastFactId(topic: string): number {
 export function factsAfter(args: { topic: string; afterId: number; limit?: number }): ObservedFact[] {
   return open()
     .prepare("SELECT * FROM observed_facts WHERE topic = @topic AND id > @after ORDER BY id ASC LIMIT @limit")
-    .all({ topic: args.topic, after: args.afterId, limit: args.limit ?? 200 }) as ObservedFact[];
+    .all({ topic: args.topic, after: args.afterId, limit: args.limit ?? 200 }) as unknown as ObservedFact[];
 }
 
 /** Every distinct topic this observer has recorded a fact under, most-recently-active first. */

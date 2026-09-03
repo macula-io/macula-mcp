@@ -15,18 +15,19 @@
 // weight for a single-writer key-value table would be solving a
 // problem this doesn't have.
 //
-// better-sqlite3 is pinned to the 12.x line, NOT latest (13.x)
-// deliberately: 13.0.3 requires Node >=22 and segfaults outright under
-// this project's own CI-tested Node 20 (confirmed live -- exit 139,
-// reproduced locally under Node 20 via asdf before landing the fix,
-// npm only warns on the engine mismatch rather than failing the
-// install, so this is silent until something actually touches the
-// native binding). 12.11.1 explicitly declares support for 20.x --
-// don't bump past the 12.x line without first confirming the new
-// version's own declared `engines` covers Node 20, not just running
-// `npm test` on whatever Node happens to be on the developer's PATH.
+// node:sqlite (not better-sqlite3) deliberately: it's Node's own
+// built-in SQLite binding, so there's no native module to compile per
+// platform/Node version and no engines-range tightrope to walk on
+// every bump. The --experimental-sqlite flag was dropped at v22.13.0/
+// v23.4.0, so it's usable flagless on every Node 24 release; it's
+// Stability 1.2 "Release candidate" as of Node 24.20/25.x (still 1.1
+// "Active development" on 22.23.2), not yet Stable anywhere. It still
+// logs an ExperimentalWarning to stderr on process start as of this
+// writing -- harmless for this server's stdio MCP transport, which
+// only treats stdout as protocol framing. Requires @types/node
+// >=22.13.0 for its ambient types (node/sqlite.d.ts).
 
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -35,13 +36,13 @@ function dbPath(): string {
   return process.env.MACULA_MCP_ROSTER_DB ?? join(homedir(), ".macula-mcp", "roster.sqlite3");
 }
 
-let db: Database.Database | undefined;
+let db: DatabaseSync | undefined;
 
-function open(): Database.Database {
+function open(): DatabaseSync {
   if (db) return db;
   const path = dbPath();
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  db = new Database(path);
+  db = new DatabaseSync(path);
   if (path !== ":memory:") {
     try {
       chmodSync(path, 0o600);
@@ -49,7 +50,14 @@ function open(): Database.Database {
       // best effort
     }
   }
-  db.pragma("journal_mode = WAL");
+  db.exec("PRAGMA journal_mode = WAL");
+  // better-sqlite3 defaulted its busy timeout to 5000ms; node:sqlite
+  // defaults to 0, which throws "database is locked" immediately on any
+  // write collision instead of waiting -- a real regression given two
+  // sessions on one machine can write this same file at once (see the
+  // module header, and rings.ts's `self` column for the designed-for
+  // multi-session case).
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (
       node_id TEXT PRIMARY KEY,
@@ -70,7 +78,7 @@ function open(): Database.Database {
 // "no such column: model". Checked via PRAGMA table_info rather than a
 // version table this single-table cache has never needed. All added
 // columns are TEXT and nullable, so this never needs a default/backfill.
-function migrateAddColumns(d: Database.Database, names: string[]): void {
+function migrateAddColumns(d: DatabaseSync, names: string[]): void {
   const existing = new Set((d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name));
   for (const name of names) {
     if (!existing.has(name)) d.exec(`ALTER TABLE agents ADD COLUMN ${name} TEXT`);
@@ -133,14 +141,14 @@ export function listAgents(page: number, pageSize: number): RosterPage {
   const total = (d.prepare("SELECT COUNT(*) AS n FROM agents").get() as { n: number }).n;
   const agents = d
     .prepare("SELECT * FROM agents ORDER BY last_seen_at DESC LIMIT ? OFFSET ?")
-    .all(pageSize, (Math.max(1, page) - 1) * pageSize) as AgentRecord[];
+    .all(pageSize, (Math.max(1, page) - 1) * pageSize) as unknown as AgentRecord[];
   return { total, agents };
 }
 
 /** Drops agents not seen in maxAgeSeconds -- lazy cleanup, not a background timer. Returns rows removed. */
 export function pruneStale(maxAgeSeconds: number): number {
   const cutoff = new Date(Date.now() - maxAgeSeconds * 1000).toISOString();
-  return open().prepare("DELETE FROM agents WHERE last_seen_at < ?").run(cutoff).changes;
+  return open().prepare("DELETE FROM agents WHERE last_seen_at < ?").run(cutoff).changes as number;
 }
 
 /** Test/shutdown hook -- releases the file handle. Re-opens lazily on next use. */

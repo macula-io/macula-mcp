@@ -22,8 +22,8 @@ need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not found 
 
 need node
 node_major="$(node -e 'console.log(process.versions.node.split(".")[0])')"
-if [ "$node_major" -lt 20 ]; then
-  die "Node.js 20+ is required (found $(node -v)). Install a newer Node (nodejs.org, nvm, fnm, volta, ...) and re-run."
+if [ "$node_major" -lt 24 ]; then
+  die "Node.js 24.18.1+ is required (found $(node -v)) -- node:sqlite (Node's own built-in SQLite binding, which roster/transcript/rings storage needs) isn't Release-Candidate-stable and doesn't have the CVE-2026-58041 fix before that. Install a newer Node (nodejs.org, nvm, fnm, volta, ...) and re-run."
 fi
 need npm
 
@@ -59,7 +59,7 @@ install_err="$(mktemp)"
 # describe. Harmless on pre-v12 npm: verified locally, it's just an
 # "Unknown cli config" warning there, not a failure -- scripts already
 # ran unconditionally on those versions anyway.
-if ! npm install -g --allow-scripts="@macula-io/mcp,better-sqlite3" "$pkg" 2>"$install_err"; then
+if ! npm install -g --allow-scripts="@macula-io/mcp" "$pkg" 2>"$install_err"; then
   cat "$install_err" >&2
   rm -f "$install_err"
   die "npm install -g ${pkg} failed (see above). If this is an EACCES/permission error, npm's

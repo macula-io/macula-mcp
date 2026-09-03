@@ -6,7 +6,7 @@
 npm ci
 ```
 
-Node >=20 (matches `engines` in `package.json` and what CI pins). If your
+Node >=24.18.1 (matches `engines` in `package.json` and what CI pins). If your
 own machine runs a newer Node than that, see
 [the native-dependency gotcha](#native-dependencies) before adding one.
 
@@ -27,7 +27,7 @@ npm test             # vitest run
 ```
 
 All three run in CI (`.github/workflows/ci.yml`) on every push to `main`
-and every PR, on Node 20. `install.sh`/`uninstall.sh` are also
+and every PR, on Node 24.20.0. `install.sh`/`uninstall.sh` are also
 shellchecked, and `install.ps1`/`uninstall.ps1` are parse-checked with
 PowerShell's own parser — touch either pair and expect those jobs to run
 too.

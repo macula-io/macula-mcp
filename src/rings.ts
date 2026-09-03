@@ -12,7 +12,7 @@
 // process -- except that ring_service.ts and mesh_ring.ts both write
 // from this process, which one connection serves fine).
 
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -272,16 +272,16 @@ function dbPath(): string {
   return process.env.MACULA_MCP_RINGS_DB ?? join(homedir(), ".macula-mcp", "rings.sqlite3");
 }
 
-let db: Database.Database | undefined;
+let db: DatabaseSync | undefined;
 
 /** A pending ring older than this is neither shown nor answerable: the caller has long stopped waiting, and the room it names may be gone. */
 export const PENDING_RING_TTL_MS = 24 * 60 * 60 * 1000;
 
-function open(): Database.Database {
+function open(): DatabaseSync {
   if (db) return db;
   const path = dbPath();
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  db = new Database(path);
+  db = new DatabaseSync(path);
   if (path !== ":memory:") {
     try {
       chmodSync(path, 0o600); // ring purposes and peers are this operator's business, not every local user's
@@ -289,7 +289,13 @@ function open(): Database.Database {
       // best effort (e.g. a filesystem without POSIX modes)
     }
   }
-  db.pragma("journal_mode = WAL");
+  db.exec("PRAGMA journal_mode = WAL");
+  // better-sqlite3 defaulted its busy timeout to 5000ms; node:sqlite
+  // defaults to 0, which throws "database is locked" immediately on any
+  // write collision instead of waiting -- a real regression here in
+  // particular, since ring_service.ts and mesh_ring.ts both write from
+  // this same process (see the module header).
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS rings (
       ring_id TEXT PRIMARY KEY,
@@ -382,19 +388,27 @@ export function getRing(ringId: string, self: string): RingRecord | undefined {
 /** Most recent first, always scoped to `self`. pendingOnly narrows to rings with no answer yet; answer narrows to one answer (e.g. 3 for outgoing rings still awaiting the callee's model). */
 export function listRings(args: { self: string; direction?: Direction; pendingOnly?: boolean; answer?: Answer; limit?: number }): RingRecord[] {
   const where: string[] = ["self = @self"];
-  if (args.direction) where.push("direction = @direction");
-  if (args.pendingOnly) where.push("answer IS NULL AND reason IS NULL AND recorded_at > @not_before");
-  if (args.answer !== undefined) where.push("answer = @answer");
+  // node:sqlite rejects a bind object carrying a named parameter that
+  // isn't in the SQL text (better-sqlite3 silently ignored it) -- so each
+  // param is only added when the WHERE clause that references it is
+  // actually present, instead of always binding the full set (same fix
+  // as lobby_transcript.ts's recentFacts()).
+  const params: Record<string, string | number> = { self: args.self.toLowerCase() };
+  if (args.direction) {
+    where.push("direction = @direction");
+    params.direction = args.direction;
+  }
+  if (args.pendingOnly) {
+    where.push("answer IS NULL AND reason IS NULL AND recorded_at > @not_before");
+    params.not_before = new Date(Date.now() - PENDING_RING_TTL_MS).toISOString();
+  }
+  if (args.answer !== undefined) {
+    where.push("answer = @answer");
+    params.answer = args.answer;
+  }
+  params.limit = args.limit ?? 50;
   const sql = `SELECT * FROM rings WHERE ${where.join(" AND ")} ORDER BY recorded_at DESC LIMIT @limit`;
-  return open()
-    .prepare(sql)
-    .all({
-      self: args.self.toLowerCase(),
-      direction: args.direction ?? "",
-      answer: args.answer ?? 0,
-      not_before: new Date(Date.now() - PENDING_RING_TTL_MS).toISOString(),
-      limit: args.limit ?? 50,
-    }) as RingRecord[];
+  return open().prepare(sql).all(params) as unknown as RingRecord[];
 }
 
 /** Incoming rings the callee's model still has to answer (policy "ask"), for `self`, younger than PENDING_RING_TTL_MS. */

@@ -5,6 +5,36 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.17.0] - 2026-09-03
+
+**Requires Node.js 24.18.1 or newer** (`engines.node` bumped from `>=20`):
+`node:sqlite` needs it, see below.
+
+### Changed
+- `roster.ts`, `lobby_transcript.ts`, and `rings.ts` (the local caches behind
+  `mesh_agents`, `mesh_read_inbox`/`mesh_lobby_transcript`, and
+  `mesh_ring`/`mesh_answer_ring`) moved from `better-sqlite3` to Node's own
+  built-in `node:sqlite`. `better-sqlite3` is a native module, and it had
+  caused real install friction twice: a Node-ABI segfault on its 13.x line
+  that forced a version pin, and npm 12's install-script lockdown silently
+  breaking its native build unless `--allow-scripts` named it explicitly.
+  `node:sqlite` ships inside Node itself, so there is no native module to
+  compile per platform/Node version and one less thing `--allow-scripts`
+  needs to name (`install.sh`/`install.ps1` now only allow-list
+  `@macula-io/mcp`, for the still-separate macula-cli-fetch postinstall
+  step). Same schema, same queries, same exported function signatures on
+  all three files -- an internal storage-driver swap only.
+- Picked up two correctness differences along the way, both now fixed
+  before landing rather than carried into node:sqlite's stricter behavior:
+  node:sqlite defaults its busy-timeout to 0ms where better-sqlite3
+  defaulted to 5000ms (now explicitly set to 5000ms on all three DBs, so a
+  write collision between two sessions on one machine waits instead of
+  throwing immediately), and node:sqlite throws on a bind object carrying a
+  named parameter with no matching placeholder in the SQL text where
+  better-sqlite3 silently ignored it (`recentFacts()` and `listRings()` now
+  build their bind params conditionally instead of always passing the full
+  set).
+
 ## [0.16.0] - 2026-09-03
 
 **Requires macula-cli 0.6.0 or newer** (`MIN_MACULA_CLI_VERSION` bumped from

@@ -21,11 +21,11 @@ function Test-Command($name) {
 # ---- 1. Node.js -------------------------------------------------------
 
 if (-not (Test-Command node)) {
-    throw "Node.js 20+ is required and wasn't found on PATH. Install it from nodejs.org and re-run."
+    throw "Node.js 24.18.1+ is required and wasn't found on PATH. Install it from nodejs.org and re-run."
 }
 $nodeMajor = [int]((node -e "console.log(process.versions.node.split('.')[0])").Trim())
-if ($nodeMajor -lt 20) {
-    throw "Node.js 20+ is required (found $(node -v)). Install a newer Node and re-run."
+if ($nodeMajor -lt 24) {
+    throw "Node.js 24.18.1+ is required (found $(node -v)) -- node:sqlite (Node's own built-in SQLite binding, which roster/transcript/rings storage needs) isn't Release-Candidate-stable and doesn't have the CVE-2026-58041 fix before that. Install a newer Node and re-run."
 }
 if (-not (Test-Command npm)) {
     throw "npm wasn't found on PATH even though node was -- unusual Node install layout."
@@ -66,7 +66,7 @@ try {
     # locally, it's just an "Unknown cli config" warning there, not a
     # failure -- scripts already ran unconditionally on those versions
     # anyway.
-    npm install -g --allow-scripts="@macula-io/mcp,better-sqlite3" $pkg
+    npm install -g --allow-scripts="@macula-io/mcp" $pkg
     if ($LASTEXITCODE -ne 0) { throw "npm install -g $pkg exited with code $LASTEXITCODE" }
 } catch {
     throw "npm install -g $pkg failed: $_`n`nIf this is a permission error, check your npm global prefix" +

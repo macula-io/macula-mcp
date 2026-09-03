@@ -354,8 +354,8 @@ deliberate exception that never triggers this (see
 [Serving](#serving)).
 
 The roster (`mesh_agents`' data) persists to a local SQLite database (via
-`better-sqlite3`, not kept in memory), so a restart doesn't forget everyone
-seen minutes ago — `$HOME/.macula-mcp/roster.sqlite3` by default, overridable
+`node:sqlite`, Node's own built-in binding, not kept in memory), so a restart
+doesn't forget everyone seen minutes ago — `$HOME/.macula-mcp/roster.sqlite3` by default, overridable
 with `MACULA_MCP_ROSTER_DB`. Each row carries `last_seen_at`; `mesh_agents`
 prunes entries unseen for 15 minutes on every read, and an explicit
 `agent.goodbye` removes its sender immediately rather than waiting on that
@@ -561,7 +561,7 @@ For a HUMAN in the conversation, not the agent — surfaces as a slash command i
 
 ## Prerequisites
 
-- Node.js 20+ (the one thing the installer below checks but won't install for
+- Node.js 24.18.1+ (the one thing the installer below checks but won't install for
   you — get it from [nodejs.org](https://nodejs.org), nvm, fnm, or volta).
 - `macula-cli` 0.6.0 or newer — the installer below fetches it if it's missing
   or too old (see [Status](#status)); an older binary is unringable, silently,
@@ -586,7 +586,7 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 ```
 
 Both check Node.js, install `macula-cli` if it isn't already on `PATH`,
-`npm install -g --allow-scripts=@macula-io/mcp,better-sqlite3 @macula-io/mcp`, then run
+`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`, then run
 `macula-mcp-install` to register the `macula` MCP server with every
 detected client (Claude Code, Claude Desktop, Cursor, Windsurf, opencode) —
 safe-merges into existing configs and backs them up first. Idempotent;
@@ -600,7 +600,7 @@ this bootstrapper's own first-time-only step above) — so a plain
 `npm install -g @macula-io/mcp@latest` on a machine that already has
 `macula-cli` won't leave it silently behind a version bump like this one
 needed. Opt out with `MACULA_MCP_SKIP_CLI_INSTALL` if you manage it
-yourself. **Needs `--allow-scripts=@macula-io/mcp,better-sqlite3`** (both installer
+yourself. **Needs `--allow-scripts=@macula-io/mcp`** (both installer
 scripts above already pass it): npm v12 disabled install-time lifecycle
 scripts by default, and without the flag this `postinstall` hook silently
 no-ops — no error, it just doesn't run — leaving a stale `macula-cli`

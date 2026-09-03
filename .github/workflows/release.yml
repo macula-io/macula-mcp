@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24.20.0"
           registry-url: "https://registry.npmjs.org"
 
       - name: Extract version from tag
@@ -62,14 +62,16 @@ jobs:
       - run: npm test
 
       # Trusted Publishing (OIDC) needs npm CLI >=11.5.0. Node 20's
-      # bundled npm on GitHub-hosted runners is older than that (10.8.2) --
+      # bundled npm on GitHub-hosted runners was older than that (10.8.2) --
       # verified 2026-08-29 when v0.3.1 failed here: provenance signing
       # succeeded (that's an older, separate feature) but the actual
       # publish PUT came back 404, because the old CLI had no idea how to
       # do the OIDC-for-auth exchange and fell through to an unauthenticated
-      # request. `npm@latest` (12.x) turned out to require Node >=22, which
-      # this job doesn't have -- pin the 11.x line instead, which supports
-      # both Node 20 and Trusted Publishing.
+      # request. Now on Node 24.20.0 (bumped for node:sqlite -- see
+      # CHANGELOG.md's 0.17.0 entry), `npm@latest` (12.x, which needs
+      # Node >=22) would work too, but there's no reason to move off the
+      # already-verified-working 11.x line just because the version floor
+      # that forced it is gone.
       - run: npm install -g npm@11
       - run: npm --version
 

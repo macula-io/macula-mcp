@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -127,7 +127,7 @@ describe("schema migration", () => {
     const dir = mkdtempSync(join(tmpdir(), "macula-mcp-roster-test-"));
     const dbFile = join(dir, "roster.sqlite3");
     try {
-      const old = new Database(dbFile);
+      const old = new DatabaseSync(dbFile);
       old.exec(`
         CREATE TABLE agents (
           node_id TEXT PRIMARY KEY,
