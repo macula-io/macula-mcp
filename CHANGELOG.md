@@ -5,7 +5,7 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.16.0] - 2026-09-03
 
 **Requires macula-cli 0.6.0 or newer** (`MIN_MACULA_CLI_VERSION` bumped from
 0.5.1), released alongside this entry: 0.5.1 and earlier don't recognize the
