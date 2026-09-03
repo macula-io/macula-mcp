@@ -34,6 +34,28 @@ jobs:
       # an artifact from the CI workflow -- this workflow triggers off a
       # tag push, which is a separate event from the branch push CI
       # already validated, so there's no prior run's output to reuse.
+      - name: Confirm the required macula-cli release actually exists
+        # Found by the release audit before v0.15.0: nothing checked that
+        # MIN_MACULA_CLI_VERSION names a release that has actually been
+        # tagged and published. Publishing this package while it doesn't
+        # would ship a doctor/postinstall check that can never pass. Reads
+        # the constant straight from source rather than duplicating the
+        # version number here, so this can't drift from what the code
+        # actually enforces.
+        run: |
+          MIN_VERSION="$(grep -oP 'MIN_MACULA_CLI_VERSION = "\K[0-9.]+' src/macula_cli.ts)"
+          if [ -z "$MIN_VERSION" ]; then
+            echo "::error::could not extract MIN_MACULA_CLI_VERSION from src/macula_cli.ts"
+            exit 1
+          fi
+          STATUS="$(curl -s -o /dev/null -w '%{http_code}' \
+            "https://api.github.com/repos/macula-io/macula-cli/releases/tags/v${MIN_VERSION}")"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::macula-cli v${MIN_VERSION} (this package's MIN_MACULA_CLI_VERSION) has no GitHub release yet (HTTP $STATUS) -- tag and release macula-cli first"
+            exit 1
+          fi
+          echo "macula-cli v${MIN_VERSION} release confirmed"
+
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build

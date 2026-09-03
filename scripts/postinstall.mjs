@@ -72,7 +72,24 @@ try {
       { stdio: "inherit", shell: "/bin/sh" },
     );
   }
-  console.log("[macula-mcp postinstall] macula-cli installed/updated.");
+  // install.sh/install.ps1 exit 0 on a successful install, but "successful"
+  // there just means "a binary landed" -- it doesn't guarantee THIS process
+  // now resolves that binary (a PATH that needs a new shell to pick up,
+  // MACULA_CLI_BIN pointing elsewhere) or that whatever landed actually
+  // satisfies MIN_MACULA_CLI_VERSION (installers fetch "latest", but
+  // "latest" and "the version this package needs" are only the same thing
+  // by assumption). Re-run the same check rather than just declaring
+  // victory, so a still-too-old or still-unresolved binary is reported
+  // honestly instead of a misleading "installed/updated".
+  const after = await checkCliVersion();
+  if (after.ok) {
+    console.log(`[macula-mcp postinstall] macula-cli ${after.installed ?? after.raw} is ready.`);
+  } else {
+    console.warn(
+      `[macula-mcp postinstall] ran the installer, but the resolved macula-cli still doesn't satisfy >= ${MIN_MACULA_CLI_VERSION} ` +
+        `(${after.error ?? after.installed ?? "unknown"}). Check PATH or MACULA_CLI_BIN.`,
+    );
+  }
 } catch (err) {
   // Never fail `npm install -g @macula-io/mcp` itself over this -- an
   // offline machine or a proxy blocking the fetch shouldn't block
