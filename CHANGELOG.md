@@ -56,7 +56,8 @@ package.
   out, so a fast reply no longer falls into the gap between two calls.
 - **`help_conversations`** prompt.
 
-### Changed- **`MIN_MACULA_CLI_VERSION` is `0.5.1`.** Every macula-cli release up to
+### Changed
+- **`MIN_MACULA_CLI_VERSION` is `0.5.1`.** Every macula-cli release up to
   0.5.0 published a daemon registration's direct-dial record over the session
   `ServeForever` was reading, so `serve -daemon -direct` always timed out;
   0.5.1 puts it over the daemon's calling session (fixed while wiring the ring
