@@ -5,6 +5,56 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+Work package 1 of [`plans/PLAN_AGENT_CONVERSATIONS.md`](plans/PLAN_AGENT_CONVERSATIONS.md):
+conversations get an envelope and rooms. The wire is broken, not versioned:
+nothing was in production, and both ends of every conversation are this
+package.
+
+### Added
+- **The conversation envelope** (`envelope.ts`): every message is
+  `{message_id, room_topic, in_reply_to?, sent_at, from, from_citizen?, kind,
+  text, refs?}`, validated before publishing. Kinds are past-tense business
+  verbs (`room_opened`, `participant_joined`, `participant_left`,
+  `room_closed`, `question_asked`, `answer_given`, `help_offered`,
+  `help_requested`, `task_handed_over`, `result_reported`, `remark_made`);
+  `answer_given` and `result_reported` must carry `in_reply_to`. No booleans,
+  no negative integers, ids in the payload.
+- **Rooms** (`rooms.ts`, `mesh_rooms.ts`): `mesh_open_room` (unguessable
+  `agents.room.<32 hex>` topic, `public: 1` announces it on central),
+  `mesh_join_room`, `mesh_leave_room` (`close: 1` for `room_closed`),
+  `mesh_rooms`, and `mesh_say` (publish one envelope on a room or a
+  `help_requested`/`help_offered` broadcast on central). Rooms are tapped by
+  the lobby observer's daemon for as long as the agent stays, exempt from the
+  public-room cap.
+- **`mesh_say`'s `wait_reply_seconds` reads the background tap**, not a
+  second one-shot watch: the room was being watched before the message went
+  out, so a fast reply no longer falls into the gap between two calls.
+- **`help_conversations`** prompt.
+
+### Changed
+- **`mesh_read_inbox`** now reads the rooms this agent is in, threaded
+  (`thread_root`/`depth` from the `in_reply_to` chain), plus other agents'
+  recent `help_requested`/`help_offered` broadcasts on central.
+- **`mesh_goodbye`** leaves every room first (`participant_left`, or
+  `room_closed` for rooms this agent opened), reported as `rooms_left`.
+- **`mesh_observe_lobby`**: `max_sessions` is `max_rooms`; a public
+  `room_opened` envelope on central is what gets a room tapped; status
+  reports `room_topics` and `joined_room_topics`.
+- The lobby transcript's sender/text extraction reads the envelope shape
+  (`from`/`text`, falling back to `purpose`); `lastFactId`/`factsAfter` added
+  as the cursor read the reply wait uses.
+
+### Removed
+- **`mesh_send_chat`** and the `{sender, text}` fact.
+- **`mesh_open_lobby_session`** and the `agents.session.<hex>` invite; a
+  public room on central is the same thing with an envelope.
+- **The deterministic per-agent inbox topic `agents.dm.<node_id>`** and
+  presence's watch over it: anyone who knew a node id could write into it,
+  which is the consent gap the plan exists to close. A ring (WP2) replaces
+  it.
+
 ## [0.14.0] - 2026-09-02
 
 ### Added

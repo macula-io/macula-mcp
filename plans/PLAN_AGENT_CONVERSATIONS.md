@@ -3,7 +3,7 @@
 **This exists so two agents run by different people can start, hold and end a
 conversation without either operator being surprised.**
 
-Status: **Approved 2026-09-03, work package 1 pending checkpoint.** Classification:
+Status: **Approved 2026-09-03. WP1 landed the same day (see CHANGELOG, Unreleased); WP2 next.** Classification:
 **BUILD** (a wire format and plumbing; makes no claim about the world; gets tests and
 commits, not a gate). Nothing here is in production, so the wire is broken, not
 versioned.
@@ -264,12 +264,42 @@ This exists so a ring is noticed, not just stored.
   harness actually surfaces to the model. Record the matrix in the README.
 - Size: one day, open-ended on the harness side; stop at the matrix.
 
+### WP6. The offline path through hecate-mail
+
+This exists so a ring to an agent that is not present now still reaches it later.
+
+Rooms are live: a message exists only for whoever was tapping the room when it
+was published. `hecate-services/hecate-mail` is the asynchronous counterpart the
+mesh already has ("lets an agent delegate work to a citizen who is not online
+right now"): per-citizen mailboxes with `initiate_mailbox`, `open_mailbox`,
+`deposit_letter`, `reply_to_letter`, `mark_letter_read`, `archive_letter`, all
+real desks under `guide_mailbox_lifecycle`, seven of them advertised as
+`hecate_mail.*` capabilities, ownership-proof gated the same way
+`hecate_citizens.register_presence` is.
+
+- A ring that comes back unreachable (WP2) is deposited as a letter in the
+  callee's mailbox: `{kind: ring_missed, ring_id, from, purpose, room_topic}`.
+  The room topic in the letter is only useful if the ringer keeps the room open;
+  the letter says so with an `open_until` integer.
+- A deferred ring (answer 3, WP3) whose caller has since gone is answered by
+  letter: `{kind: contact_accepted | contact_declined, ring_id, room_topic?}`.
+- On presence start, the agent opens its mailbox and surfaces unread letters in
+  `mesh_read_inbox` under `letters`, next to rings and rooms. Reading is a
+  deliberate `mark_letter_read`, not a side effect of listing.
+- Before any of this: the deployment on beam01/beam02 predates the domain code
+  (README says scaffold; the memory note says nine real desks). Redeploy and
+  verify `hecate_mail.open_mailbox` live before WP6 starts, not during.
+- Size: one day, after WP2 and WP3, since both ends of a letter are rings.
+
 ## 10. Non-goals
 
 - Payload encryption. Delivery by call already keeps the ring off any public topic;
   room facts are still readable by anyone who learns the topic. Encrypting a room to
   its participants' keys is the same shape as the portal's key-wrapping code and is a
   separate plan.
-- Cross-realm conversations. Every topic and procedure here is realm-scoped like
-  everything else; bridging is `PLAN_CITIZEN_IDENTITY_AUTHN_AUTHZ.md`'s problem.
+- Cross-realm conversations. Bridging is `PLAN_CITIZEN_IDENTITY_AUTHN_AUTHZ.md`'s
+  problem. Honest current state: presence, central and rooms all live in the
+  default all-zero realm, because the daemon-backed `pubsub watch` the taps use has
+  no realm flag yet. Realm-scoped rooms need that flag first; until then the tools
+  take no `realm` parameter rather than accept one they cannot honour.
 - A human chat UI. Operators read their agent's inbox through the agent.

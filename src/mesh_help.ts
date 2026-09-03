@@ -40,7 +40,7 @@ const TOPICS: HelpTopic[] = [
     ask:
       "Give me a quick, example-driven overview of the Macula mesh tools available in this " +
       "conversation: mesh_call, mesh_put, mesh_get, mesh_publish, mesh_watch, mesh_hello, " +
-      "mesh_agents, mesh_goodbye, mesh_serve, mesh_unserve, plus the mesh://identity and " +
+      "mesh_agents, mesh_goodbye, mesh_open_room, mesh_say, mesh_read_inbox, mesh_serve, mesh_unserve, plus the mesh://identity and " +
       "mesh://etiquette resources. Show one realistic example call per tool and the top 3 " +
       "gotchas to avoid -- for mesh_serve specifically, lead with the fact that it opens a real " +
       "inbound trigger any mesh caller can invoke, not a one-shot action.",
@@ -79,14 +79,14 @@ const TOPICS: HelpTopic[] = [
     ask:
       "Explain the presence tools in this conversation: what presence actually starts (a " +
       "periodic agent.hello heartbeat, a durable subscription to other agents' hellos, a " +
-      "durable subscription to this agent's own direct-message inbox, AND a standing watch " +
-      "over the lobby -- agents.lobby plus every session it announces -- all backed by daemons " +
+      "standing watch over central (agents.lobby) plus every room this agent opens, joins or sees " +
+      "announced there -- all backed by daemons " +
       "this server manages internally, not a one-shot call like every other tool here), what " +
       "mesh_agents shows (a persistent SQLite roster, not an in-memory list, so it survives a " +
       "restart) and how staleness/pruning works, what mesh_read_inbox shows (an instant, " +
-      "never-blocking local read of that inbox -- see mesh_send_chat's `to` parameter for how " +
-      "another agent reaches it, no invite or lobby needed), and why mesh_goodbye matters " +
-      "(removes you from others' rosters immediately, and stops the inbox and lobby watches " +
+      "never-blocking, threaded local read of the rooms you are in -- see help_conversations), " +
+      "and why mesh_goodbye matters " +
+      "(leaves your rooms, removes you from others' rosters immediately, and stops the central and room watches " +
       "too, instead of waiting for your heartbeat to simply stop). Emphasize that presence is " +
       "now AUTOMATIC (2026-08-31): any genuinely mesh-touching tool call starts it in the " +
       "background the first time it's used, with operator_name/message/model taken from env " +
@@ -95,6 +95,24 @@ const TOPICS: HelpTopic[] = [
       "mesh_goodbye (which stays honored, not silently undone by the next mesh call). Mention " +
       "operator_name as the stable human-facing label over what's often an ephemeral node ID, " +
       "and that mesh_serve/mesh_unserve are the one deliberate exception to the automatic start.",
+  },
+  {
+    name: "help_conversations",
+    description: "Explain rooms and central -- mesh_open_room/mesh_join_room/mesh_say/mesh_read_inbox/mesh_leave_room/mesh_rooms -- and the envelope every message carries.",
+    ask:
+      "Explain how agents converse over the mesh in this conversation: central (agents.lobby, the one " +
+      "topic every present agent keeps watching, for help_requested/help_offered broadcasts and public " +
+      "room_opened announcements) versus a room (an unguessable agents.room.<32 hex> topic opened by " +
+      "mesh_open_room, joined by mesh_join_room, watched in the background for as long as you stay, " +
+      "left by mesh_leave_room; a direct message is just a two-party room). Show the envelope every " +
+      "message carries (message_id, room_topic, in_reply_to, sent_at, from, kind, text, refs) and the " +
+      "kinds (question_asked/answer_given, help_offered/help_requested, task_handed_over/result_reported, " +
+      "remark_made), why answer_given and result_reported must carry in_reply_to, how mesh_say's " +
+      "wait_reply_seconds differs from a publish-then-watch pair (the room was already being watched " +
+      "before the message went out), and what is NOT there yet: rings (an addressed invite delivered as " +
+      "a mesh_call with an identity proof, answered by the callee's contact policy) are the next work " +
+      "package, so today a private room reaches its other participants only by being told the topic. " +
+      "Mention that a room topic is unguessable, not encrypted.",
   },
   {
     name: "help_serve",

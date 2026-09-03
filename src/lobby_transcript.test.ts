@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeTranscript, distinctTopics, pruneOld, recentFacts, recordFact } from "./lobby_transcript.js";
+import { closeTranscript, distinctTopics, factsAfter, lastFactId, pruneOld, recentFacts, recordFact } from "./lobby_transcript.js";
+
+const FROM = "a".repeat(64);
+const ROOM = `agents.room.${"1".repeat(32)}`;
+const envelope = (over: Record<string, unknown> = {}) => ({
+  message_id: "f".repeat(32),
+  room_topic: ROOM,
+  sent_at: 1,
+  from: FROM,
+  kind: "remark_made",
+  text: "hi",
+  ...over,
+});
 
 // Same :memory: isolation pattern as roster.test.ts, same reason: a
 // fresh :memory: db only appears on the NEXT open() after closeTranscript().
@@ -12,34 +24,30 @@ afterEach(() => {
 });
 
 describe("recordFact / recentFacts", () => {
-  it("records a fact and extracts sender/text from the {sender, text} chat shape", () => {
-    recordFact({ topic: "agents.session.abc", payload: { sender: "node1", text: "hello" }, at: "2026-08-31T00:00:00.000Z" });
-    const { total, facts } = recentFacts({ topic: "agents.session.abc", limit: 10 });
+  it("records a fact and extracts sender/text from a conversation envelope", () => {
+    recordFact({ topic: ROOM, payload: envelope({ text: "hello" }), at: "2026-08-31T00:00:00.000Z" });
+    const { total, facts } = recentFacts({ topic: ROOM, limit: 10 });
     expect(total).toBe(1);
-    expect(facts[0]).toMatchObject({ topic: "agents.session.abc", sender: "node1", text: "hello" });
+    expect(facts[0]).toMatchObject({ topic: ROOM, sender: FROM, text: "hello" });
   });
 
-  it("extracts sender/text from the {from, message} lobby-invite shape", () => {
-    recordFact({
-      topic: "agents.lobby",
-      payload: { from: "node1", session_topic: "agents.session.abc", message: "looking to pair" },
-      at: "2026-08-31T00:00:00.000Z",
-    });
+  it("falls back to purpose as the text of a room_opened whose text is empty", () => {
+    recordFact({ topic: "agents.lobby", payload: envelope({ kind: "room_opened", text: "", purpose: "looking to pair" }), at: "2026-08-31T00:00:00.000Z" });
     const { facts } = recentFacts({ topic: "agents.lobby", limit: 10 });
-    expect(facts[0]).toMatchObject({ sender: "node1", text: "looking to pair" });
+    expect(facts[0]).toMatchObject({ sender: FROM, text: "looking to pair" });
   });
 
-  it("leaves sender/text null for a payload matching neither known shape, but keeps raw_json intact", () => {
-    recordFact({ topic: "agents.lobby", payload: { from: "node1", session_topic: "agents.session.abc" }, at: "2026-08-31T00:00:00.000Z" });
+  it("leaves sender/text null for a payload that is not an envelope, but keeps raw_json intact", () => {
+    recordFact({ topic: "agents.lobby", payload: { sender: FROM, text: "the old chat shape" }, at: "2026-08-31T00:00:00.000Z" });
     const { facts } = recentFacts({ topic: "agents.lobby", limit: 10 });
     expect(facts[0]?.sender).toBeNull();
     expect(facts[0]?.text).toBeNull();
-    expect(JSON.parse(facts[0]!.raw_json)).toEqual({ from: "node1", session_topic: "agents.session.abc" });
+    expect(JSON.parse(facts[0]!.raw_json)).toEqual({ sender: FROM, text: "the old chat shape" });
   });
 
   it("never dedupes -- every recorded call is its own row, a transcript not a latest-state cache", () => {
-    recordFact({ topic: "t", payload: { sender: "a", text: "1" }, at: "2026-08-31T00:00:00.000Z" });
-    recordFact({ topic: "t", payload: { sender: "a", text: "2" }, at: "2026-08-31T00:00:01.000Z" });
+    recordFact({ topic: "t", payload: envelope({ text: "1" }), at: "2026-08-31T00:00:00.000Z" });
+    recordFact({ topic: "t", payload: envelope({ text: "2" }), at: "2026-08-31T00:00:01.000Z" });
     const { total, facts } = recentFacts({ topic: "t", limit: 10 });
     expect(total).toBe(2);
     expect(facts.map((f) => f.text)).toEqual(["1", "2"]);
@@ -47,7 +55,7 @@ describe("recordFact / recentFacts", () => {
 
   it("returns the most recent `limit` facts, oldest-first within that window", () => {
     for (let i = 0; i < 5; i++) {
-      recordFact({ topic: "t", payload: { sender: "a", text: `${i}` }, at: new Date(2026, 7, 31, 0, i).toISOString() });
+      recordFact({ topic: "t", payload: envelope({ text: `${i}` }), at: new Date(2026, 7, 31, 0, i).toISOString() });
     }
     const { total, facts } = recentFacts({ topic: "t", limit: 3 });
     expect(total).toBe(5); // total reflects everything in the topic, not just the returned window
@@ -55,11 +63,28 @@ describe("recordFact / recentFacts", () => {
   });
 
   it("without topic, spans every topic, interleaved by insertion order", () => {
-    recordFact({ topic: "agents.lobby", payload: { sender: "a", text: "invite" }, at: "2026-08-31T00:00:00.000Z" });
-    recordFact({ topic: "agents.session.x", payload: { sender: "b", text: "hi" }, at: "2026-08-31T00:00:01.000Z" });
+    recordFact({ topic: "agents.lobby", payload: envelope({ text: "invite" }), at: "2026-08-31T00:00:00.000Z" });
+    recordFact({ topic: ROOM, payload: envelope({ text: "hi" }), at: "2026-08-31T00:00:01.000Z" });
     const { total, facts } = recentFacts({ limit: 10 });
     expect(total).toBe(2);
-    expect(facts.map((f) => f.topic)).toEqual(["agents.lobby", "agents.session.x"]);
+    expect(facts.map((f) => f.topic)).toEqual(["agents.lobby", ROOM]);
+  });
+});
+
+describe("lastFactId / factsAfter", () => {
+  it("is 0 for a topic with nothing recorded, then the newest row id", () => {
+    expect(lastFactId(ROOM)).toBe(0);
+    recordFact({ topic: ROOM, payload: envelope({ text: "1" }), at: "2026-08-31T00:00:00.000Z" });
+    recordFact({ topic: ROOM, payload: envelope({ text: "2" }), at: "2026-08-31T00:00:01.000Z" });
+    expect(lastFactId(ROOM)).toBe(2);
+  });
+
+  it("returns only what arrived after the cursor, oldest-first, on that topic", () => {
+    recordFact({ topic: ROOM, payload: envelope({ text: "old" }), at: "2026-08-31T00:00:00.000Z" });
+    const cursor = lastFactId(ROOM);
+    recordFact({ topic: "agents.lobby", payload: envelope({ text: "elsewhere" }), at: "2026-08-31T00:00:01.000Z" });
+    recordFact({ topic: ROOM, payload: envelope({ text: "new" }), at: "2026-08-31T00:00:02.000Z" });
+    expect(factsAfter({ topic: ROOM, afterId: cursor }).map((f) => f.text)).toEqual(["new"]);
   });
 });
 

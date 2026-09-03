@@ -1,9 +1,11 @@
 // Tools: mesh_observe_lobby / mesh_lobby_transcript / mesh_unobserve_lobby
-// — a standing, read-only watch over agents.lobby and every session
-// topic it announces, plus a fast local read of what's been recorded.
+// — a standing, read-only watch over central (agents.lobby) and every
+// PUBLIC room announced there, plus a fast local read of what's been
+// recorded (rooms this agent joined on purpose land in the same
+// transcript, through rooms.ts).
 //
-// SCOPE, worth saying plainly: this watches EVERY lobby invite and
-// EVERY resulting session's chat that this process can see, from
+// SCOPE, worth saying plainly: this watches EVERY central broadcast and
+// EVERY public room's chat that this process can see, from
 // strangers and friends alike, not just this agent's own conversations,
 // and keeps a durable local transcript of it. mesh_watch on agents.lobby
 // already lets anyone see the same thing by hand; this just makes
@@ -13,8 +15,8 @@
 // (2026-08-31) mesh_hello now starts this automatically (see
 // presence.ts/lobby_observer.ts) -- an agent that's said hello is
 // already watching the lobby, with no separate call needed. This tool
-// still matters for: raising max_sessions above the default (20) on a
-// busy lobby, restarting the watch after mesh_unobserve_lobby without a
+// still matters for: raising max_rooms above the default (20) on a
+// busy central, restarting the watch after mesh_unobserve_lobby without a
 // full mesh_goodbye+mesh_hello cycle, or explicitly confirming it's
 // running. Idempotent either way -- a second call just raises the cap.
 //
@@ -45,29 +47,29 @@ const MAX_TRANSCRIPT_LIMIT = 500;
 export function registerMeshLobbyObserver(server: McpServer): void {
   server.tool(
     "mesh_observe_lobby",
-    "Start a standing, read-only watch over agents.lobby and every session_topic it announces, recording " +
-      "every lobby invite and every resulting session's chat this process can see -- from any agent, not " +
+    "Start a standing, read-only watch over central (agents.lobby) and every PUBLIC room announced there, " +
+      "recording every broadcast and every public room's chat this process can see -- from any agent, not " +
       "just this one's own conversations -- into a durable local transcript. mesh_hello already starts this " +
-      "automatically, so you usually don't need to call it -- use this to raise max_sessions above the " +
+      "automatically, so you usually don't need to call it -- use this to raise max_rooms above the " +
       "default (20), or to restart the watch after mesh_unobserve_lobby without a full mesh_goodbye+" +
       "mesh_hello cycle. Idempotent: a second call just raises the cap if the new value is higher. Never " +
       "retroactive -- only sees facts published after this call. Read the transcript with " +
       "mesh_lobby_transcript (instant, local, never blocks); stop with mesh_unobserve_lobby.",
     {
-      max_sessions: z
+      max_rooms: z
         .number()
         .int()
         .positive()
         .optional()
-        .describe("Cap on concurrently-tapped session topics (default 20) -- a bound against unlimited child processes on a busy lobby."),
+        .describe("Cap on concurrently-tapped PUBLIC rooms (default 20) -- a bound against unlimited child processes on a busy central. Rooms you open or join yourself are never subject to it."),
       host: z
         .string()
         .optional()
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ max_sessions, host }) => {
+    async ({ max_rooms, host }) => {
       try {
-        const result = await lobbyObserver.start({ host, maxSessions: max_sessions });
+        const result = await lobbyObserver.start({ host, maxRooms: max_rooms });
         return jsonContent(result);
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));
@@ -78,10 +80,10 @@ export function registerMeshLobbyObserver(server: McpServer): void {
   server.tool(
     "mesh_lobby_transcript",
     "Read what mesh_observe_lobby has recorded -- instant, a local SQLite read, never blocks and never " +
-      "makes a mesh round trip. Omit topic to see every topic observed (lobby invites and every session's " +
+      "makes a mesh round trip. Omit topic to see every topic observed (central broadcasts and every room's " +
       "chat, interleaved by arrival time) plus the list of distinct topics seen, so you can narrow into " +
-      "one. Pass topic (agents.lobby, or a session_topic from a prior invite) to read just that " +
-      "conversation. Never retroactive: only contains what arrived after mesh_observe_lobby was called, " +
+      "one. Pass topic (agents.lobby, or a room_topic) to read just that conversation, raw; mesh_read_inbox " +
+      "is the threaded view of the rooms you are actually in. Never retroactive: only contains what arrived after the watch started, " +
       "even if it's since been stopped -- the transcript persists like mesh_agents' roster does.",
     {
       topic: z.string().optional().describe("Narrow to one topic. Omit to see everything observed, across all topics."),
@@ -117,7 +119,8 @@ export function registerMeshLobbyObserver(server: McpServer): void {
 
   server.tool(
     "mesh_unobserve_lobby",
-    "Stop mesh_observe_lobby: kills the lobby watch and every session-topic watch it opened. " +
+    "Stop mesh_observe_lobby: kills the central watch and every room tap, including rooms you are in " +
+      "(without saying participant_left -- mesh_leave_room or mesh_goodbye do that). " +
       "The recorded transcript is NOT cleared -- mesh_lobby_transcript still reads what was already " +
       "seen. No-op if not currently observing. A later mesh_hello call (or mesh_observe_lobby itself) " +
       "restarts it -- this only opts out for now, it isn't sticky across the next mesh_hello.",

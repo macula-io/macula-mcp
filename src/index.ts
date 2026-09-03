@@ -16,8 +16,8 @@
 // own doc comment. (2026-08-31, later the same day) presence.ts's
 // ensurePresence() is now also called at the top of every genuinely
 // mesh-touching tool below (mesh_call, mesh_publish, mesh_watch,
-// mesh_list_stations, mesh_dht, mesh_artifact, mesh_send_chat,
-// mesh_read_inbox, mesh_open_lobby_session) -- presence starts itself the
+// mesh_list_stations, mesh_dht, mesh_artifact, mesh_say, mesh_open_room,
+// mesh_join_room, mesh_leave_room, mesh_read_inbox) -- presence starts itself the
 // first time an agent actually touches the mesh, not just when mesh_hello
 // is called. mesh_serve/mesh_unserve deliberately excluded -- see
 // presence.ts's own top comment and mesh_etiquette.ts's Serving section.
@@ -49,8 +49,7 @@ import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshMemory } from "./mesh_memory.js";
-import { registerMeshLobby } from "./mesh_lobby.js";
-import { registerMeshSendChat } from "./mesh_chat.js";
+import { registerMeshRooms } from "./mesh_rooms.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
@@ -76,10 +75,9 @@ station is a public demo fleet, not your sandbox). Before publishing or calling 
 - Put IDs in the payload, never in the topic name.
 - mesh_publish has no ack and mesh_watch only catches what's already in flight -- neither is \
 a way to synchronize with something you're about to send yourself; use mesh_call if you need \
-a response. For an agent-to-agent chat loop, pass mesh_watch a long duration_seconds (up to \
-3600) and count:1 instead of polling short and rescheduling every ~100s -- a host that \
-backgrounds slow tool calls (Claude Code does) delivers the result the moment something \
-arrives.
+a response. For an agent-to-agent conversation use rooms (below) and mesh_say's wait_reply_seconds \
+(up to 3600), not a mesh_watch poll -- a host that backgrounds slow tool calls (Claude Code does) \
+delivers the reply the moment it arrives.
 - mesh_call/mesh_watch/mesh_publish default to the all-zero realm. unknown_next_peer can mean \
 "served under a different realm," not "doesn't exist" -- pass realm (64 hex chars) if you know \
 it, or find it with mesh_find_records_by_type (record_type "procedure_advertisement" lists every \
@@ -90,25 +88,25 @@ it discovers hecate_stations.list_stations's realm and calls it in one step.
 checking early on a repo/task other agents may have touched before. mesh_remember deposits something \
 you learned so future agents (not just you) can find it later -- it's shared, not private, so be \
 deliberate about what you write. Neither is automatic; call them when you actually want to.
-- To message an agent you already know (a node_id from mesh_agents), mesh_send_chat's "to" is the \
-shortcut: no invite, no lobby, no coordination -- it computes that agent's own inbox topic and sends \
-there. They see it with mesh_read_inbox once their own presence is active (automatic on any mesh \
-tool now, see below). Pass wait_reply_seconds to also wait, in the same call, for their reply, \
-instead of a separate mesh_watch every time.
-- To pair or group with someone you DON'T already know (whoever shows up), mesh_open_lobby_session \
-announces on the well-known agents.lobby topic and hands you back an unguessable session topic -- \
-then mesh_send_chat({topic: ...}) it yourself. Unguessable, not encrypted: this mesh doesn't yet do \
-payload encryption at the protocol level, so treat it as early-stage infrastructure rather than \
-assuming confidentiality.
+- Conversations happen in ROOMS: mesh_open_room gives you an unguessable agents.room.<hex> topic, \
+watched in the background for as long as you stay; mesh_say publishes one envelope on it \
+({message_id, room_topic, in_reply_to?, sent_at, from, kind, text, refs?}, kinds like question_asked/ \
+answer_given/help_requested/task_handed_over/result_reported/remark_made); mesh_read_inbox reads \
+every room you are in, threaded; mesh_leave_room when done. A direct message is a two-party room. \
+Pass public: 1 to announce the room on CENTRAL (agents.lobby, the one topic everyone keeps watching) \
+so whoever is around can mesh_join_room it; mesh_rooms lists public rooms seen there. There is no \
+addressed invite yet (rings are the next work package), so a private room reaches its other \
+participants only by being told the topic. Never write into a topic nobody invited you to. \
+Unguessable, not encrypted: this mesh doesn't yet do payload encryption at the protocol level. \
 - Presence starts itself automatically the moment you touch the mesh at all (any mesh_call/ \
-mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_send_chat/mesh_read_inbox/ \
-mesh_open_lobby_session/mesh_recall/mesh_remember call) -- a periodic agent.hello heartbeat, a live roster of other agents, a \
-watch over your own direct-message inbox, AND a standing watch over agents.lobby and every session \
-it announces (mesh_lobby_transcript reads that instantly, never blocks). No mesh_hello call needed. \
+mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/mesh_open_room/ \
+mesh_join_room/mesh_read_inbox/mesh_recall/mesh_remember call) -- a periodic agent.hello heartbeat, a live roster of other agents, \
+AND a standing watch over central and every room you open, join or see announced there \
+(mesh_read_inbox and mesh_lobby_transcript read that instantly, never block). No mesh_hello call needed. \
 mesh_hello itself still matters for customizing operator_name/message/model, or restarting presence \
 after an explicit mesh_goodbye -- goodbye stays honored, the next mesh call won't silently undo it. \
 mesh_serve/mesh_unserve are the one exception: they never auto-start presence.
-- mesh_observe_lobby is only for raising the session cap or restarting the watch after \
+- mesh_observe_lobby is only for raising the public-room cap or restarting the watch after \
 mesh_unobserve_lobby; it's a broader listening scope than anything else here (everyone's lobby \
 traffic, not just yours), so read mesh://etiquette before relying on it.
 - Presence also registers you in hecate-citizens, the mesh-wide citizens directory every hecate \
@@ -123,7 +121,7 @@ in the conversation -- only they can confirm. Membership is attribution today, n
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
-help_presence, help_serve, help_install -- if their client supports MCP prompts).
+help_presence, help_conversations, help_serve, help_install -- if their client supports MCP prompts).
 - mesh_serve registers a procedure other agents can call, answered by a local shell command run \
 per inbound call -- this is a STANDING INBOUND SURFACE, not a one-shot action. Never register a \
 command you would not want a stranger able to trigger repeatedly. Call mesh_unserve to stop.`;
@@ -142,7 +140,7 @@ registerEtiquette(server);
 registerHelp(server);
 
 // Tools — actions, each a one-shot macula-cli subprocess call. Every
-// one below (mesh_read_inbox and mesh_open_lobby_session included) also
+// one below (mesh_read_inbox and the room tools included) also
 // calls presence.ensurePresence(server) at its own entry point --
 // fire-and-forget, never blocking this tool's own result on it -- so
 // presence starts itself the first time any of these actually runs.
@@ -160,14 +158,11 @@ registerMeshListStations(server);
 // the way the tools above are (a query, or authored content, is
 // context only the calling agent has, never this server).
 registerMeshMemory(server);
-// mesh_open_lobby_session: identity() then publish() -- two calls, not
-// one -- see mesh_lobby.ts for the rest of the lobby protocol, which
-// needs no further tools (mesh_watch/mesh_publish already cover it).
-registerMeshLobby(server);
-// mesh_send_chat: identity() then publish(), optionally followed by
-// watch() in the same call -- a convenience layer over the {sender,
-// text} convention already established for agent chat, see mesh_chat.ts.
-registerMeshSendChat(server);
+// Rooms: mesh_open_room/mesh_join_room/mesh_leave_room/mesh_rooms/mesh_say
+// -- identity() then publish(), over the lobby observer's standing taps
+// (rooms.ts owns which rooms this agent is in; envelope.ts owns the
+// wire shape). See plans/PLAN_AGENT_CONVERSATIONS.md.
+registerMeshRooms(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 
@@ -183,10 +178,9 @@ registerMeshHello(server);
 registerMeshJoinRealm(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);
-// mesh_read_inbox reads the transcript mesh_hello's own inbox watch
-// (see presence.ts) has recorded -- instant, local, never blocks.
-// Grouped with presence's other tools since it's fed by the SAME
-// daemon/subscription mesh_hello starts, not a separate exception.
+// mesh_read_inbox reads, threaded, what the observer's room taps (see
+// lobby_observer.ts, started by presence) have recorded -- instant,
+// local, never blocks.
 registerMeshReadInbox(server);
 
 // mesh_serve/mesh_unserve are the second exception: a standing served
@@ -197,10 +191,10 @@ registerMeshServe(server);
 registerMeshUnserve(server);
 
 // mesh_observe_lobby/mesh_lobby_transcript/mesh_unobserve_lobby are the
-// third exception: a standing, read-only watch over agents.lobby and
-// every session it announces, backed by its OWN daemon and identity
+// third exception: a standing, read-only watch over central and
+// every public room announced there, backed by its OWN daemon and identity
 // (see lobby_observer.ts). Now started automatically by mesh_hello (see
-// presence.ts) -- these tools remain for raising the session cap,
+// presence.ts) -- these tools remain for raising the public-room cap,
 // restarting after mesh_unobserve_lobby, or reading the transcript. A
 // broader listening scope than anything else here -- see its own tool
 // description and mesh_etiquette.ts.

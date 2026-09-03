@@ -1,26 +1,25 @@
-// Tool: mesh_read_inbox — read what's arrived on YOUR OWN direct-message
-// inbox (inbox.ts). Instant, local, never blocks or makes a mesh round
-// trip -- same shape as mesh_lobby_transcript, same underlying store
-// (lobby_transcript.ts's transcript is a generic {topic, sender, text}
-// log, not lobby-specific despite the module's name).
+// Tool: mesh_read_inbox -- what has arrived in the rooms this agent is
+// in, threaded, plus the help_requested/help_offered broadcasts on
+// central from other agents. Instant, local, never blocks or makes a
+// mesh round trip: it reads the transcript the background taps
+// (lobby_observer.ts) are already feeding.
 //
-// Requires presence to be active (see presence.ts): that's what starts
-// the standing watch over your inbox that actually records anything
-// here. Calling this tool itself calls ensurePresence(), same as every
-// other mesh-touching tool -- but presence startup takes real time
-// (spawns a daemon) and this tool never blocks on it, so the very
-// FIRST call in a session can still legitimately error if presence
-// hasn't finished starting yet; a moment later it will have. Nothing
-// here can see a message sent before the inbox watch started, or
-// while it wasn't running -- same fire-and-forget constraint as every
-// other watch-backed tool on this mesh.
+// "Inbox" used to mean a deterministic per-agent topic anyone could
+// write into (agents.dm.<node_id>, 2026-08-31 to 2026-09-03). That is
+// gone -- see rooms.ts and plans/PLAN_AGENT_CONVERSATIONS.md. Rings
+// (WP2) will show up here too, once they exist.
+//
+// Never retroactive, same as everything watch-backed here: a room's
+// messages are only the ones that arrived while this process was
+// tapping it.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
-import { inboxTopic } from "./inbox.js";
+import * as rooms from "./rooms.js";
 import { recentFacts } from "./lobby_transcript.js";
+import { CENTRAL_TOPIC, threadEnvelopes } from "./envelope.js";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
@@ -28,42 +27,51 @@ const MAX_LIMIT = 500;
 export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
     "mesh_read_inbox",
-    "Read what's arrived on your own direct-message inbox -- instant, a local SQLite read, never " +
-      "blocks and never makes a mesh round trip. Presence (which starts watching your inbox) is now " +
-      "automatic on any mesh tool use, including this one -- but it takes a moment to actually start, " +
-      "so the very first call in a session can still error if it hasn't finished yet; retry once, or " +
-      "call mesh_hello explicitly. mesh_send_chat's `to` shortcut is how another agent reaches your " +
-      "inbox. Most recent N messages, oldest-first within that window, same shape as mesh_lobby_transcript.",
+    "Read what has arrived in the rooms you are in, threaded (each message carries thread_root and depth " +
+      "from its in_reply_to chain), plus recent help_requested/help_offered broadcasts on central from other " +
+      "agents. Instant, a local SQLite read, never blocks. Pass room_topic to read one room. Only ever shows " +
+      "what arrived while this process was watching that room -- nothing from before you joined.",
     {
+      room_topic: z.string().optional().describe("One room to read. Omit for every room you are in."),
       limit: z
         .number()
         .int()
         .positive()
         .max(MAX_LIMIT)
         .default(DEFAULT_LIMIT)
-        .describe(`Most recent N messages, oldest-first within that window (default ${DEFAULT_LIMIT}).`),
+        .describe(`Most recent N messages per room, oldest-first within that window (default ${DEFAULT_LIMIT}).`),
     },
-    async ({ limit }) => {
+    async ({ room_topic, limit }) => {
       presence.ensurePresence(server);
-      const nodeId = presence.currentNodeId();
-      if (!nodeId) {
-        return errorContent(
-          "mesh_read_inbox: presence isn't active yet (it starts automatically on first mesh use, or call mesh_hello) -- try again in a moment.",
-        );
-      }
       try {
-        const topic = inboxTopic(nodeId);
-        const { total, facts } = recentFacts({ topic, limit });
+        const me = presence.currentNodeId();
+        const { joined } = rooms.listRooms();
+        const selected = room_topic ? joined.filter((r) => r.room_topic === room_topic) : joined;
+        if (room_topic && selected.length === 0) {
+          return errorContent(`mesh_read_inbox: not in room ${room_topic} -- mesh_join_room it first, or see mesh_rooms.`);
+        }
+        const roomsOut = selected.map((room) => {
+          const { total, facts } = recentFacts({ topic: room.room_topic, limit });
+          const { messages, unparsed } = threadEnvelopes(facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })));
+          return {
+            room_topic: room.room_topic,
+            opened_by: room.opened_by,
+            purpose: room.purpose,
+            participants_seen: room.participants_seen,
+            total_received: total,
+            returned: messages.length,
+            unparsed,
+            messages,
+          };
+        });
+        const central = room_topic
+          ? undefined
+          : threadEnvelopes(
+              recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })),
+            ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me);
         return jsonContent({
-          inbox_topic: topic,
-          total_received: total,
-          returned: facts.length,
-          messages: facts.map((f) => ({
-            sender: f.sender ?? undefined,
-            text: f.text ?? undefined,
-            raw: f.sender === null && f.text === null ? (JSON.parse(f.raw_json) as unknown) : undefined,
-            received_at: f.observed_at,
-          })),
+          rooms: roomsOut,
+          ...(central !== undefined ? { central_broadcasts: central } : {}),
         });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));

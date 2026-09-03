@@ -14,12 +14,11 @@
 // First call: prints a welcome banner, publishes one agent.hello
 // immediately, and starts a periodic heartbeat (see presence.ts) that
 // keeps republishing it -- plus a durable subscription to everyone
-// else's agent.hello/agent.goodbye (feeding mesh_agents' roster), to
-// this agent's own direct-message inbox (feeding mesh_read_inbox), AND
-// to agents.lobby and every session it announces (feeding
-// mesh_lobby_transcript, see lobby_observer.ts). Being discoverable,
-// reachable, and present in the lobby are all the same action now --
-// see inbox.ts and lobby_observer.ts for why. A later call while
+// else's agent.hello/agent.goodbye (feeding mesh_agents' roster), AND
+// to central (agents.lobby) and every room this agent opens, joins or
+// sees announced there (feeding mesh_read_inbox/mesh_lobby_transcript,
+// see lobby_observer.ts and rooms.ts). Being discoverable, reachable,
+// and present on central are all the same action now. A later call while
 // already active just updates operator_name/message/model/
 // connected_via for future heartbeats, without restarting anything.
 //
@@ -61,15 +60,15 @@ export function registerMeshHello(server: McpServer): void {
     "mesh_hello",
     "Announce this agent's presence on the mesh: prints a welcome banner and starts a periodic " +
       "agent.hello heartbeat (default every 60s), a durable subscription to other agents' hellos " +
-      "(feeding mesh_agents' roster), a durable subscription to this agent's own direct-message inbox " +
-      "(feeding mesh_read_inbox), AND a standing watch over the lobby -- agents.lobby plus every " +
-      "session_topic it announces (feeding mesh_lobby_transcript) -- being discoverable, reachable, and " +
-      "present in the lobby are all the same action now. You usually don't need to call this yourself: " +
-      "any mesh_call/mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_send_chat/" +
-      "mesh_read_inbox/mesh_open_lobby_session/mesh_recall/mesh_remember call already starts presence " +
+      "(feeding mesh_agents' roster), AND a standing watch over central (agents.lobby) plus every room " +
+      "this agent opens, joins or sees announced there (feeding mesh_read_inbox and " +
+      "mesh_lobby_transcript) -- being discoverable, reachable, and present on central are all the same " +
+      "action now. You usually don't need to call this yourself: " +
+      "any mesh_call/mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/" +
+      "mesh_open_room/mesh_join_room/mesh_read_inbox/mesh_recall/mesh_remember call already starts presence " +
       "automatically, with " +
       "operator_name/message/model taken from MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL if set. Call " +
-      "mesh_hello directly to override those, or to see the banner/inbox_topic/lobby_topic explicitly, or " +
+      "mesh_hello directly to override those, or to see the banner/lobby_topic explicitly, or " +
       "to restart presence after mesh_goodbye -- an explicit goodbye is NOT undone automatically by the " +
       "next mesh tool call, only by calling this again. Calling this again while already active just " +
       "updates operator_name/message/model/connected_via for future heartbeats -- it also re-confirms the " +

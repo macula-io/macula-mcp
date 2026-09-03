@@ -28,7 +28,7 @@
 //
 // mesh_remember calls hecate-rag's add_knowledge -- one mesh RPC, not
 // two. It used to sequence ingest_document then embed_document by hand
-// (the "two steps become one" bar mesh_send_chat's own
+// (the "two steps become one" bar mesh_say's own
 // wait_reply_seconds already established), but add_knowledge (added to
 // hecate-rag the same day this file was first written) does that
 // server-side AND fixes the short-text gap the old path had: content
@@ -150,7 +150,7 @@ export function registerMeshMemory(server: McpServer): void {
       "sessions. Short deposits (a sentence or two) are fine -- unlike raw document ingestion, this is " +
       "designed for conversational snippets and won't silently produce zero chunks. Be deliberate about " +
       "what you write here: this is shared, not private to you, and this mesh doesn't encrypt payloads -- " +
-      "the same caveat mesh_send_chat and mesh_open_lobby_session already carry. Don't deposit anything " +
+      "the same caveat mesh_say and mesh_open_room already carry. Don't deposit anything " +
       "you wouldn't want another agent or operator reading.",
     {
       content: z.string().describe("The text to remember, in your own words. Markdown is fine -- header-aware chunking splits it if long."),

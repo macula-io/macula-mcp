@@ -1,5 +1,6 @@
 // A local, persistent cache of what lobby_observer.ts has seen on
-// agents.lobby and whatever session topics it discovered there --
+// agents.lobby (central) and every room topic it watches, whether
+// announced there or joined deliberately (rooms.ts) --
 // the same shape and same reasoning as roster.ts (its own header
 // comment applies here near-verbatim): not an event store, just a
 // projection over what's been observed while this process's observer
@@ -59,19 +60,20 @@ export interface ObservedFact {
 
 /**
  * Best-effort sender/text extraction so a transcript reader doesn't have
- * to parse raw_json itself for the common shapes this server's own
- * tools already produce: {sender, text} (session chat, per mesh_lobby.ts's
- * own documented convention) and {from, message} (a lobby invite fact).
- * Neither is enforced -- an agent's own session topic can carry any
- * payload shape it likes -- so both fields stay null, not thrown, when
- * neither shape matches; raw_json always has the real payload regardless.
+ * to parse raw_json itself for the one shape this server's own tools
+ * produce: the conversation envelope (envelope.ts) -- sender is its
+ * `from`, text is its `text`, or its `purpose` when the text is empty
+ * (a room_opened carries the reason in purpose, not text). Not
+ * enforced -- a topic can carry any payload shape -- so both fields
+ * stay null, not thrown, when it isn't an envelope; raw_json always has
+ * the real payload regardless.
  */
 function extractSenderText(payload: unknown): { sender: string | null; text: string | null } {
   if (typeof payload !== "object" || payload === null) return { sender: null, text: null };
   const p = payload as Record<string, unknown>;
-  if (typeof p.sender === "string" && typeof p.text === "string") return { sender: p.sender, text: p.text };
-  if (typeof p.from === "string" && typeof p.message === "string") return { sender: p.from, text: p.message };
-  return { sender: null, text: null };
+  if (typeof p.from !== "string" || typeof p.text !== "string") return { sender: null, text: null };
+  const text = p.text.length > 0 ? p.text : typeof p.purpose === "string" ? p.purpose : p.text;
+  return { sender: p.from, text };
 }
 
 /** Records one observed fact. Never idempotent/deduped -- every arrival is its own row, a transcript, not a cache of latest state. */
@@ -107,6 +109,19 @@ export function recentFacts(args: { topic?: string; limit: number }): Transcript
     .prepare(`SELECT * FROM (SELECT * FROM observed_facts ${where} ORDER BY id DESC LIMIT @limit) ORDER BY id ASC`)
     .all({ topic: args.topic ?? "", limit: args.limit }) as ObservedFact[];
   return { total, facts: rows };
+}
+
+/** The highest row id recorded under `topic` (0 if none) -- a cursor for factsAfter, so a caller can watch for what arrives next without re-reading what it already saw. */
+export function lastFactId(topic: string): number {
+  const row = open().prepare("SELECT COALESCE(MAX(id), 0) AS n FROM observed_facts WHERE topic = ?").get(topic) as { n: number };
+  return row.n;
+}
+
+/** Facts on `topic` with id > afterId, oldest-first, capped at limit -- the "anything new since my cursor?" read rooms.ts polls while waiting for a reply. */
+export function factsAfter(args: { topic: string; afterId: number; limit?: number }): ObservedFact[] {
+  return open()
+    .prepare("SELECT * FROM observed_facts WHERE topic = @topic AND id > @after ORDER BY id ASC LIMIT @limit")
+    .all({ topic: args.topic, after: args.afterId, limit: args.limit ?? 200 }) as ObservedFact[];
 }
 
 /** Every distinct topic this observer has recorded a fact under, most-recently-active first. */

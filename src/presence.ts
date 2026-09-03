@@ -1,28 +1,30 @@
 // Presence: this macula-mcp process's own "being on the mesh" state --
 // a periodic agent.hello heartbeat, durable subscriptions to
 // agent.hello/agent.goodbye from everyone else feeding the local
-// roster (roster.ts), a durable subscription to this agent's own
-// direct-message inbox (inbox.ts) feeding the transcript store
-// mesh_lobby_transcript already uses, AND starting the lobby observer
-// (lobby_observer.ts) so this agent is watching agents.lobby -- and
-// every session it announces -- from the moment it's present, without
-// a separate mesh_observe_lobby call. mesh_hello.ts/mesh_goodbye.ts/
-// mesh_agents.ts/mesh_read_inbox.ts are thin tool wrappers around
-// start()/stop()/roster/transcript reads; this module owns the actual
+// roster (roster.ts), AND starting the lobby observer
+// (lobby_observer.ts) so this agent is watching central (agents.lobby)
+// -- and every room it opens, joins or sees announced there -- from
+// the moment it's present, without a separate mesh_observe_lobby call.
+// (2026-09-03, PLAN_AGENT_CONVERSATIONS WP1: the deterministic
+// direct-message inbox topic this module used to watch, agents.dm.<node_id>,
+// is gone -- rooms.ts + the observer's taps replaced it.)
+// mesh_hello.ts/mesh_goodbye.ts/mesh_agents.ts are thin tool wrappers
+// around start()/stop()/roster reads; this module owns the actual
 // lifecycle -- lobby_observer.ts still owns ITS OWN lifecycle (own
 // daemon, own identity, own socket) and this module only calls its
 // start()/stop(), the same way mesh_observe_lobby.ts itself does, so
-// an agent that wants a bigger max_sessions or to opt back in after
+// an agent that wants a bigger max_rooms or to opt back in after
 // mesh_unobserve_lobby can still call mesh_observe_lobby directly.
 //
 // (2026-08-31, later the same day) ensurePresence(): every genuinely
 // mesh-touching tool (mesh_call, mesh_publish, mesh_watch,
-// mesh_list_stations, mesh_dht, mesh_artifact, mesh_send_chat,
-// mesh_read_inbox, mesh_open_lobby_session) now calls this at its own
+// mesh_list_stations, mesh_dht, mesh_artifact, mesh_say, mesh_open_room,
+// mesh_join_room, mesh_leave_room, mesh_read_inbox) now calls this at its own
 // entry point. Asked directly, twice: first "the agent-to-agent
 // protocol is too clumsy and operator-intensive... should establish
 // itself without much user friction" (-> the inbox/lobby bundling
-// above), then, after a fresh session correctly reported it hadn't
+// above -- the inbox half of which rooms later replaced), then, after a
+// fresh session correctly reported it hadn't
 // said hello because nothing had asked it to yet: "make mesh_hello
 // fire itself the first time an agent touches the mesh... frictionless
 // and occasionally automatic." This is that second, larger reversal --
@@ -77,8 +79,6 @@ import {
   watchTopicOnDaemon,
 } from "./macula_cli.js";
 import { removeAgent, upsertAgent } from "./roster.js";
-import { inboxTopic } from "./inbox.js";
-import { recordFact } from "./lobby_transcript.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
@@ -170,7 +170,6 @@ export interface StartResult {
   connected_to: string;
   interval_seconds: number;
   already_active: boolean;
-  inbox_topic: string;
   lobby_topic: string;
   /** The same node_id, named for what it is in the citizens directory. */
   citizen_did: string;
@@ -180,7 +179,7 @@ export interface StartResult {
   realm: realm.RealmStatus;
 }
 
-/** The presence node_id currently watching an inbox, or undefined if presence isn't active -- see mesh_read_inbox.ts. */
+/** The node_id this process's own agent.hello beats carry (the default identity's), or undefined if presence isn't active -- what rooms.ts stamps as `from` and mesh_agents uses for is_self. */
 export function currentNodeId(): string | undefined {
   return state?.nodeId;
 }
@@ -237,7 +236,6 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       connected_to: state.host,
       interval_seconds: intervalSeconds,
       already_active: true,
-      inbox_topic: inboxTopic(state.nodeId),
       lobby_topic: lobbyObserver.LOBBY_TOPIC,
       citizen_did: state.nodeId,
       citizenship: citizen,
@@ -247,7 +245,6 @@ async function doStart(args: StartArgs): Promise<StartResult> {
 
   const { node_id: nodeId } = await identity();
   const socketName = `presence-${process.pid}-${randomBytes(4).toString("hex")}`;
-  const myInboxTopic = inboxTopic(nodeId);
 
   const daemon = await startDaemon(host, presenceIdentityPath(), socketName);
   const watchers = [
@@ -268,18 +265,9 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       const payload = evt as Record<string, unknown>;
       if (typeof payload.node_id === "string") removeAgent(payload.node_id);
     }),
-    // The direct-message inbox (see inbox.ts): mesh_hello starting this
-    // watch automatically is the whole point -- being discoverable
-    // (saying hello) and being reachable (having an inbox someone can
-    // write to) are the same action now, not two separate opt-ins.
-    // Recorded into the SAME transcript store mesh_lobby_transcript
-    // already uses (a generic {topic, sender, text} log, not lobby-
-    // specific despite the module's name) -- read back via
-    // mesh_read_inbox.
-    watchTopicOnDaemon(socketName, myInboxTopic, (payload) => {
-      recordFact({ topic: myInboxTopic, payload, at: new Date().toISOString() });
-    }),
   ];
+  // Being reachable is the lobby observer's job now (started just below):
+  // it taps central and every room this agent is in -- see rooms.ts.
 
   const heartbeatTimer = setInterval(() => void beat(), intervalSeconds * 1000);
   heartbeatTimer.unref(); // a pending heartbeat alone shouldn't keep the process alive
@@ -318,7 +306,6 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     connected_to: host,
     interval_seconds: intervalSeconds,
     already_active: false,
-    inbox_topic: myInboxTopic,
     lobby_topic: lobbyObserver.LOBBY_TOPIC,
     citizen_did: nodeId,
     citizenship: citizen,
@@ -329,7 +316,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
 /**
  * A daemon or watcher child dying on its own (crash, killed externally,
  * lost connection) used to leave `state` set with nothing to notice --
- * found live 2026-09-02: an agent's inbox watcher died silently mid-
+ * found live 2026-09-02: an agent's (then) inbox watcher died silently mid-
  * session, isActive()/already_active kept reporting true, and a real
  * message from another agent was simply never recorded, with no error
  * anywhere. The only fix the operator had was to notice independently
@@ -392,7 +379,7 @@ export interface StopResult {
   said_goodbye: boolean;
 }
 
-/** Publishes agent.goodbye, then tears everything down (including lobby observing -- goodbye means leaving entirely), and marks explicitlyLeft so ensurePresence() won't silently restart it. No-op if not active. */
+/** Publishes agent.goodbye, then tears everything down (including lobby observing -- goodbye means leaving entirely; mesh_goodbye.ts leaves rooms first), and marks explicitlyLeft so ensurePresence() won't silently restart it. No-op if not active. */
 export async function stop(): Promise<StopResult> {
   if (!state) return { said_goodbye: false };
   const { nodeId, host } = state;
