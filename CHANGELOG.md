@@ -36,13 +36,6 @@ package.
   processes, callee on Paris and caller on Frankfurt:
   `scripts/ring-two-process-check.mjs`.
 
-### Changed
-- **`MIN_MACULA_CLI_VERSION` is `0.5.1`.** Every macula-cli release up to
-  0.5.0 published a daemon registration's direct-dial record over the session
-  `ServeForever` was reading, so `serve -daemon -direct` always timed out;
-  0.5.1 puts it over the daemon's calling session (fixed while wiring the ring
-  endpoint). `doctor` reports an older binary; the installer fetches the
-  current one.
 - **The conversation envelope** (`envelope.ts`): every message is
   `{message_id, room_topic, in_reply_to?, sent_at, from, from_citizen?, kind,
   text, refs?}`, validated before publishing. Kinds are past-tense business
@@ -63,7 +56,12 @@ package.
   out, so a fast reply no longer falls into the gap between two calls.
 - **`help_conversations`** prompt.
 
-### Changed
+### Changed- **`MIN_MACULA_CLI_VERSION` is `0.5.1`.** Every macula-cli release up to
+  0.5.0 published a daemon registration's direct-dial record over the session
+  `ServeForever` was reading, so `serve -daemon -direct` always timed out;
+  0.5.1 puts it over the daemon's calling session (fixed while wiring the ring
+  endpoint). `doctor` reports an older binary; the installer fetches the
+  current one.
 - **`mesh_read_inbox`** now reads the rooms this agent is in, threaded
   (`thread_root`/`depth` from the `in_reply_to` chain), plus other agents'
   recent `help_requested`/`help_offered` broadcasts on central.
