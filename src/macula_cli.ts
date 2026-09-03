@@ -16,7 +16,7 @@
 // the mesh's own already-existing DHT store the same way -- one
 // subprocess, point-in-time -- not a peer registry this file accumulates.
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -341,6 +341,31 @@ export function observeIdentityPath(): string {
   return (cachedObserveIdentityPath ??= mintIdentityPath("observe"));
 }
 
+/**
+ * One identity PER ROOM TOPIC lobby_observer.ts is concurrently tapping
+ * -- not a fixed sixth slot like the five above. Needed since
+ * @macula-io/ts's Session allows only one active subscribe() per
+ * connection (see presence.ts's own doc comment): watching N room
+ * topics concurrently now means N independent connections, and two
+ * connections sharing one node ID get the older one closed by the
+ * station (the same per-identity dedupe every identity in this file
+ * exists to avoid) -- so every concurrently-tapped room needs its own,
+ * on top of observeIdentityPath()'s own fifth identity for central.
+ * Deterministic per (session scope, room topic), same persistence
+ * reasoning as the five fixed identities -- though since observing
+ * never publishes under this identity (same reasoning as
+ * presenceGoodbyeIdentityPath's own doc), nothing outside this file
+ * actually needs to recognize it again. No env var override, unlike the
+ * five fixed concerns above: a dynamically-tapped room has no fixed
+ * slot to override. `roomTopic` is trusted to already be a valid room
+ * topic (envelope.ts's isRoomTopic -- lowercase letters, digits, dots
+ * only), so it is safe to embed directly in the filename.
+ */
+export function observeRoomIdentityPath(roomTopic: string): string {
+  mkdirSync(identityDir, { recursive: true });
+  return join(identityDir, `observe-room-${roomTopic}-${scopeKey}.seed`);
+}
+
 export class MaculaCliUnavailable extends Error {}
 export class MaculaCliError extends Error {
   constructor(
@@ -415,125 +440,6 @@ function execFile(
     );
     child.on("close", (code) => resolve({ stdout, stderr, code }));
   });
-}
-
-/**
- * Starts a `macula-cli daemon start` child process and resolves once it
- * reports readiness -- shared between presence.ts, serve.ts, and
- * lobby_observer.ts, the modules that each hold one such daemon open
- * for as long as they need their own standing capability
- * (subscriptions, or served procedures). Each caller passes its OWN
- * identity path and socket name; this function has no opinion on
- * either, matching the existing "identity per concern" pattern the
- * rest of this file already establishes. seedFlags (from stationArgs)
- * are macula-cli's own -seed fallback stations, so THIS daemon --
- * which stays open indefinitely, unlike a one-shot command -- can
- * redial and keep running if its current station goes down instead of
- * silently going deaf until something restarts it by hand.
- */
-export function startDaemon(
-  host: string,
-  seedFlags: string[],
-  identityPath: string,
-  socketName: string,
-): Promise<ChildProcessWithoutNullStreams> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(binPath(), [
-      "daemon",
-      "start",
-      "--json",
-      "--identity",
-      identityPath,
-      "-socket-name",
-      socketName,
-      ...seedFlags,
-      host,
-    ]) as ChildProcessWithoutNullStreams;
-
-    // daemon start --json pretty-prints its readiness envelope across
-    // multiple lines (report.emit's indented encoder -- the SAME shape
-    // every other one-shot --json command uses, unlike pubsub watch's
-    // deliberately single-line-per-event NDJSON). So this can't look
-    // for a first newline the way a line-oriented reader would; it has
-    // to keep accumulating and re-attempt a parse of the WHOLE buffer
-    // until one succeeds, since there's no framing signal cheaper than
-    // "is this valid JSON yet" for a pretty-printed value of unknown
-    // length.
-    let buf = "";
-    let settled = false;
-    const onData = (chunk: Buffer) => {
-      buf += chunk.toString("utf8");
-      let parsed: { ok: boolean; error?: { message?: string } };
-      try {
-        parsed = JSON.parse(buf.trim());
-      } catch {
-        return; // not a complete JSON value yet -- wait for more chunks
-      }
-      child.stdout.off("data", onData);
-      settled = true;
-      if (parsed.ok) {
-        child.unref(); // a held-open daemon child shouldn't keep this process alive on its own
-        resolve(child);
-      } else {
-        reject(new MaculaCliError(parsed.error?.message ?? "daemon start failed"));
-      }
-    };
-    child.stdout.on("data", onData);
-    child.on("error", (e) => {
-      if (!settled) {
-        settled = true;
-        reject(e);
-      }
-    });
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new MaculaCliError(`daemon start exited before announcing readiness (code ${code})`));
-      }
-    });
-  });
-}
-
-/**
- * Taps a running daemon's subscription to `topic` (creating it first if
- * it doesn't already exist), streaming NDJSON events to `onEvent` as
- * they arrive, for as long as the returned child lives. Shared by
- * presence.ts (agent.hello/agent.goodbye) and lobby_observer.ts
- * (agents.lobby, plus every session topic it discovers there) -- both
- * hold a daemon open for durable multi-topic subscriptions, and this is
- * the one piece of that mechanic neither needs its own copy of.
- */
-export function watchTopicOnDaemon(
-  socketName: string,
-  topic: string,
-  onEvent: (payload: unknown, event: WatchEvent) => void,
-): ChildProcessWithoutNullStreams {
-  const child = spawn(binPath(), ["pubsub", "watch", "-daemon", "--json", "-socket-name", socketName, topic]) as ChildProcessWithoutNullStreams;
-  // A held-open child process is ref'd by default and would keep this
-  // MCP server's Node process alive on its own even after the MCP
-  // client disconnects and there's nothing else left to do -- unref so
-  // this is background infrastructure, not a reason to stay up. The
-  // caller's own onShutdown hook still explicitly kills it either way.
-  child.unref();
-
-  let buf = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    buf += chunk.toString("utf8");
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      try {
-        const evt = parseWatchLine(line);
-        if (evt) onEvent(evt.payload, evt);
-      } catch {
-        // a trailing failure envelope on this line -- the connection is
-        // presumably gone; nothing more will arrive on it, so just stop
-        // trying to parse further lines from this child.
-      }
-    }
-  });
-  return child;
 }
 
 /**

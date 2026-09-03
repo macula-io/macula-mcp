@@ -75,6 +75,38 @@ fires on a `v*` tag push, not on every commit to `main`).
   no direct-dial fallback. Presence's own two subscribe Sessions and heartbeat are fully in-process now;
   the citizen-directory registration `presence.start()` also drives is not, and can't be until those
   three capabilities land in `@macula-io/ts`.
+- **`lobby_observer.ts`'s `macula-cli daemon` replaced by one persistent `@macula-io/ts` `Session` PER
+  WATCHED TOPIC**, backing `mesh_observe_lobby`/`mesh_lobby_transcript`/`mesh_unobserve_lobby` (and, through
+  it, `rooms.ts`'s own `tapRoom()`/`untapRoom()`). The old daemon multiplexed central plus every room topic
+  over ONE mesh connection/identity; `Session` allows only one active `subscribe()` per connection (same
+  constraint presence's own cutover hit first), so multiplexing is gone — central gets the existing fifth
+  identity (`observeIdentityPath()`/`MACULA_MCP_OBSERVE_IDENTITY`, unchanged), and every concurrently-tapped
+  room gets its OWN identity, new `observeRoomIdentityPath()` (`macula_cli.ts`, no env override — there's no
+  fixed slot to pin a dynamically-tapped room to), minted from the room's own topic. `tapRoom()` stays a
+  synchronous, fire-and-forget call (rooms.ts never awaits it, matching the old daemon-child-spawn shape) —
+  the room's Session is registered in the tap map immediately, before its connect even starts, and the
+  connect itself runs in the background.
+- **Genuinely improved resilience, not just a port**: every leg (central, and each room tap) is now
+  independently self-healing, adapted from presence.ts's own reconnect-with-backoff pattern (1s base,
+  doubling, capped at 30s) rather than reinvented. This is a real behavior upgrade over the old daemon
+  model, not a like-for-like port of it — previously the WHOLE daemon dying tore down every tap at once, and
+  a single tap's watcher child dying silently removed just that tap, leaving `rooms.ts`'s own
+  `ensureTapped()` to notice and re-tap on next use. Now a died central connection reconnects on its own
+  without touching any room tap, and a died room tap reconnects on its own without anyone needing to notice
+  or re-tap — there is no more "a tap died silently" condition to report, so the old `status()`'s
+  `taps_died` field (and the daemon-crash detection it existed for) is gone with it. `stop()` and
+  `untapRoom()` now do a graceful async `Session.close()` (`stop()` itself became `async` — its two callers,
+  `mesh_unobserve_lobby` and `presence.ts`'s own `stop()`, now `await` it) instead of a bare child-process
+  `kill()`. Verified live against the production fleet: a `room_opened` envelope from another identity on
+  central dynamically tapped that room and its own chat was recorded with station-attested `publisher`; a
+  real forced disconnect on a room tap's own Session (dialing a second connection under its exact identity,
+  the same technique presence's own live check used) reconnected it within one backoff cycle while central
+  and the observer's own `isActive()` stayed unaffected throughout; `presence.ts`'s real `start()`/`stop()`
+  round-trip (which drives this module) confirmed end to end. New `src/lobby_observer.test.ts` (17 cases)
+  covers the wiring, dynamic room discovery and the `max_rooms` cap, `tapRoom()`/`untapRoom()` including the
+  connect-still-in-flight race, and independent per-leg reconnect, mocked at the `macula_ts_client.ts`
+  boundary the same way `presence.test.ts` does. `macula_cli.ts`'s now-unused `startDaemon()`/
+  `watchTopicOnDaemon()` (their last caller) are removed.
 
 ### Known gaps (real, not hidden — see README.md)
 - `@macula-io/ts` does not yet support non-default realms or direct-dial. `mesh_call`'s `realm` and `direct`

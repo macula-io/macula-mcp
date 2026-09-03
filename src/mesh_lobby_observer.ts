@@ -126,7 +126,7 @@ export function registerMeshLobbyObserver(server: McpServer): void {
       "restarts it -- this only opts out for now, it isn't sticky across the next mesh_hello.",
     {},
     async () => {
-      const result = lobbyObserver.stop();
+      const result = await lobbyObserver.stop();
       return jsonContent(result);
     },
   );

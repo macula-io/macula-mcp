@@ -5,7 +5,7 @@
 // mesh_observe_lobby.ts/mesh_lobby_transcript.ts/mesh_unobserve_lobby.ts
 // are thin tool wrappers around start()/status()/stop(); rooms.ts calls
 // tapRoom()/untapRoom() for the rooms this agent deliberately opens,
-// joins and leaves; this module owns the actual daemon lifecycle --
+// joins and leaves; this module owns the actual observer lifecycle --
 // same split as presence.ts owning mesh_hello/mesh_agents/mesh_goodbye.
 //
 // A THIRD narrow exception to "one-shot subprocess, no standing state"
@@ -26,36 +26,55 @@
 // tapRoom() regardless of the public-room cap -- a deliberate join is
 // not something a resource bound should silently drop.
 //
-// (2026-09-03, release review) TWO correctness fixes, both found live
-// by the same review that landed WP1-3:
-//   1. start() had no in-flight guard, unlike presence.ts's own start().
-//      Every room tool calls presence.ensurePresence() (which itself
-//      awaits this module's start() inside its own doStart) and then
-//      immediately awaits start() again itself -- two concurrent first
-//      calls both saw `state === undefined`, both minted an identity and
-//      spawned a daemon, and whichever finished last silently overwrote
-//      the other's ObserverState, leaking the first daemon and losing
-//      its taps. Same race presence.ts's own `starting` guard exists to
-//      fix, applied here the same way.
-//   2. Nothing noticed a daemon or a room-tap child dying on its own.
-//      isActive()/isTapped() kept reporting true, rooms looked joined,
-//      and mesh_say's reply wait polled a transcript nothing was
-//      feeding -- the exact silent-loss shape presence.ts's own
-//      watchForUnexpectedDeath fixed for the old inbox watcher on
-//      2026-09-02, now moved (untested until this fix) to the room-tap path.
-//      The daemon dying tears the whole observer down (stopSync, so the
-//      next start() rebuilds it); a single tap dying only removes that
-//      tap, so rooms.ts's own isTapped() check (already relied on by
-//      listRooms) correctly reports it as no longer watched.
+// (2026-09-04) In-process @macula-io/ts Sessions, not a macula-cli
+// daemon: this module used to hold one macula-cli `daemon start`
+// subprocess open, with the central topic and every room topic tapped
+// as separate `pubsub watch -daemon` children multiplexed over that
+// ONE daemon's single mesh connection/identity. @macula-io/ts's Session
+// allows only one active subscribe() per connection (confirmed against
+// macula-go's own connection.Session -- see presence.ts's own doc
+// comment, which took this same fork first for agent.hello/
+// agent.goodbye), so multiplexing is gone: watching N topics now means
+// N independent persistent Sessions, each with its OWN identity (a
+// second connection under the same node ID gets the FIRST one closed by
+// the station -- macula_station_listener.erl's per-identity peer
+// dedupe, the same reason presence needs two identities for its own two
+// legs). Central gets the existing fifth identity
+// (observeIdentityPath()/MACULA_MCP_OBSERVE_IDENTITY, unchanged); every
+// concurrently-tapped room gets its OWN identity, minted on demand from
+// the room's own topic (observeRoomIdentityPath(), macula_cli.ts) --
+// there is no fixed slot to pre-allocate one for, unlike the five fixed
+// concerns that function's neighbors cover.
+//
+// Real reconnect, adapted from presence.ts's own pattern rather than
+// reinvented: every leg (central, and each room tap) is given an
+// onClosed hook that reconnects and re-subscribes with exponential
+// backoff (1s base, doubling, capped at 30s) the moment ITS OWN
+// connection dies, for any reason short of a deliberate untapRoom()/
+// stop(). This is a genuine improvement over the old daemon model, not
+// just a port of it: previously the WHOLE daemon dying tore down every
+// tap at once (stopSync -- see git history), and a single tap's watcher
+// child dying silently removed just that tap, requiring rooms.ts's own
+// ensureTapped() to notice and re-tap on next use. Now every leg is
+// independent AND self-healing -- a died central connection reconnects
+// on its own without touching any room tap, and a died room tap
+// reconnects on its own without anyone needing to notice. There is no
+// more "a tap died silently, someone should re-tap it" condition to
+// report, so the old status()'s taps_died field (and the daemon-crash
+// detection it existed for) is gone with it -- rooms.ts's own
+// isTapped()-then-re-tap fallback in ensureTapped() still exists and is
+// still correct, it just only fires now after the WHOLE observer was
+// stopped and restarted (an empty roomTaps map), not after an
+// individual reconnect.
 //
 // Never retroactive: observing only ever sees facts published AFTER a
 // tap starts, same fire-and-forget constraint documented on
 // mesh_watch/mesh_etiquette. Starting the observer does not reveal
 // anything that happened before it started.
 
-import { randomBytes } from "node:crypto";
-import { type ChildProcessWithoutNullStreams } from "node:child_process";
-import { identity, observeIdentityPath, onShutdown, startDaemon, stationArgs, watchTopicOnDaemon } from "./macula_cli.js";
+import type { Identity, PubsubEvent, Session } from "@macula-io/ts";
+import { defaultIdentityPath, observeIdentityPath, observeRoomIdentityPath, onShutdown, stationArgs } from "./macula_cli.js";
+import { connectWithFallback, loadOrGenerateIdentity, toCliError, tsIdentity } from "./macula_ts_client.js";
 import { recordFact } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "./envelope.js";
 
@@ -63,23 +82,51 @@ export const LOBBY_TOPIC = CENTRAL_TOPIC;
 
 const DEFAULT_MAX_ROOMS = 20;
 
-interface RoomTap {
-  watcher: ChildProcessWithoutNullStreams;
-  /** 1 if this agent opened or joined the room on purpose (rooms.ts); 0 if it was tapped only because it was announced publicly on central. */
+/** Reconnect backoff for any leg (central or a room tap): starts at 1s, doubles, caps at 30s -- same numbers as presence.ts's own legs. */
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
+
+/**
+ * One durably-subscribed topic: its own identity/Session, its own
+ * current subscription's stop() function, and enough state to
+ * reconnect-with-backoff when that Session's connection dies. `session`
+ * is undefined until the FIRST connect actually completes -- room-tap
+ * legs are created and registered synchronously (tapRoom() is not
+ * async; rooms.ts never awaits it) while the connect itself runs in the
+ * background, so a concurrent untapRoom() can land before there is a
+ * real Session to close (see attachSession's own `closing` checks).
+ * `identity` is loaded once and reused across every reconnect for this
+ * leg's whole life -- connect()ing again under the same Identity object
+ * is safe (read-only from the Go side, never consumed).
+ */
+interface Leg {
+  topic: string;
+  onEvent: (evt: PubsubEvent) => void;
+  /** The raw, possibly-undefined host override this leg was started with -- kept raw (not pre-resolved to a single primary) so every (re)connect attempt gets connectWithFallback's own multi-station fallback. */
+  host?: string;
+  identity: Identity;
+  session?: Session;
+  stopSubscription: () => Promise<void>;
+  reconnectAttempt: number;
+  retryTimer?: NodeJS.Timeout;
+  /** Set once untapRoom()/stop() starts tearing this leg down -- suppresses any reconnect already scheduled or about to be scheduled, and tells a connect attempt still in flight to close what it just opened instead of subscribing on it. */
+  closing: boolean;
+}
+
+/** A room tap: a Leg plus whether this agent opened or joined the room on purpose (rooms.ts), as opposed to tapping it only because it was announced publicly on central. */
+interface RoomTap extends Leg {
   joined: 0 | 1;
 }
 
 interface ObserverState {
   nodeId: string;
   host: string;
-  socketName: string;
-  daemon: ChildProcessWithoutNullStreams;
-  lobbyWatcher: ChildProcessWithoutNullStreams;
+  /** The raw host override start() was called with (possibly undefined) -- every room tap leg reuses it, the same raw value the central leg itself got, so both get connectWithFallback's own multi-station fallback identically. */
+  hostArg: string | undefined;
+  centralLeg: Leg;
   roomTaps: Map<string, RoomTap>;
   maxRooms: number;
   droppedForCap: number;
-  /** Room topics whose tap died on its own since the last status()/listRooms() read -- so a caller can tell "closed" apart from "never watched". */
-  diedUnexpectedly: Set<string>;
 }
 
 let state: ObserverState | undefined;
@@ -127,68 +174,146 @@ function doStartAlreadyActive(args: StartArgs): StartResult {
   };
 }
 
-async function doStart(args: StartArgs): Promise<StartResult> {
-  if (state) return doStartAlreadyActive(args);
-  const { host, seedFlags } = stationArgs(args.host);
-  const maxRooms = Math.max(1, args.maxRooms ?? DEFAULT_MAX_ROOMS);
-
-  const { node_id: nodeId } = await identity();
-  const socketName = `observe-${process.pid}-${randomBytes(4).toString("hex")}`;
-  const daemon = await startDaemon(host, seedFlags, observeIdentityPath(), socketName);
-  const roomTaps = new Map<string, RoomTap>();
-
-  // Built before `state` exists, same order presence.ts uses for its own
-  // daemon+watchers -- safe because the callback only ever fires later,
-  // asynchronously, on a real network event, by which point `state`
-  // (assigned immediately below, before this function does anything
-  // else async) is already set. tapPublicRoomIfNew reads `state` itself
-  // rather than closing over roomTaps/maxRooms directly so the
-  // idempotent re-`start()` path above (which mutates `state.maxRooms`)
-  // is the one source of truth for the cap.
-  const lobbyWatcher = watchTopicOnDaemon(socketName, LOBBY_TOPIC, (payload) => {
-    recordFact({ topic: LOBBY_TOPIC, payload, at: new Date().toISOString() });
-    tapPublicRoomIfNew(payload);
+/**
+ * (Re)connects `leg` and re-subscribes, wiring a fresh onClosed hook
+ * that schedules the NEXT reconnect the moment this one's connection
+ * dies. Throws on failure -- the caller decides whether that's fatal
+ * (connectCentralLeg's first attempt) or just another turn of the
+ * backoff loop (a room tap's own first-connect failure, and every
+ * scheduleReconnect retry); this function itself has no opinion on
+ * that. Shared by the central leg and every room tap -- adapted from
+ * presence.ts's own attachSession, generalized over `Leg` instead of
+ * two fixed fields.
+ */
+async function attachSession(leg: Leg): Promise<void> {
+  const session = await connectWithFallback(leg.identity, leg.host);
+  if (leg.closing) {
+    await session.close(leg.identity).catch(() => {});
+    return;
+  }
+  const stop = await session.subscribe(leg.topic, leg.onEvent, {
+    onClosed: (err) => {
+      console.error(`lobby observer: ${leg.topic} subscription closed unexpectedly (${err.message}) -- reconnecting`);
+      scheduleReconnect(leg);
+    },
   });
+  if (leg.closing) {
+    // stop() ran while subscribe() was still in flight -- tear this fresh one down too, nothing should be left listening.
+    await stop().catch(() => {});
+    await session.close(leg.identity).catch(() => {});
+    return;
+  }
+  leg.session = session;
+  leg.stopSubscription = stop;
+  leg.reconnectAttempt = 0; // a successful (re)connect resets backoff for the NEXT disconnect
+  leg.retryTimer = undefined;
+}
 
-  const newState: ObserverState = { nodeId, host, socketName, daemon, lobbyWatcher, roomTaps, maxRooms, droppedForCap: 0, diedUnexpectedly: new Set() };
-  state = newState;
-  onShutdown(stopSync);
-  watchForUnexpectedDeath(newState);
-  return { node_id: nodeId, connected_to: host, lobby_topic: LOBBY_TOPIC, max_rooms: maxRooms, already_active: false };
+/** Schedules attachSession() again after an exponential backoff, retrying itself on further failure until it succeeds or the leg starts closing. Never throws -- every failure just re-schedules. */
+function scheduleReconnect(leg: Leg): void {
+  if (leg.closing) return;
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** leg.reconnectAttempt);
+  leg.reconnectAttempt += 1;
+  console.error(`lobby observer: ${leg.topic} reconnecting in ${delay}ms (attempt ${leg.reconnectAttempt})`);
+  const timer = setTimeout(() => {
+    void attachSession(leg).catch((e) => {
+      console.error(`lobby observer: ${leg.topic} reconnect attempt failed: ${e instanceof Error ? e.message : String(e)}`);
+      scheduleReconnect(leg);
+    });
+  }, delay);
+  timer.unref(); // a pending reconnect attempt alone shouldn't keep the process alive
+  leg.retryTimer = timer;
+}
+
+/** Loads/mints `identityPath`'s identity and makes the FIRST connection -- throws if it fails, so start() doesn't silently report success on a central leg that never connected. Every reconnect AFTER this first one goes through scheduleReconnect instead, which never throws. Used for the central leg only -- a room tap's own first connect is fire-and-forget instead (tapRoomLeg below), since tapRoom() is not async. */
+async function connectCentralLeg(host: string | undefined, identityPath: string, topic: string, onEvent: (evt: PubsubEvent) => void): Promise<Leg> {
+  const identity = loadOrGenerateIdentity(identityPath);
+  const leg: Leg = { topic, onEvent, host, identity, session: undefined, stopSubscription: async () => {}, reconnectAttempt: 0, closing: false };
+  try {
+    await attachSession(leg);
+  } catch (e) {
+    identity.dispose();
+    throw toCliError(e);
+  }
+  return leg;
+}
+
+/** Graceful async teardown: waits for the subscription to actually stop and the Session to actually close (if one was ever established) before disposing the identity. Used by stop() and untapRoom(), which can afford to let this run in the background without blocking their own (sync, for untapRoom) return. */
+async function stopLeg(leg: Leg): Promise<void> {
+  leg.closing = true;
+  if (leg.retryTimer) clearTimeout(leg.retryTimer);
+  await leg.stopSubscription().catch(() => {});
+  if (leg.session) await leg.session.close(leg.identity).catch(() => {});
+  leg.identity.dispose();
+}
+
+/** Synchronous best-effort teardown only -- what onShutdown registers, same reasoning as presence.ts's own stopLegSync: a SIGINT/SIGTERM handler cannot reliably wait on an async close. An abrupt process kill just drops the connection; disposing the identity handle is the only truly synchronous, safe cleanup available here. */
+function stopLegSync(leg: Leg): void {
+  leg.closing = true;
+  if (leg.retryTimer) clearTimeout(leg.retryTimer);
+  leg.identity.dispose();
 }
 
 /**
- * A daemon or watcher child dying on its own (crash, station kick, lost
- * connection) used to leave `state` untouched -- see the module header
- * for the failure this fixes, mirroring presence.ts's own
- * watchForUnexpectedDeath. `forState`/`forWatcher` are closed over, not
- * read from the module-level `state`/tap map, so a handler registered
- * against an OLD state or an already-untapped room never acts on
- * something that isn't current anymore.
+ * Starts watching `roomTopic` on its own fresh Session/identity, and
+ * registers it in `forState.roomTaps` immediately -- BEFORE the connect
+ * even begins, so a concurrent tapRoom()/untapRoom() call sees it right
+ * away and a caller's own openRoom()/joinRoom() (which taps before
+ * publishing, deliberately) doesn't race an empty map. The connect
+ * itself is fire-and-forget: tapRoom() is a sync function rooms.ts never
+ * awaits, matching the old watchTopicOnDaemon()'s own "spawn and don't
+ * wait" shape. A first-connect failure does not throw or drop the tap --
+ * it logs and hands off to scheduleReconnect(), the same self-healing
+ * every later disconnect gets (see this module's own header).
  */
-function watchForUnexpectedDeath(forState: ObserverState): void {
-  const onDaemonDeath = (source: string) => {
-    if (state !== forState) return;
-    console.error(`lobby observer: ${source} exited unexpectedly -- marking inactive so the next start() rebuilds it`);
-    stopSync();
+function tapRoomLeg(forState: ObserverState, roomTopic: string, joined: 0 | 1): void {
+  const identity = loadOrGenerateIdentity(observeRoomIdentityPath(roomTopic));
+  const leg: RoomTap = {
+    topic: roomTopic,
+    onEvent: (evt) => {
+      recordFact({
+        topic: roomTopic,
+        payload: evt.payload,
+        at: new Date().toISOString(),
+        publisher: Buffer.from(evt.publisher).toString("hex"),
+      });
+    },
+    host: forState.hostArg,
+    identity,
+    session: undefined,
+    stopSubscription: async () => {},
+    reconnectAttempt: 0,
+    closing: false,
+    joined,
   };
-  forState.daemon.on("exit", () => onDaemonDeath("daemon"));
-  forState.daemon.on("error", () => onDaemonDeath("daemon"));
-  forState.lobbyWatcher.on("exit", () => onDaemonDeath("central watcher"));
-  forState.lobbyWatcher.on("error", () => onDaemonDeath("central watcher"));
+  forState.roomTaps.set(roomTopic, leg);
+  void attachSession(leg).catch((e) => {
+    console.error(`lobby observer: room tap ${roomTopic} failed to connect, retrying: ${e instanceof Error ? e.message : String(e)}`);
+    scheduleReconnect(leg);
+  });
 }
 
-function watchTapForUnexpectedDeath(forState: ObserverState, roomTopic: string, forWatcher: ChildProcessWithoutNullStreams): void {
-  const onTapDeath = () => {
-    if (state !== forState) return;
-    const tap = forState.roomTaps.get(roomTopic);
-    if (!tap || tap.watcher !== forWatcher) return; // already untapped or replaced deliberately
-    forState.roomTaps.delete(roomTopic);
-    forState.diedUnexpectedly.add(roomTopic);
-    console.error(`lobby observer: tap on ${roomTopic} exited unexpectedly -- rooms.ts will re-tap on next use`);
-  };
-  forWatcher.on("exit", onTapDeath);
-  forWatcher.on("error", onTapDeath);
+async function doStart(args: StartArgs): Promise<StartResult> {
+  if (state) return doStartAlreadyActive(args);
+  const { host } = stationArgs(args.host);
+  const maxRooms = Math.max(1, args.maxRooms ?? DEFAULT_MAX_ROOMS);
+
+  const { node_id: nodeId } = tsIdentity(defaultIdentityPath());
+
+  const centralLeg = await connectCentralLeg(args.host, observeIdentityPath(), LOBBY_TOPIC, (evt) => {
+    recordFact({
+      topic: LOBBY_TOPIC,
+      payload: evt.payload,
+      at: new Date().toISOString(),
+      publisher: Buffer.from(evt.publisher).toString("hex"),
+    });
+    tapPublicRoomIfNew(evt.payload);
+  });
+
+  const newState: ObserverState = { nodeId, host, hostArg: args.host, centralLeg, roomTaps: new Map(), maxRooms, droppedForCap: 0 };
+  state = newState;
+  onShutdown(stopSync);
+  return { node_id: nodeId, connected_to: host, lobby_topic: LOBBY_TOPIC, max_rooms: maxRooms, already_active: false };
 }
 
 /** A public room_opened envelope on central: start watching that room, if not already tapped and under the cap. */
@@ -206,9 +331,9 @@ function tapPublicRoomIfNew(centralPayload: unknown): void {
 }
 
 /**
- * Starts watching `roomTopic` on the observer's daemon (recording every
- * fact into the transcript, with the station-attested publisher kept
- * alongside), or marks an existing tap as joined. A joined tap is
+ * Starts watching `roomTopic` on its own persistent Session (recording
+ * every fact into the transcript, with the station-attested publisher
+ * kept alongside), or marks an existing tap as joined. A joined tap is
  * exempt from the public-room cap: opening or joining a room is this
  * agent's own decision, not something a resource bound should silently
  * drop. Throws if the observer isn't active -- callers await start()
@@ -216,27 +341,20 @@ function tapPublicRoomIfNew(centralPayload: unknown): void {
  */
 export function tapRoom(roomTopic: string, opts: { joined: 0 | 1 }): void {
   if (!state) throw new Error("lobby observer is not active -- start() it before tapping a room");
-  const forState = state;
-  const existing = forState.roomTaps.get(roomTopic);
+  const existing = state.roomTaps.get(roomTopic);
   if (existing) {
     if (opts.joined === 1) existing.joined = 1;
     return;
   }
-  forState.diedUnexpectedly.delete(roomTopic);
-  const watcher = watchTopicOnDaemon(forState.socketName, roomTopic, (payload, evt) => {
-    recordFact({ topic: roomTopic, payload, at: new Date().toISOString(), publisher: evt.publisher });
-  });
-  forState.roomTaps.set(roomTopic, { watcher, joined: opts.joined });
-  watchTapForUnexpectedDeath(forState, roomTopic, watcher);
+  tapRoomLeg(state, roomTopic, opts.joined);
 }
 
-/** Stops watching `roomTopic`. No-op if it wasn't tapped. */
+/** Stops watching `roomTopic`. No-op if it wasn't tapped. Removes it from the map immediately (so isTapped() reflects it right away); the actual Session close and identity dispose run in the background. */
 export function untapRoom(roomTopic: string): void {
   const tap = state?.roomTaps.get(roomTopic);
   if (!tap || !state) return;
-  tap.watcher.kill();
   state.roomTaps.delete(roomTopic);
-  state.diedUnexpectedly.delete(roomTopic);
+  void stopLeg(tap).catch(() => {});
 }
 
 export function isTapped(roomTopic: string): boolean {
@@ -256,16 +374,12 @@ export interface ObserverStatus {
   joined_room_topics: string[];
   max_rooms: number;
   dropped_for_cap: number;
-  /** Room topics whose tap died on its own since the last read of this status -- surfaced once, then cleared. */
-  taps_died: string[];
 }
 
 export function status(): ObserverStatus {
   if (!state) {
-    return { active: false, lobby_topic: LOBBY_TOPIC, room_topics: [], joined_room_topics: [], max_rooms: 0, dropped_for_cap: 0, taps_died: [] };
+    return { active: false, lobby_topic: LOBBY_TOPIC, room_topics: [], joined_room_topics: [], max_rooms: 0, dropped_for_cap: 0 };
   }
-  const died = [...state.diedUnexpectedly];
-  state.diedUnexpectedly.clear();
   return {
     active: true,
     lobby_topic: LOBBY_TOPIC,
@@ -273,7 +387,6 @@ export function status(): ObserverStatus {
     joined_room_topics: joinedRooms(),
     max_rooms: state.maxRooms,
     dropped_for_cap: state.droppedForCap,
-    taps_died: died,
   };
 }
 
@@ -282,18 +395,21 @@ export interface StopResult {
   rooms_stopped: number;
 }
 
-/** Tears everything down. No-op (was_active: false) if not active. Nothing to "say goodbye" for -- observing never announced itself, unlike presence; rooms.ts's leaveAll() is what publishes participant_left first, when leaving is deliberate. */
-export function stop(): StopResult {
+/** Tears everything down, gracefully (waits for every Session to actually close before resolving). No-op (was_active: false) if not active. Nothing to "say goodbye" for -- observing never announced itself, unlike presence; rooms.ts's leaveAll() is what publishes participant_left first, when leaving is deliberate. */
+export async function stop(): Promise<StopResult> {
   if (!state) return { was_active: false, rooms_stopped: 0 };
-  const roomsStopped = state.roomTaps.size;
-  stopSync();
+  const { centralLeg, roomTaps } = state;
+  const roomsStopped = roomTaps.size;
+  await stopLeg(centralLeg);
+  await Promise.all([...roomTaps.values()].map((t) => stopLeg(t)));
+  state = undefined;
   return { was_active: true, rooms_stopped: roomsStopped };
 }
 
+/** Synchronous teardown only -- what onShutdown registers, since a SIGINT/SIGTERM handler cannot reliably wait on an async close (see stopLegSync's own doc). */
 function stopSync(): void {
   if (!state) return;
-  state.daemon.kill();
-  state.lobbyWatcher.kill();
-  for (const t of state.roomTaps.values()) t.watcher.kill();
+  stopLegSync(state.centralLeg);
+  for (const t of state.roomTaps.values()) stopLegSync(t);
   state = undefined;
 }

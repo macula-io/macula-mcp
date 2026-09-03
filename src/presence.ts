@@ -532,7 +532,7 @@ export async function stop(): Promise<StopResult> {
     // best effort -- still tear down locally even if the mesh is unreachable
   }
   await ringService.stop();
-  lobbyObserver.stop();
+  await lobbyObserver.stop();
   clearInterval(heartbeatTimer);
   await stopLeg(helloLeg);
   await stopLeg(goodbyeLeg);
