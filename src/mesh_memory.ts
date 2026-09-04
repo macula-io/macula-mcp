@@ -63,6 +63,7 @@ import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { call, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
+import { assertNoLikelySecret, findLikelySecret, isExcludedPath } from "./secret_scan.js";
 
 const SEARCH_PROCEDURE = "hecate-rag.answer_query";
 const ADD_KNOWLEDGE_PROCEDURE = "hecate-rag.add_knowledge";
@@ -180,6 +181,8 @@ export function registerMeshMemory(server: McpServer): void {
     async ({ content, source_label, topics, host }) => {
       ensurePresence(server);
       try {
+        assertNoLikelySecret(content, "content");
+        if (topics !== undefined) assertNoLikelySecret(topics, "topics");
         const discovery = await discoverHecateRagRealm(host);
         if ("error" in discovery) return errorContent(discovery.error);
 
@@ -253,6 +256,14 @@ export function registerMeshMemory(server: McpServer): void {
         if (isExcluded(rel, excludeDirs)) continue;
         const ext = extname(rel);
         if (!includeExt.includes(ext)) continue;
+        // Cheap first layer, before even opening the file: a filename
+        // that's secret-bearing by convention (.env, id_rsa, .npmrc, ...)
+        // gets refused regardless of what content-scanning would find --
+        // defense in depth, not a replacement for it.
+        if (isExcludedPath(rel)) {
+          skipped.push({ path: rel, reason: "filename matches a known secret-bearing convention (.env/.pem/.key/id_rsa/.ssh/.aws/.npmrc/credentials.json) -- refusing to read it at all" });
+          continue;
+        }
 
         let content: string;
         try {
@@ -264,6 +275,11 @@ export function registerMeshMemory(server: McpServer): void {
         }
         if (content.trim().length === 0) {
           skipped.push({ path: rel, reason: "empty file" });
+          continue;
+        }
+        const secretMatch = findLikelySecret(content, rel);
+        if (secretMatch) {
+          failed.push({ path: rel, error: `refusing to upload -- looks like it contains a ${secretMatch.patternName} (at ${secretMatch.path}). Redact it and re-run to include this file.` });
           continue;
         }
 

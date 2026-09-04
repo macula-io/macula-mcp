@@ -15,6 +15,7 @@ import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { publish } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
+import { assertNoLikelySecret } from "./secret_scan.js";
 
 export function registerMeshPublish(server: McpServer): void {
   server.tool(
@@ -42,6 +43,7 @@ export function registerMeshPublish(server: McpServer): void {
     async ({ topic, fact, host, realm }) => {
       ensurePresence(server);
       try {
+        assertNoLikelySecret(fact, "fact");
         const res = await publish({ host, topic, fact, realm, identityPath: defaultIdentityPath() });
         return jsonContent({ topic: res.topic, duration_ms: res.duration_ms });
       } catch (e) {

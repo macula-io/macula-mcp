@@ -36,6 +36,7 @@ import { z } from "zod";
 import { defaultStation } from "./mesh_config.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
+import { assertNoLikelySecret } from "./secret_scan.js";
 
 const DEFAULT_BANNER = `
    __  __  _____   ___  _   _  _      _
@@ -101,6 +102,12 @@ export function registerMeshHello(server: McpServer): void {
     },
     async ({ operator_name, message, model, interval_seconds, host }) => {
       try {
+        // Only the explicit tool args, not the MACULA_MCP_*-env-var
+        // fallbacks below -- those are an operator's own standing
+        // configuration, not a live agent decision, and out of scope for
+        // a gate aimed at a careless AGENT's real-time content choices.
+        if (operator_name !== undefined) assertNoLikelySecret(operator_name, "operator_name");
+        if (message !== undefined) assertNoLikelySecret(message, "message");
         const result = await presence.start({
           host,
           // Explicit args win; MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL

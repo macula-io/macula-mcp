@@ -23,6 +23,7 @@ import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { artifactGet, artifactPut } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
+import { assertNoLikelySecretInBase64Content } from "./secret_scan.js";
 
 export function registerMeshArtifact(server: McpServer): void {
   server.tool(
@@ -39,6 +40,7 @@ export function registerMeshArtifact(server: McpServer): void {
     async ({ content, host }) => {
       ensurePresence(server);
       try {
+        assertNoLikelySecretInBase64Content(content, "content");
         const res = await artifactPut({ host, contentBase64: content, identityPath: defaultIdentityPath() });
         return jsonContent({ mcid_hex: res.mcid_hex, size_bytes: res.size_bytes });
       } catch (e) {

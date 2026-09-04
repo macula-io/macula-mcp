@@ -12,6 +12,7 @@ import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as ringService from "./ring_service.js";
 import * as rooms from "./rooms.js";
+import { assertNoLikelySecret } from "./secret_scan.js";
 
 export function registerMeshAnswerRing(server: McpServer): void {
   server.tool(
@@ -33,6 +34,7 @@ export function registerMeshAnswerRing(server: McpServer): void {
     async ({ ring_id, answer, reason, host }) => {
       ensurePresence(server);
       try {
+        if (reason !== undefined) assertNoLikelySecret(reason, "reason");
         const res = await ringService.answerPendingRing({ ring_id, answer: answer === 1 ? 1 : 2, reason, host });
         return jsonContent({
           ...res,

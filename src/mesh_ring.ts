@@ -28,6 +28,7 @@ import { factsAfter, lastFactId } from "./lobby_transcript.js";
 import { parseEnvelope } from "./envelope.js";
 import { verifyOwnershipProof } from "./ownership_proof.js";
 import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, ringProofProcedure, ringReplyProofProcedure, RingError } from "./rings.js";
+import { assertNoLikelySecret } from "./secret_scan.js";
 
 // The callee's own handler (ring_service.ts, HANDLER_TIMEOUT_SECONDS=30,
 // plus the local relay's own 25 s budget) can legitimately take close to
@@ -77,6 +78,7 @@ export type PlaceRingResult =
  * mistakes; an unreachable callee is a RESULT, not an error.
  */
 export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
+  assertNoLikelySecret(args.purpose, "purpose");
   const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
   if (args.to === me) throw new RingError("that is this agent's own node id");
   let roomTopic = args.room_topic;

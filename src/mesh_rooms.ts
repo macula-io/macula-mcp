@@ -21,6 +21,7 @@ import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC, KINDS, TALK_KINDS } from "./envelope.js";
 import { ANSWER, listRings } from "./rings.js";
+import { assertNoLikelySecret } from "./secret_scan.js";
 
 const MAX_WAIT_SECONDS = 3600;
 
@@ -55,6 +56,7 @@ export function registerMeshRooms(server: McpServer): void {
     async ({ purpose, public: isPublic, participants, host }) => {
       ensurePresence(server);
       try {
+        if (purpose !== undefined) assertNoLikelySecret(purpose, "purpose");
         const res = await rooms.openRoom({ host, purpose, public: isPublic === 1 ? 1 : 0, participants });
         return jsonContent({
           ...res,
@@ -169,6 +171,11 @@ export function registerMeshRooms(server: McpServer): void {
         return errorContent(`mesh_say: ${kind} is a lifecycle kind, published by mesh_open_room/mesh_join_room/mesh_leave_room, not by mesh_say.`);
       }
       try {
+        // refs too, not just text: it's caller-supplied free strings
+        // (z.string().min(1)), not actually validated as MCID hex despite
+        // its own documented shape -- found by adversarial review to be an
+        // unscanned path on an otherwise-wired tool.
+        assertNoLikelySecret({ text, refs }, "text/refs");
         const res = await rooms.say({ host, room_topic, kind, text, in_reply_to, refs, waitReplySeconds: wait_reply_seconds });
         return jsonContent(res);
       } catch (e) {

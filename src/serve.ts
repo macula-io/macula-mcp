@@ -68,6 +68,7 @@ import { spawn } from "node:child_process";
 import type { Session, Identity, JsonValue } from "@macula-io/ts";
 import { onShutdown, serveAdvertiseIdentityPath, serveProcedureIdentityPath } from "./mesh_config.js";
 import { connectWithFallback, loadOrGenerateIdentity, toCliError } from "./macula_ts_client.js";
+import { findLikelySecret } from "./secret_scan.js";
 
 interface Registration {
   procedure: string;
@@ -185,11 +186,24 @@ function runExec(execCmd: string, timeoutMs: number, payload: JsonValue): Promis
         resolve(null);
         return;
       }
+      let parsed: JsonValue;
       try {
-        resolve(JSON.parse(trimmed) as JsonValue);
+        parsed = JSON.parse(trimmed) as JsonValue;
       } catch (e) {
         reject(new Error(`exec stdout was not valid JSON: ${e instanceof Error ? e.message : String(e)}`));
+        return;
       }
+      // This reply is about to leave the machine to WHOEVER called this
+      // served procedure, not a choice this agent made in the moment --
+      // a registered command's output (e.g. an innocently-configured
+      // "show config" helper) deserves the same scan every other outbound
+      // path gets, see secret_scan.ts's own doc.
+      const secretMatch = findLikelySecret(parsed, "exec stdout");
+      if (secretMatch) {
+        reject(new Error(`exec stdout looks like it contains a ${secretMatch.patternName} (at ${secretMatch.path}) -- refusing to reply with it.`));
+        return;
+      }
+      resolve(parsed);
     });
     try {
       child.stdin.write(JSON.stringify(payload));

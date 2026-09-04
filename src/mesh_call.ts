@@ -21,6 +21,7 @@ import { call } from "./macula_ts_client.js";
 import { signIdentity, withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
+import { assertNoLikelySecret } from "./secret_scan.js";
 
 export function registerMeshCall(server: McpServer): void {
   server.tool(
@@ -96,6 +97,7 @@ export function registerMeshCall(server: McpServer): void {
     async ({ procedure: rawProcedure, args, timeout_ms, host, realm: rawRealm, direct, prove_identity }) => {
       ensurePresence(server);
       try {
+        assertNoLikelySecret(args, "args");
         // Split here, before signing: an ownership proof is bound to the
         // procedure name the server checks, which is the bare one.
         const { procedure, realm } = splitRealmPrefix(rawProcedure, rawRealm);
