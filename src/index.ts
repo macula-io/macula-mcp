@@ -4,7 +4,7 @@
 //
 // Topology: thin client, but a direct one. macula-mcp speaks MCP over
 // stdio to the agent, and talks QUIC/DHT/Macula RPC to the mesh itself,
-// in-process, via the vendored @macula-io/ts SDK (macula_ts_client.ts) --
+// in-process, via the @macula-io/ts SDK (macula_ts_client.ts) --
 // no subprocess, no separately-installed binary, nothing else in the
 // dependency chain to keep in version lockstep. Most tools below are a
 // one-shot connect/act/close (mirroring the "connect, do the thing, exit"

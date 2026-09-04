@@ -39,8 +39,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 // Both the DHT lookup (all-zero realm) and the actual list_stations call
-// go through @macula-io/ts now -- the 0.12.0 vendor refresh added realm
-// support to Session.call, closing the one gap that used to force the
+// go through @macula-io/ts now -- realm support on Session.call (landed
+// in @macula-io/ts 0.12.0) closed the one gap that used to force the
 // second half onto a macula-cli subprocess. See README.md/CHANGELOG.md.
 import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { call, findRecordsByType } from "./macula_ts_client.js";

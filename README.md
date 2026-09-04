@@ -30,8 +30,8 @@ Continue, and anything else that speaks MCP.
 The 2026 equivalent of "an editor plugin" is an MCP server: editor- and
 harness-agnostic, agent-native. `macula-mcp` speaks MCP over stdio to the
 agent, and talks QUIC/DHT/Macula RPC to the mesh itself, **in-process**,
-via [`@macula-io/ts`](https://github.com/macula-io/macula-ts), a
-TypeScript SDK vendored as a packed tarball (see [Prerequisites](#prerequisites)).
+via [`@macula-io/ts`](https://www.npmjs.com/package/@macula-io/ts), a
+real npm dependency (see [Prerequisites](#prerequisites)).
 No subprocess, no separately-installed binary: every tool call is a
 one-shot connect/act/close (`macula_ts_client.ts`), except three narrow
 standing exceptions that hold a persistent Session for as long as this
@@ -632,10 +632,10 @@ For a HUMAN in the conversation, not the agent — surfaces as a slash command i
 - Node.js 24.18.1+ — the one thing the installer below checks but won't install for
   you (get it from [nodejs.org](https://nodejs.org), nvm, fnm, or volta).
 
-That's it. `@macula-io/mcp` talks to the mesh in-process (via a vendored
-`@macula-io/ts`, see [CHANGELOG.md](CHANGELOG.md)'s 0.18.0 entry for why
-it's vendored as a packed tarball rather than a normal npm dependency) —
-there is no separate binary to install, version, or keep in sync.
+That's it. `@macula-io/mcp` talks to the mesh in-process (via
+[`@macula-io/ts`](https://www.npmjs.com/package/@macula-io/ts), an
+ordinary npm dependency) — there is no separate binary to install,
+version, or keep in sync.
 
 ## Install
 

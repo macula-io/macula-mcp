@@ -20,8 +20,8 @@ irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | ie
 Three steps, in order: check Node.js 24.18.1+ is present (won't install it
 for you), `npm install -g @macula-io/mcp`, then run `macula-mcp-install`.
 That's the whole install — this package ships zero lifecycle scripts of
-its own (mesh operations run in-process via a vendored `@macula-io/ts`,
-see CHANGELOG.md's 0.18.0 entry), so there's nothing to fetch, version, or
+its own (mesh operations run in-process via `@macula-io/ts`, an ordinary
+npm dependency), so there's nothing to fetch, version, or
 keep in sync beyond the npm package itself. (Before the 0.18.0 cutover,
 this server shelled out to a separately installed `macula-cli` binary and
 the install/uninstall/doctor flow had several steps dedicated to keeping

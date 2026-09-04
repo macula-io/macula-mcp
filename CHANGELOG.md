@@ -52,6 +52,15 @@ fires on a `v*` tag push, not on every commit to `main`).
   `0.4.0` — they read the real package version now (`version.ts`'s `serverVersion()`), the same fix `index.ts`
   itself already got for the identical bug.
 
+### Changed
+- **`@macula-io/ts` is now a real npm dependency (`^0.13.5`), not a vendored tarball.** Now that it's actually
+  published, `vendor/macula-io-ts-0.12.0.tgz` and the whole vendoring stopgap it needed are gone. Note the
+  version floor: `0.13.0` through `0.13.4` all shipped a stray native-compile install script on the registry
+  (found and root-caused during this same work, fixed upstream in `0.13.5`) — `^0.13.5` deliberately excludes
+  all of them, don't loosen this range without checking that history first. Verified end to end against the
+  real published package: a fresh `npm install` shows zero compile/gyp signals, and a real `mesh_serve` →
+  `mesh_call` round trip against the production fleet succeeds through it.
+
 ## [0.18.0] - 2026-09-04
 
 ### Changed

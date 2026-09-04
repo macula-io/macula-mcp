@@ -9,20 +9,19 @@
 // that file is gone -- see mesh_config.ts for what of it survives:
 // pure station/identity config with no subprocess involved).
 //
-// Deliberately NOT a like-for-like port of every capability the old
-// subprocess client had: mesh_call's own `direct` option is still NOT wired to
-// Session.callDirect()/resolveDirect() -- those exist on Session (since
-// the direct-dial cutover below landed) and ARE used internally by
-// callThenDirect() further down, but routing mesh_call's caller-facing
-// `direct: true` flag through them is a separate, not-yet-done cutover
-// (see mesh_call.ts's assertDirectNotRequested / call() below). realm
-// WAS in this "not yet" list too, until the 0.12.0 vendor refresh added
-// CallOptions.realm/PublishOptions.realm/SubscribeOptions.realm to
-// Session.call/publish/subscribe -- call(), publish() and watch() below
-// now thread a caller-supplied realm straight through. call() itself
-// still throws a clear MaculaCliError (reused, not a new error type, so
-// reply.ts's describeCliError keeps working unchanged) for `direct`,
-// rather than silently ignoring it.
+// @macula-io/ts is a real published npm dependency (^0.13.0), not a
+// vendored tarball -- that stopgap (documented in CHANGELOG.md's history,
+// left as accurate history there, not rewritten) is gone now that the
+// package is actually on the registry.
+//
+// mesh_call's caller-facing `direct: true` is wired to Session.callDirect/
+// callDirectWithUcan (call(), below) -- realm support (CallOptions.realm/
+// PublishOptions.realm/SubscribeOptions.realm, landed in @macula-io/ts
+// 0.12.0) is threaded through call()/publish()/watch() the same way.
+// call() still throws a clear MaculaCliError (reused, not a new error
+// type, so reply.ts's describeCliError keeps working unchanged) for
+// whatever @macula-io/ts genuinely doesn't support yet, rather than
+// silently ignoring an option it can't honor.
 //
 // Connects fresh per one-shot call, same "connect, do the thing, exit"
 // semantics macula-cli's own one-shot subcommands had -- deliberately

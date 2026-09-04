@@ -57,7 +57,7 @@ import { z } from "zod";
 // Same as mesh_stations.ts and for the identical reason: hecate-rag is
 // ALWAYS called under a discovered non-zero realm. Both the DHT discovery
 // half and the actual realm-scoped call now go through @macula-io/ts --
-// the 0.12.0 vendor refresh added realm support to Session.call, closing
+// realm support on Session.call (landed in @macula-io/ts 0.12.0) closed
 // the gap that used to force the second half onto a macula-cli subprocess.
 import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { call, findRecordsByType } from "./macula_ts_client.js";
