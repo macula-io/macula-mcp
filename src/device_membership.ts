@@ -20,13 +20,20 @@
 // byte layout (ownership_proof.ts's proofMessage), so
 // macula_ts_client.ts's signOwnershipProof signs it unchanged.
 //
-// Procedure string traced from source, not guessed: macula-realm's
-// MembershipUcanRpcHandlers advertises via
+// Procedure string traced from source AND confirmed against a live
+// DHT record (2026-09-04, once macula-realm advertised one at all):
+// macula-realm's MembershipUcanRpcHandlers advertises via
 // macula_topic:realm_hope(realm(), "identity", "issue_membership_ucan", 1),
 // and macula_topic:build/6 (macula/src/macula_topic.erl) turns that into
-// "<Realm>/_realm/_realm/identity/issue_membership_ucan_v1" (Org=App the
-// "_realm" sentinel for a realm-tier procedure, "_v<N>" version suffix).
-// MEMBERSHIP_UCAN_PROCEDURE below is everything after the realm segment.
+// "<Realm>/_realm/_realm/identity/issue_membership_ucan_v1" -- Realm
+// here is the human NAME ("io.macula"), not the DHT's own outer hex
+// scope, so the callable procedure string embeds it too; the two are
+// separate segments stacked (hex-realm-id, then the topic string, which
+// starts with the human name again on its own). membershipUcanProcedure()
+// below builds that full string per realm, NOT a bare suffix -- an
+// earlier version of this file mis-traced this (dropped the embedded
+// realm-name segment) and every call failed as unknown_next_peer until
+// a live procedure_advertisement record made the mistake visible.
 //
 // Realm targeting is NOT discovery-based like citizenship.ts's
 // discoverProcedureRealm: that helper assumes exactly one live
@@ -53,10 +60,29 @@
 // commons realm the moment this ships.
 import { createHash } from "node:crypto";
 import { defaultIdentityPath } from "./mesh_config.js";
-import { call, signOwnershipProof } from "./macula_ts_client.js";
+import { callThenDirect, signOwnershipProof } from "./macula_ts_client.js";
 import { loadCredential, storeCredential, type RealmCredential } from "./realm.js";
 
-export const MEMBERSHIP_UCAN_PROCEDURE = "_realm/_realm/identity/issue_membership_ucan_v1";
+/**
+ * The procedure string is NOT a constant -- macula_topic:build/6 embeds
+ * the realm NAME (not just the outer DHT-scope hex id) as the topic's
+ * own leading segment, so this differs per realm: "io.macula/_realm/
+ * _realm/identity/issue_membership_ucan_v1" for io.macula, and the
+ * equivalent for net.beam-campus. Confirmed live 2026-09-04 against a
+ * real procedure_advertisement record once macula-realm's DHT
+ * advertisement gap was fixed (ae0d507): the record's procedure_uri was
+ * "<hex realm id>/io.macula/_realm/_realm/identity/issue_membership_ucan_v1"
+ * -- an EARLIER version of this function returned only "_realm/_realm/
+ * identity/issue_membership_ucan_v1" (everything after just the hex id),
+ * which mis-traced macula_topic:build/6 and silently dropped the
+ * embedded realm-name segment. That version genuinely never worked
+ * (unknown_next_peer on every attempt, a wire-level "no such procedure"
+ * miss, not a routing/reachability problem as first suspected) until
+ * corrected here.
+ */
+export function membershipUcanProcedure(realmName: string): string {
+  return `${realmName}/_realm/_realm/identity/issue_membership_ucan_v1`;
+}
 export const MEMBERSHIP_UCAN_PROOF_PROCEDURE = "macula_realm.membership_ucan";
 const CALL_TIMEOUT_MS = 6_000;
 
@@ -105,21 +131,20 @@ export function parseMembershipUcanResult(payload: unknown): MembershipUcanResul
  * Throws on any failure; callers record, never propagate (same
  * discipline as citizenship.ts's register()).
  *
- * A PLAIN call, deliberately not callThenDirect's plain-then-direct-dial
- * fallback: macula-realm doesn't yet put a DHT procedure_advertisement
- * record for issue_membership_ucan (confirmed live 2026-09-04 -- it only
- * does the wire-level macula_station_link:advertise/4, no hecate_om-style
- * advertise_direct), so a direct-dial attempt has nothing to resolve and
- * would only add a guaranteed-failing retry to every genuine failure's
- * error message. Revisit once that DHT record exists.
+ * Plain-then-direct-dial, same as citizenship.ts's callThenDirect: a
+ * plain call depends on inter-station gossip already carrying a route
+ * to macula-realm's own station, which direct-dial sidesteps -- and now
+ * has something to resolve, since macula-realm gained a real DHT
+ * procedure_advertisement record for issue_membership_ucan (2026-09-04,
+ * ae0d507) after starting with none at all.
  */
 export async function joinDevice(input: { host?: string; realmName: string }): Promise<RealmCredential> {
   const identityPath = defaultIdentityPath();
   const signed = signOwnershipProof(identityPath, MEMBERSHIP_UCAN_PROOF_PROCEDURE);
   const callArgs = deviceJoinArgs({ nodeId: signed.node_id, timestamp: signed.timestamp, signature: signed.signature });
-  const res = await call({
+  const res = await callThenDirect({
     host: input.host,
-    procedure: MEMBERSHIP_UCAN_PROCEDURE,
+    procedure: membershipUcanProcedure(input.realmName),
     realm: realmId(input.realmName),
     callArgs,
     timeoutMs: CALL_TIMEOUT_MS,
