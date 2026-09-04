@@ -6,13 +6,19 @@
 // specific operations.
 //
 // Deliberately NOT a like-for-like port of every macula_cli.ts
-// capability: @macula-io/ts does not yet expose realm (any non-default
-// realm), direct-dial, or ownership-proof signing (identitySign() stays
-// on macula_cli.ts's subprocess path for exactly that last one -- see
-// mesh_call.ts). Every function below throws a clear MaculaCliError
-// (reused, not a new error type, so reply.ts's describeCliError keeps
-// working unchanged) for a capability it can't yet honor, rather than
-// silently ignoring the parameter.
+// capability: @macula-io/ts does not yet expose direct-dial (as used by
+// mesh_call's own `direct` option -- callDirect/resolveDirect DO exist
+// on Session now, but wiring mesh_call's `direct` flag to them is a
+// separate, not-yet-done cutover, see mesh_call.ts) or ownership-proof
+// signing (identitySign() stays on macula_cli.ts's subprocess path for
+// that -- see mesh_call.ts). realm WAS in this list until the 0.12.0
+// vendor refresh added CallOptions.realm/PublishOptions.realm/
+// SubscribeOptions.realm to Session.call/publish/subscribe -- call(),
+// publish() and watch() below now thread a caller-supplied realm
+// straight through. Every function below still throws a clear
+// MaculaCliError (reused, not a new error type, so reply.ts's
+// describeCliError keeps working unchanged) for a capability it can't
+// yet honor, rather than silently ignoring the parameter.
 //
 // Connects fresh per one-shot call, same "connect, do the thing, exit"
 // semantics macula-cli's own one-shot subcommands had -- deliberately
@@ -108,16 +114,6 @@ export async function withSession<T>(
   }
 }
 
-function assertRealmSupported(realm: string | undefined, tool: string): void {
-  if (realm) {
-    throw new MaculaCliError(
-      `${tool}: a non-default realm was requested, but @macula-io/ts does not yet expose realm on its ` +
-        "public call/publish/subscribe/DHT API (all-zero realm only) -- not supported by this server's " +
-        "in-process implementation yet.",
-    );
-  }
-}
-
 function assertDirectNotRequested(direct: boolean | undefined, tool: string): void {
   if (direct) {
     throw new MaculaCliError(
@@ -200,15 +196,18 @@ export async function call(args: {
    * the wire, same as macula-cli's own -ucan flag always did). */
   ucanPath?: string;
 }): Promise<TsCallResult> {
-  assertRealmSupported(args.realm, "mesh_call");
   assertDirectNotRequested(args.direct, "mesh_call");
   const start = Date.now();
   return withSession(args.host, args.identityPath, async (session) => {
     const payload = args.ucanPath
       ? await session.callWithUcan(args.procedure, toJsonValue(args.callArgs ?? {}), readUcanToken(args.ucanPath), {
           deadlineMs: args.timeoutMs,
+          realm: args.realm,
         })
-      : await session.call(args.procedure, toJsonValue(args.callArgs ?? {}), { deadlineMs: args.timeoutMs });
+      : await session.call(args.procedure, toJsonValue(args.callArgs ?? {}), {
+          deadlineMs: args.timeoutMs,
+          realm: args.realm,
+        });
     return { procedure: args.procedure, payload, duration_ms: Date.now() - start };
   });
 }
@@ -227,10 +226,9 @@ export async function publish(args: {
   realm?: string;
   identityPath: string;
 }): Promise<TsPublishResult> {
-  assertRealmSupported(args.realm, "mesh_publish");
   const start = Date.now();
   return withSession(args.host, args.identityPath, async (session) => {
-    await session.publish(args.topic, toJsonValue(args.fact));
+    await session.publish(args.topic, toJsonValue(args.fact), { realm: args.realm });
     return { topic: args.topic, duration_ms: Date.now() - start };
   });
 }
@@ -252,7 +250,6 @@ export async function watch(args: {
   realm?: string;
   identityPath: string;
 }): Promise<TsWatchEvent[]> {
-  assertRealmSupported(args.realm, "mesh_watch");
   return withSession(args.host, args.identityPath, async (session) => {
     const events: TsWatchEvent[] = [];
     let stop: (() => Promise<void>) | undefined;
@@ -273,7 +270,7 @@ export async function watch(args: {
               resolve();
             }
           },
-          { onClosed: () => resolve() },
+          { onClosed: () => resolve(), realm: args.realm },
         )
         .then((s) => {
           stop = s;

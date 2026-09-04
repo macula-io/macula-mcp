@@ -54,12 +54,13 @@ import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-// Same hybrid as mesh_stations.ts and for the identical reason: hecate-rag
-// is ALWAYS called under a discovered non-zero realm, which @macula-io/ts's
-// call() does not support yet -- the DHT discovery half (all-zero realm)
-// uses macula-ts, the actual realm-scoped call stays on macula-cli.
-import { call, defaultIdentityPath, defaultStation } from "./macula_cli.js";
-import { findRecordsByType } from "./macula_ts_client.js";
+// Same as mesh_stations.ts and for the identical reason: hecate-rag is
+// ALWAYS called under a discovered non-zero realm. Both the DHT discovery
+// half and the actual realm-scoped call now go through @macula-io/ts --
+// the 0.12.0 vendor refresh added realm support to Session.call, closing
+// the gap that used to force the second half onto a macula-cli subprocess.
+import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { call, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
@@ -148,6 +149,7 @@ export function registerMeshMemory(server: McpServer): void {
           procedure: SEARCH_PROCEDURE,
           callArgs: { query_text, top_k },
           realm: discovery.realm,
+          identityPath: defaultIdentityPath(),
         });
         const payload = res.payload as { hits?: unknown[] } | undefined;
         return jsonContent({ realm: discovery.realm, hits: payload?.hits ?? [] });
@@ -186,6 +188,7 @@ export function registerMeshMemory(server: McpServer): void {
           procedure: ADD_KNOWLEDGE_PROCEDURE,
           callArgs: { text: content, source_label, topics },
           realm: discovery.realm,
+          identityPath: defaultIdentityPath(),
         });
         const payload = res.payload as { chunks?: number } | undefined;
         return jsonContent({
@@ -272,6 +275,7 @@ export function registerMeshMemory(server: McpServer): void {
             procedure: UPLOAD_KNOWLEDGE_PROCEDURE,
             callArgs: { document_id: documentId, source_path: sourcePath, source_type: sourceTypeFor(ext), raw_bytes: content },
             realm: discovery.realm,
+            identityPath: defaultIdentityPath(),
           });
           const payload = res.payload as { chunks?: number } | undefined;
           ingested.push({ path: rel, document_id: documentId, chunks: payload?.chunks ?? 0 });

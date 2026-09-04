@@ -46,20 +46,26 @@ that keeps them alive across a dropped connection), and
 plus one MORE per concurrently-tapped room, each self-healing on its own;
 see [Observing](#observing)). `mesh_join_realm`'s own ownership-proof
 signing is in-process too, via `@macula-io/ts`'s `Identity.sign()` — see
-[Joining the realm](#joining-the-realm). A few things still shell out to
-[`macula-cli`](https://github.com/macula-io/macula-cli) because
-`macula_ts_client.ts` (this server's own adapter) hasn't been wired up to
-the underlying library's realm/direct-dial support yet, even though
-`@macula-io/ts` itself gained both: non-default realms, direct-dial
-(so `mesh_call`'s `realm`/`direct` options and anything requiring them —
-notably UCAN-gated capabilities — still need `macula-cli`), and `mesh_call`'s
-own `prove_identity` ownership-proof signing specifically (a differently-scoped
-proof than `mesh_join_realm`'s — bound to whatever procedure is being called,
-not a fixed one — not yet cut over to `Identity.sign()`). `mesh_stations`
-and `mesh_recall`/`mesh_remember`/`mesh_remember_directory` are a genuine
-hybrid: DHT discovery via `@macula-io/ts`, the actual realm-scoped call via
+[Joining the realm](#joining-the-realm). `mesh_call`/`mesh_publish`/
+`mesh_watch` now thread a caller-supplied `realm` straight through to
+`@macula-io/ts`'s `Session.call`/`publish`/`subscribe` too (the 0.12.0
+vendor refresh added `CallOptions.realm`/`PublishOptions.realm`/
+`SubscribeOptions.realm`) — a non-default realm no longer needs
+`macula-cli` at all. `mesh_stations` and
+`mesh_recall`/`mesh_remember`/`mesh_remember_directory` were the same kind
+of gap (DHT discovery via `@macula-io/ts`, the actual realm-scoped call via
 `macula-cli`, since the services they call are always advertised under a
-non-zero realm. Presence's own [Citizenship](#citizenship) registration
+non-zero realm) and are now fully in-process for the same reason: both
+halves — discovery and the call — go through `@macula-io/ts`. A few things
+still shell out to [`macula-cli`](https://github.com/macula-io/macula-cli):
+`mesh_call`'s `direct` option (`@macula-io/ts` does expose `callDirect`/
+`resolveDirect` now, but wiring `mesh_call`'s own `direct` flag to them —
+and by extension UCAN-gated capabilities, which currently only reach
+direct-dial-advertised procedures — is a separate, not-yet-done cutover),
+and `mesh_call`'s own `prove_identity` ownership-proof signing specifically
+(a differently-scoped proof than `mesh_join_realm`'s — bound to whatever
+procedure is being called, not a fixed one — not yet cut over to
+`Identity.sign()`). Presence's own [Citizenship](#citizenship) registration
 is the same kind of hybrid, for the same reason: `citizenship.ts` still
 shells out to `macula-cli` for realm discovery, the actual registration
 call, and the ownership-proof signature it carries. Room tools
@@ -747,16 +753,19 @@ and troubleshooting.
 ## Status
 
 **Current release: v0.18.0.** Requires macula-cli **0.6.0** or newer for the tools still backed by it —
-every direct-dial tool call, and presence's/serving's/observing's own persistent Sessions (`@macula-io/ts`,
+every direct-dial tool call, and citizenship's own registration call (see [Citizenship](#citizenship)).
+Presence's/serving's/observing's own persistent Sessions (`@macula-io/ts`,
 not `macula-cli` daemons since the 2026-09 cutover — see [Presence](#presence), [Serving](#serving),
 [Observing](#observing)), all dial a primary station plus fallbacks (`MACULA_MESH_STATIONS`) instead of
 exactly one with no recourse if it's down, and reconnect and resubscribe on their own if their connection
-dies later. `mesh_call` also transparently falls back to a
-temp-file `--args-file` for any payload at or above 32KB (needed for
-`hecate-rag.upload_knowledge`'s raw document text, which can exceed a
-safe command-line length), and `mesh_remember_directory` ingests every
-matching file under a local directory into `hecate-rag` in one call.
-`mesh_remember` calls `hecate-rag.add_knowledge` directly, one RPC.
+dies later. `mesh_stations`/`mesh_recall`/`mesh_remember`/`mesh_remember_directory` are in-process too
+(2026-09) — both the DHT discovery and the actual realm-scoped call go through `@macula-io/ts`'s
+`Session.call`, so the 32KB `--args-file` temp-file fallback `macula_cli.ts`'s own `call()` still carries
+(for whatever still uses it — a command-line length limit that only ever applied to shelling out to
+`macula-cli`) no longer applies to `mesh_remember_directory`'s document uploads: those go over the wire
+directly, in-process, with no argv involved. `mesh_remember_directory` ingests every matching file under a
+local directory into `hecate-rag` in one call each; `mesh_remember` calls `hecate-rag.add_knowledge`
+directly, one RPC.
 
 `mesh_serve`/`mesh_unserve` (serving), `mesh_hello`/`mesh_agents`/
 `mesh_goodbye`/`mesh_read_inbox` (presence), and `mesh_observe_lobby`/

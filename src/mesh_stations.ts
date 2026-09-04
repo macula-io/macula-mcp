@@ -38,15 +38,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-// The DHT lookup (all-zero realm) goes through macula-ts; the actual
-// list_stations call goes through macula-cli's `call`, not macula-ts's --
-// @macula-io/ts's call() does not support a non-default realm yet, and
-// hecate_stations is ALWAYS advertised under a non-zero realm (the whole
-// point of the lookup below). A genuine hybrid, not a shortcut: each half
-// uses whichever backend actually supports what it needs. See
-// README.md/CHANGELOG.md.
-import { call, defaultIdentityPath, defaultStation } from "./macula_cli.js";
-import { findRecordsByType } from "./macula_ts_client.js";
+// Both the DHT lookup (all-zero realm) and the actual list_stations call
+// go through @macula-io/ts now -- the 0.12.0 vendor refresh added realm
+// support to Session.call, closing the one gap that used to force the
+// second half onto a macula-cli subprocess. See README.md/CHANGELOG.md.
+import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { call, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
@@ -125,6 +122,7 @@ export function registerMeshListStations(server: McpServer): void {
           procedure: LIST_STATIONS_PROCEDURE,
           callArgs: { near, continent, country, city },
           realm: match.procedure_advertisement.realm,
+          identityPath: defaultIdentityPath(),
         });
         const payload = res.payload as { stations?: Record<string, unknown>[] } | undefined;
         const stations = (payload?.stations ?? []).map(decodeStation);

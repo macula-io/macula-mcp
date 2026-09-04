@@ -144,20 +144,40 @@ fires on a `v*` tag push, not on every commit to `main`).
   accepted it as valid proof of possession. `mesh_call`'s own `prove_identity` is a separate, narrower
   ownership proof (bound to whatever procedure the caller is invoking, not the fixed join procedure) and is
   intentionally NOT touched by this cutover — see the "Known gaps" note below, updated to match.
+- **`macula_ts_client.ts`'s `call`/`publish`/`watch` now thread a caller-supplied `realm` straight through**
+  to `@macula-io/ts`'s `Session.call`/`callWithUcan`/`publish`/`subscribe` (their `CallOptions.realm`/
+  `PublishOptions.realm`/`SubscribeOptions.realm`, all landed in the 0.12.0 vendor refresh above) — the
+  `assertRealmSupported()` guard that used to throw for any non-default realm on all three is gone. This was
+  a real, live bug for `mesh_call`/`mesh_publish`/`mesh_watch` themselves, not just for `mesh_stations`/
+  `mesh_recall`/`mesh_remember`: all three tools already accepted and forwarded a `realm` argument, so
+  passing one always threw "not supported by this server's in-process implementation yet" even though the
+  underlying SDK had supported it since 0.12.0 landed — now it works. `assertDirectNotRequested()` is
+  unchanged and still throws for `mesh_call`'s `direct: true` (see the direct-dial gap below — a separate,
+  larger cutover).
+- **`mesh_stations.ts`/`mesh_memory.ts` (`mesh_list_stations`/`mesh_recall`/`mesh_remember`/
+  `mesh_remember_directory`) finish cutting over to `@macula-io/ts`**, closing the exact gap the previous
+  bullet fixed: both the DHT discovery half and the actual realm-scoped call (`hecate_stations.list_stations`
+  / `hecate-rag.answer_query`/`add_knowledge`/`upload_knowledge`) now go through `macula_ts_client.ts`'s
+  `call()`, not `macula-cli`'s subprocess one. New `src/mesh_stations.test.ts` and expanded
+  `src/mesh_memory.test.ts` cover the discover-then-call composition and its realm threading, mocked at the
+  `macula_ts_client.ts` boundary the same way `rooms.test.ts`/`presence.test.ts` do (confirmed RED against
+  the pre-cutover code, GREEN after). Verified live against the production fleet: `mesh_list_stations` and
+  `mesh_recall` (read-only) ran fully live end to end; `mesh_remember`/`mesh_remember_directory` (which
+  write to the real shared `hecate-rag` corpus) were also verified live, each write small, distinctly
+  tagged, and immediately retired again via `hecate-rag.retire_document` (its `document_id` is the
+  `source_label` for a `mesh_remember` deposit, and `mesh_memory.ts`'s own deterministic
+  `documentIdFor(relativePath)` hash for a `mesh_remember_directory` file), then confirmed gone from a
+  follow-up `mesh_recall` search — see `scripts/mesh-stations-memory-live-check.mjs`.
 
 ### Known gaps (real, not hidden — see README.md)
 - `@macula-io/ts` itself now supports non-default realms, direct-dial, and `Identity.sign()` (0.12.0, see
-  above) — but `macula_ts_client.ts`, this server's own in-process adapter, has NOT been updated to route
-  through the new realm/direct-dial capability yet: `assertRealmSupported`/`assertDirectNotRequested` still
-  throw a clear error for `mesh_call`'s `realm`/`direct` options instead of using them, so UCAN-gated
-  capabilities (which require `direct: true`) still need `macula-cli`'s path via those exact same failing
-  options. That is real, scoped follow-up work, not attempted in this pass. `mesh_call`'s `prove_identity`
-  likewise still shells out to `macula-cli`'s `identity sign` — `Identity.sign()` is now used for
-  `mesh_join_realm`'s own (differently-scoped) proof, but wiring it through `mesh_call`'s `prove_identity`
-  path too is separate, not-yet-done work.
-- `mesh_stations` and `mesh_recall`/`mesh_remember`/`mesh_remember_directory` are a genuine hybrid: the DHT
-  discovery half runs on `@macula-io/ts`, but the actual call (to `hecate_stations.list_stations` /
-  `hecate-rag.*`) stays on `macula-cli`, since those services are always advertised under a non-zero realm.
+  above), and `macula_ts_client.ts` now routes realm through (see above) — but direct-dial is NOT wired up
+  yet: `assertDirectNotRequested()` still throws a clear error for `mesh_call`'s `direct` option instead of
+  using `@macula-io/ts`'s `callDirect`/`resolveDirect`, so UCAN-gated capabilities (which require
+  `direct: true`) still need `macula-cli`'s path for that option. That is real, scoped follow-up work, not
+  attempted in this pass. `mesh_call`'s `prove_identity` likewise still shells out to `macula-cli`'s
+  `identity sign` — `Identity.sign()` is now used for `mesh_join_realm`'s own (differently-scoped) proof, but
+  wiring it through `mesh_call`'s `prove_identity` path too is separate, not-yet-done work.
 - The DHT tools no longer report `verified`/`verify_error` — `@macula-io/ts` does not verify a record's
   signature or expiry on the caller's behalf yet (documented in its own `findRecord`/`findRecords`/
   `findRecordsByType`). A caller that needs to trust a record's payload must check the signature itself.
@@ -167,12 +187,17 @@ fires on a `v*` tag push, not on every commit to `main`).
 - `mesh_serve`'s persistent Session has no reconnect supervisor yet (the old `macula-cli` daemon had one,
   mirroring the Erlang reference SDK's `respawn_link` pattern) — if the underlying connection dies, served
   procedures stop answering until `mesh_serve` is called again. Real, scoped future work, not attempted here.
-- Existing narrow unit tests (`mesh_call.test.ts`, `mesh_memory.test.ts`) test pure helper functions
-  (`splitRealmPrefix`, `sourceTypeFor`, etc.) unaffected by this cutover and still pass; they do not exercise
-  the new `@macula-io/ts`-backed call paths. New mocked unit tests for `macula_ts_client.ts` were not added
-  in this pass — correctness here rests on live verification against the real production fleet (every
-  cut-over tool, including a full `mesh_serve` → call-from-a-separate-process → `mesh_unserve` → confirm-gone
-  cycle), not on unit test coverage. A real gap, flagged for follow-up.
+- Existing narrow unit tests (`mesh_call.test.ts`) test pure helper functions (`splitRealmPrefix`, etc.)
+  unaffected by this cutover and still pass; they do not exercise `mesh_call`/`mesh_publish`/`mesh_watch`'s
+  own `@macula-io/ts`-backed call paths (including the realm threading fixed above) with a boundary mock.
+  `mesh_memory.test.ts` is the exception as of the `mesh_stations`/`mesh_memory` cutover above — it now also
+  covers `mesh_recall`/`mesh_remember`/`mesh_remember_directory`'s discover-then-call composition and realm
+  threading via a boundary mock (as does the new `mesh_stations.test.ts`), verified RED against the
+  pre-cutover code. New mocked unit tests for `mesh_call.ts`/`mesh_publish.ts`/`mesh_watch.ts`/the DHT tools/
+  `serve.ts` were not added in this pass — correctness there still rests on live verification against the
+  real production fleet (every cut-over tool, including a full `mesh_serve` → call-from-a-separate-process →
+  `mesh_unserve` → confirm-gone cycle), not on unit test coverage. A real, narrower gap now, flagged for
+  follow-up.
 
 ## [0.17.0] - 2026-09-03
 
