@@ -1,7 +1,5 @@
 // Platform detection for the installer. Used to pick MCP-client
-// config paths, which vary per OS. macula-cli's own install.sh/
-// install.ps1 handle platform detection for fetching that binary --
-// not this installer's job.
+// config paths, which vary per OS.
 
 import { platform, arch } from "node:os";
 

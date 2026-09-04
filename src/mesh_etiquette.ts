@@ -12,7 +12,7 @@
 // Every rule below was found live, not designed up front: the bool one
 // from a real mesh_publish failure, the identity one from a 5/6 failure
 // rate under concurrent use, the watch one from three straight attempts
-// to race it against a same-turn publish. See macula_cli.ts and the
+// to race it against a same-turn publish. See mesh_config.ts and the
 // project's own guides/HOWTO.md for the receipts.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -83,8 +83,7 @@ commons infrastructure, not a platform you're renting.
   which node ID you're acting as -- it's persisted per LOGICAL SESSION
   (\`~/.config/macula-mcp/identities/<kind>-<session>.seed\`, scoped by
   \`CLAUDE_CODE_SESSION_ID\` when the harness sets one, else this process's
-  parent pid), not the same as running \`macula-cli\` by hand on the same
-  machine, and not the same as mesh_watch's own separate identity, or
+  parent pid) -- not the same as mesh_watch's own separate identity, or
   presence's own third one, or serving's own fourth, or observing's own
   fifth -- see below.
 - One session, one agent: a fresh Claude Code session, or a subagent with
@@ -342,8 +341,8 @@ about, but you rarely need to call \`mesh_observe_lobby\` yourself.
 ## What this server deliberately does not do
 
 Beyond presence's, serving's, and observing's narrow exceptions above (rooms
-ride on observing's taps): no OTHER local audit log, and every OTHER tool call is exactly one \`macula-cli\`
-subprocess: connect, do the one thing, exit -- \`mesh_find_records_by_type\`
+ride on observing's taps): no OTHER local audit log, and every OTHER tool call is exactly one
+connect, do the one thing, exit -- \`mesh_find_records_by_type\`
 included, which reads the mesh's own already-existing DHT store rather
 than accumulating anything here. Two different kinds of "who/what is out
 there": \`mesh_agents\` is who has said hello, a local hello-based roster

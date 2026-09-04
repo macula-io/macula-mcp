@@ -42,7 +42,7 @@
 // legs). Central gets the existing fifth identity
 // (observeIdentityPath()/MACULA_MCP_OBSERVE_IDENTITY, unchanged); every
 // concurrently-tapped room gets its OWN identity, minted on demand from
-// the room's own topic (observeRoomIdentityPath(), macula_cli.ts) --
+// the room's own topic (observeRoomIdentityPath(), mesh_config.ts) --
 // there is no fixed slot to pre-allocate one for, unlike the five fixed
 // concerns that function's neighbors cover.
 //
@@ -73,7 +73,7 @@
 // anything that happened before it started.
 
 import type { Identity, PubsubEvent, Session } from "@macula-io/ts";
-import { defaultIdentityPath, observeIdentityPath, observeRoomIdentityPath, onShutdown, stationArgs } from "./macula_cli.js";
+import { defaultIdentityPath, observeIdentityPath, observeRoomIdentityPath, onShutdown, stationArgs } from "./mesh_config.js";
 import { connectWithFallback, loadOrGenerateIdentity, toCliError, tsIdentity } from "./macula_ts_client.js";
 import { recordFact } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "./envelope.js";

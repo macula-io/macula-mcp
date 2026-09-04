@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Live check for mesh_stations.ts / mesh_memory.ts's cutover of their
-// remaining realm-scoped RPC call from macula-cli over to @macula-io/ts's
-// Session.call (0.12.0 vendor refresh added CallOptions.realm), against
+// Live check for mesh_stations.ts / mesh_memory.ts's realm-scoped RPC
+// calls, in-process via @macula-io/ts's Session.call (0.12.0 vendor
+// refresh added CallOptions.realm), against
 // the REAL production fleet (default station). Runs the actual compiled
 // tool handlers (dist/mesh_stations.js, dist/mesh_memory.js, unmocked)
 // behind a fake McpServer that just captures each registered handler --
@@ -36,7 +36,7 @@ process.env.MACULA_MCP_IDENTITY = join(base, "default.identity");
 const meshStations = await import(join(DIST, "mesh_stations.js"));
 const meshMemory = await import(join(DIST, "mesh_memory.js"));
 const tsClient = await import(join(DIST, "macula_ts_client.js"));
-const cli = await import(join(DIST, "macula_cli.js"));
+const cfg = await import(join(DIST, "mesh_config.js"));
 const presence = await import(join(DIST, "presence.js"));
 
 const results = [];
@@ -61,7 +61,7 @@ function fakeServer() {
 }
 
 async function main() {
-  console.log(`default station: ${cli.defaultStation()}`);
+  console.log(`default station: ${cfg.defaultStation()}`);
 
   // 1. mesh_list_stations, fully live, read-only.
   const stations = fakeServer();
@@ -87,7 +87,7 @@ async function main() {
 
   // 3. mesh_remember: probe (read-only) whether a retire capability exists
   //    before deciding whether a live write test is reversible.
-  const discovery = await tsClient.findRecordsByType({ recordType: "procedure_advertisement", identityPath: cli.defaultIdentityPath() });
+  const discovery = await tsClient.findRecordsByType({ recordType: "procedure_advertisement", identityPath: cfg.defaultIdentityPath() });
   const retireAd = discovery.records.find((r) => r.procedure_advertisement?.procedure === "hecate-rag.retire_document");
   if (retireAd) {
     console.log(`hecate-rag.retire_document IS advertised (realm ${retireAd.procedure_advertisement.realm.slice(0, 12)}...) -- attempting a reversible live mesh_remember test`);
@@ -112,7 +112,7 @@ async function main() {
         procedure: "hecate-rag.retire_document",
         callArgs: { document_id: tag },
         realm: retireAd.procedure_advertisement.realm,
-        identityPath: cli.defaultIdentityPath(),
+        identityPath: cfg.defaultIdentityPath(),
       });
       check("hecate-rag.retire_document: cleaned up the test deposit", retireRes.payload?.pruned > 0, JSON.stringify(retireRes.payload));
     } catch (e) {
@@ -138,7 +138,7 @@ async function main() {
         procedure: "hecate-rag.retire_document",
         callArgs: { document_id: fileDocumentId },
         realm: retireAd.procedure_advertisement.realm,
-        identityPath: cli.defaultIdentityPath(),
+        identityPath: cfg.defaultIdentityPath(),
       });
       check(
         "hecate-rag.retire_document: cleaned up the mesh_remember_directory test file",

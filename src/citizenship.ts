@@ -17,9 +17,12 @@
 // agent.hello announces. No new key: the whole point of the ownership
 // proof hecate_citizens.register_presence demands is that only the holder
 // of that key can register it, and signIdentity() below (Identity.sign()
-// via @macula-io/ts, no macula-cli subprocess -- see macula_ts_client.ts's
+// via @macula-io/ts, no subprocess -- see macula_ts_client.ts's
 // signOwnershipProof) produces exactly that proof from the default
-// identity file.
+// identity file. register()'s realm discovery (macula_ts_client.ts's
+// discoverProcedureRealm) is in-process too, the same DHT
+// find-records-by-type + filter mesh_stations.ts/mesh_memory.ts do
+// inline for their own single call sites.
 //
 // Registration is presence, not identity: entries expire (hecate-citizens'
 // own TTL is ~20 min), so this re-registers every DEFAULT_RENEW_SECONDS,
@@ -35,8 +38,8 @@
 // Opt out with MACULA_MCP_NO_CITIZENSHIP=1: registering puts this agent
 // in a public directory, same category of decision as presence's own
 // agent.hello broadcast (see presence.ts on why that is on by default).
-import { defaultIdentityPath, discoverProcedureRealm } from "./macula_cli.js";
-import { callThenDirect as callThenDirectTs, signOwnershipProof, type TsCallResult, type TsIdentitySignResult } from "./macula_ts_client.js";
+import { defaultIdentityPath } from "./mesh_config.js";
+import { callThenDirect as callThenDirectTs, discoverProcedureRealm, signOwnershipProof, type TsCallResult, type TsIdentitySignResult } from "./macula_ts_client.js";
 
 export const REGISTER_PROCEDURE = "hecate_citizens.register_presence";
 export const CITIZEN_KIND = "agent";
@@ -65,10 +68,10 @@ export interface CitizenshipStatus {
 interface CitizenshipState {
   // Deliberately the ORIGINAL possibly-undefined override, not
   // resolved via defaultStation() here -- discoverProcedureRealm/call's
-  // own stationArgs() resolution needs the real absence of a host to
-  // attach -seed fallbacks to each periodic renewal; a pre-resolved
-  // string looks exactly like an explicit override and would silently
-  // lose them.
+  // own connectWithFallback() (macula_ts_client.ts) needs the real
+  // absence of a host to attach its own multi-station fallback to each
+  // periodic renewal; a pre-resolved string looks exactly like an
+  // explicit override and would silently lose it.
   host?: string;
   nodeId: string;
   displayName: string;
@@ -172,9 +175,7 @@ export async function callThenDirect(args: {
  * An ownership proof for `procedure`, signed by this server's own
  * default identity -- macula_ts_client.ts's signOwnershipProof pinned to
  * defaultIdentityPath(), the same identity register()/mesh_call's
- * prove_identity/ring_service.ts/mesh_ring.ts all act as. Replaces
- * macula_cli.ts's identitySign() (a macula-cli `identity sign`
- * subprocess) for every caller of this module.
+ * prove_identity/ring_service.ts/mesh_ring.ts all act as.
  */
 export function signIdentity(procedure: string): TsIdentitySignResult {
   return signOwnershipProof(defaultIdentityPath(), procedure);
@@ -182,7 +183,7 @@ export function signIdentity(procedure: string): TsIdentitySignResult {
 
 /** One registration attempt against the directory. Throws on any failure; callers record, never propagate. */
 export async function register(input: { host?: string; nodeId: string; displayName: string }): Promise<{ realm: string; expires_at?: number }> {
-  const realm = await discoverProcedureRealm({ host: input.host, procedure: REGISTER_PROCEDURE });
+  const realm = await discoverProcedureRealm({ host: input.host, procedure: REGISTER_PROCEDURE, identityPath: defaultIdentityPath() });
   const signed = signIdentity(REGISTER_PROCEDURE);
   if (signed.node_id !== input.nodeId) {
     throw new Error(`identity sign returned node_id ${signed.node_id}, presence announced ${input.nodeId}`);

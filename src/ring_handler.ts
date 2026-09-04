@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// The relay macula-cli's serve daemon runs once per inbound ring (see
-// ring_service.ts for why a relay): reads the call's JSON payload from
-// stdin, forwards it as one line over the local socket the running
-// macula-mcp process listens on, prints the one-line JSON reply to
-// stdout. Any failure exits non-zero with the reason on stderr, which
-// the daemon turns into an error for the caller -- "unreachable" is
-// the honest answer when the process behind the socket is gone.
+// The relay serve.ts's own runExec runs once per inbound ring, via the
+// registered exec command (see ring_service.ts for why a relay): reads
+// the call's JSON payload from stdin, forwards it as one line over the
+// local socket the running macula-mcp process listens on, prints the
+// one-line JSON reply to stdout. Any failure exits non-zero with the
+// reason on stderr, which serve.ts turns into an error for the caller --
+// "unreachable" is the honest answer when the process behind the socket
+// is gone.
 //
 // Deliberately tiny and dependency-free: it runs in a fresh node
-// process for every ring, under the daemon's own timeout.
+// process for every ring, under serve.ts's own exec timeout.
 
 import { connect } from "node:net";
 

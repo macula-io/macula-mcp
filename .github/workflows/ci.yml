@@ -37,12 +37,11 @@ jobs:
         with:
           node-version: "24.20.0"
       - run: npm ci
-      # Offline only: parseWatchOutput's NDJSON parsing (src/macula_cli.test.ts).
-      # No live-fleet test here -- every tool in this repo shells out to
-      # macula-cli, which isn't installed on this runner and shouldn't need
-      # to be for a unit-test job; live verification is "run the built MCP
-      # server against a real macula-cli," done by hand, same convention
-      # macula-cli's own README documents for itself.
+      # Offline only -- every tool in this repo talks to the mesh
+      # in-process via @macula-io/ts (macula_ts_client.ts), which this
+      # suite mocks at the module boundary (see mesh_call.test.ts and
+      # its siblings); live verification against the real fleet is done
+      # by hand, not in CI.
       - run: npm test
 
   shellcheck:

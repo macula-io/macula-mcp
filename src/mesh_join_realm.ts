@@ -4,7 +4,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as realm from "./realm.js";
-import { defaultIdentityPath } from "./macula_cli.js";
+import { defaultIdentityPath } from "./mesh_config.js";
 import { tsIdentity } from "./macula_ts_client.js";
 import { errorContent } from "./reply.js";
 import { connectedViaLabel, ensurePresence } from "./presence.js";

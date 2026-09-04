@@ -1,12 +1,12 @@
 // Tools: mesh_find_record / mesh_find_records / mesh_find_records_by_type
 // — read the mesh's signed DHT record store.
 //
-// A one-shot subprocess like every other tool here, NOT a standing peer
-// registry: this reads whatever the connected station's own DHT already
-// holds, point-in-time, same shape as mesh_call/mesh_get. The "no peer
-// listing" line in macula_cli.ts's header comment was about macula-mcp
-// itself never accumulating its own directory (the old hecate-daemon did,
-// and it's gone) -- these tools accumulate nothing; the mesh already does.
+// A one-shot connect-and-close like every other point-in-time tool here,
+// NOT a standing peer registry: this reads whatever the connected
+// station's own DHT already holds, point-in-time, same shape as
+// mesh_call/mesh_get. macula-mcp itself never accumulates its own
+// directory (the old hecate-daemon did, and it's gone) -- these tools
+// accumulate nothing; the mesh already does.
 //
 // mesh_find_records_by_type is the discovery entry point: list every
 // record of a type (e.g. procedure_advertisement, the DHT record every
@@ -25,7 +25,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { findRecord, findRecords, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";

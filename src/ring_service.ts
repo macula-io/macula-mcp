@@ -15,17 +15,19 @@
 // policy of "closed" still serves, and declines, so a caller learns the
 // answer is no rather than silence.
 //
-// HOW A RING REACHES THIS PROCESS. macula-cli's serve daemon runs the
-// handler as a subprocess per call (`sh -c <exec>`, payload on stdin,
-// reply on stdout -- see serve.ts). That subprocess cannot reach into
-// this process's memory, and the room the ring carries has to be tapped
-// HERE (the lobby observer's daemon lives here). So the shipped handler
-// (ring_handler.ts) is a relay: it forwards the payload over a local
-// Unix socket this module listens on, and prints whatever comes back.
-// Policy, proof verification, the room tap and the participant_joined
-// publish all happen in this process, synchronously within the call.
-// If this process is gone, the relay fails, the call fails, and the
-// caller gets "unreachable" -- which is the truth.
+// HOW A RING REACHES THIS PROCESS. serve.ts's own runExec runs the
+// registered handler as a fresh shell subprocess per call (payload on
+// stdin, reply on stdout -- see serve.ts), the same way for every
+// registered procedure, ring endpoint included. That subprocess cannot
+// reach into this process's memory, and the room the ring carries has to
+// be tapped HERE (the lobby observer's own persistent Session lives
+// here). So the shipped handler (ring_handler.ts) is a relay: it
+// forwards the payload over a local Unix socket this module listens on,
+// and prints whatever comes back. Policy, proof verification, the room
+// tap and the participant_joined publish all happen in this process,
+// synchronously within the call. If this process is gone, the relay
+// fails, the call fails, and the caller gets "unreachable" -- which is
+// the truth.
 //
 // (2026-09-03, release review) THREE fixes on top of the shape above:
 //   1. Every reply this service gives is now itself SIGNED (proof over
@@ -39,7 +41,7 @@
 //      registry bug made real (see mesh_ring.ts's own comment).
 //   2. Every ring row now carries `self` (rings.ts): which agent's rings
 //      these are. Identities are scoped per logical session
-//      (macula_cli.ts), but rings.sqlite3 is one file per MACHINE, so
+//      (mesh_config.ts), but rings.sqlite3 is one file per MACHINE, so
 //      two sessions on one box used to see and could answer each
 //      other's rings. Every read here is scoped to this process's own
 //      node id.
@@ -57,7 +59,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { defaultStation, onShutdown } from "./macula_cli.js";
+import { defaultStation, onShutdown } from "./mesh_config.js";
 import { callThenDirect, signIdentity, withIdentityProof } from "./citizenship.js";
 import * as serve from "./serve.js";
 import * as rooms from "./rooms.js";
@@ -96,8 +98,8 @@ const HANDLER_TIMEOUT_SECONDS = 30;
  * carried a daemon-served procedure across stations within 3 s when
  * measured -- but a ring should be one hop, not a bet. The daemon
  * publishes the record once per registration and never renews it, so
- * the service re-registers well inside the TTL. Needs macula-cli >= 0.5.1
- * (see macula_cli.ts's serveRegister).
+ * the service re-registers well inside the TTL (see serve.ts's own
+ * `serve()`, `direct: true`).
  */
 export const DIRECT_DIAL_TTL_SECONDS = 3600;
 export const DIRECT_DIAL_RENEW_SECONDS = 1200;
@@ -182,7 +184,7 @@ export function isActive(): boolean {
   return state !== undefined;
 }
 
-/** The shell command the serve daemon runs per inbound ring: this same node binary, the shipped relay, the socket to reach us on. Each argument is single-quoted for POSIX sh (macula-cli runs `sh -c <this string>` -- see macula-cli's exec_handler.go) so a `$`, backtick or space anywhere in process.execPath, this package's install path, or MACULA_MCP_RING_SOCKET_DIR cannot be interpreted by the shell. */
+/** The shell command serve.ts's runExec runs per inbound ring: this same node binary, the shipped relay, the socket to reach us on. Each argument is single-quoted for POSIX sh (runExec spawns with `shell: true`, Node's own equivalent of `sh -c <this string>`) so a `$`, backtick or space anywhere in process.execPath, this package's install path, or MACULA_MCP_RING_SOCKET_DIR cannot be interpreted by the shell. */
 export function handlerCommand(socketPath: string): string {
   const handler = fileURLToPath(new URL("./ring_handler.js", import.meta.url));
   return [process.execPath, handler, socketPath].map(shQuote).join(" ");

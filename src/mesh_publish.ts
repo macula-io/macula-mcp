@@ -1,16 +1,17 @@
 // Tool: mesh_publish — emit an integration fact to a mesh topic.
 //
-// One-shot: macula-cli connects, publishes, exits. No delivery
-// confirmation beyond the wire send succeeding -- PUBLISH has no ack on
-// this protocol -- and no accountable event/fact_id anymore, since that
-// was hecate-daemon's own ReckonDB-backed audit trail, dropped along with
-// the daemon itself. `seq` is macula-cli's own current-time-millis
-// (see its README) since nothing here persists a real sequence counter
-// between one-shot invocations.
+// One-shot: connects, publishes, exits (macula_ts_client.ts's publish(),
+// via @macula-io/ts's Session.publish). No delivery confirmation beyond
+// the wire send succeeding -- PUBLISH has no ack on this protocol -- and
+// no accountable event/fact_id anymore, since that was hecate-daemon's
+// own ReckonDB-backed audit trail, dropped along with the daemon itself.
+// No `seq` in the result either -- @macula-io/ts's Session.publish
+// doesn't surface one (a real, known gap vs. the old macula-cli-backed
+// version, see CHANGELOG.md/README.md).
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { publish } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
@@ -20,10 +21,10 @@ export function registerMeshPublish(server: McpServer): void {
     "mesh_publish",
     "Publish an integration fact to a mesh topic so other parties' agents can react. " +
       "Use a business verb for the fact type (e.g. 'module_generated', 'capability_announced'), " +
-      `never CRUD. Returns the topic and seq macula-cli reported. Defaults to ${defaultStation()} if host isn't given.`,
+      `never CRUD. Returns the topic and duration_ms. Defaults to ${defaultStation()} if host isn't given.`,
     {
       topic: z.string().describe("Topic name (e.g. 'agents.module_generated')."),
-      fact: z.record(z.unknown()).describe("The integration fact payload (plain JSON; macula-cli encodes the wire)."),
+      fact: z.record(z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire)."),
       host: z
         .string()
         .optional()

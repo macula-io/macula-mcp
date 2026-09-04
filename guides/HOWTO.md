@@ -17,33 +17,15 @@ curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.s
 irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | iex
 ```
 
-Four steps, in order: check Node.js 24.18.1+ is present (won't install it for
-you), install `macula-cli` if it isn't already on `PATH`,
-`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`, then run
-`macula-mcp-install`.
-
-**Since v0.5.1, `npm install -g @macula-io/mcp` on its own also keeps
-`macula-cli` current** — a `postinstall` hook checks the installed
-version against this package's own required minimum and runs
-`macula-cli`'s `install.sh`/`install.ps1` automatically if it's missing
-*or* below that minimum, not just missing outright (which is all the
-bootstrapper's own step 2 above ever checked). This closes a real gap:
-before v0.5.1, upgrading only the npm package (e.g. `npm install -g
-@macula-io/mcp@latest` on a machine that already had `macula-cli`) left
-a stale `macula-cli` completely undetected until either a presence tool
-call failed with a version error or someone happened to run `doctor`.
-Never runs on this repo's own `npm ci` (see `CONTRIBUTING.md`), and
-never fails the npm install itself if the fetch fails — a warning, not
-a blocker.
-
-**Needs `--allow-scripts=@macula-io/mcp` on npm v12+** (both installer
-scripts pass it already; add it yourself if you run the bare `npm
-install -g` above). npm v12 (2026-07) disabled install-time lifecycle
-scripts by default, and without the flag this exact `postinstall` hook
-silently no-ops — no error, the install just succeeds without it — which
-is precisely the "stale `macula-cli` completely undetected" gap this hook
-exists to close. Harmless to pass on older npm: it just warns about the
-unrecognized flag and installs normally.
+Three steps, in order: check Node.js 24.18.1+ is present (won't install it
+for you), `npm install -g @macula-io/mcp`, then run `macula-mcp-install`.
+That's the whole install — this package ships zero lifecycle scripts of
+its own (mesh operations run in-process via a vendored `@macula-io/ts`,
+see CHANGELOG.md's 0.18.0 entry), so there's nothing to fetch, version, or
+keep in sync beyond the npm package itself. (Before the 0.18.0 cutover,
+this server shelled out to a separately installed `macula-cli` binary and
+the install/uninstall/doctor flow had several steps dedicated to keeping
+it current — that entire concern is gone now, not just simplified.)
 
 If more than one MCP client is detected and you're running in a real
 terminal (not a piped `curl | bash`), `macula-mcp-install` asks which to
@@ -69,7 +51,6 @@ is the check that would have caught both immediately.
 | Env var | Effect |
 |---|---|
 | `MACULA_MCP_VERSION` | Pin a version (e.g. `0.3.0`) instead of latest. |
-| `MACULA_MCP_SKIP_CLI_INSTALL` | Don't touch `macula-cli` at all — covers both the full bootstrapper's own step 2 and the `npm install -g` `postinstall` hook (v0.5.1+). Use this if you're managing its version yourself. |
 | `MACULA_MCP_SKIP_CONFIGURE` | Install the package but don't register any MCP client — run `macula-mcp-install` yourself later. |
 
 ```bash
@@ -87,24 +68,9 @@ iwr -useb .../uninstall.ps1 -OutFile uninstall.ps1; .\uninstall.ps1 -Purge
 Unregisters from every detected MCP client (`macula-mcp-uninstall --all`
 under the hood — `--all` on purpose, so a client you've since uninstalled
 still gets its stale config entry cleaned up), then `npm uninstall -g
-@macula-io/mcp`. **Does not touch `macula-cli`** — that's a separate concern
-with its own [install/uninstall](https://github.com/macula-io/macula-cli).
+@macula-io/mcp`.
 
 ### Troubleshooting the install
-
-**Installed fine, but `macula-cli` is missing or stale, and no
-`[macula-mcp postinstall]` lines showed up during install.** You're on
-npm v12+ and installed without `--allow-scripts=@macula-io/mcp` (a manual
-`npm install -g @macula-io/mcp`, not the `install.sh`/`install.ps1`
-above, which already pass it). npm v12 disabled install-time lifecycle
-scripts by default and skips them silently — no error, no warning, the
-install just succeeds without running `postinstall`. Re-run with the flag
-to fix it retroactively:
-`npm install -g --allow-scripts=@macula-io/mcp @macula-io/mcp`. If that
-still doesn't print `[macula-mcp postinstall]` lines, skip the hook
-entirely and run what it would have run:
-`curl -fsSL https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash`
-(or [macula-cli's own install.ps1](https://github.com/macula-io/macula-cli) on Windows).
 
 **`npm install -g` fails with `EACCES`.** npm's global prefix isn't owned
 by your user — common with a system-package-manager-installed Node. See
@@ -118,15 +84,6 @@ since their global directory is already yours.
 global bin directory isn't on your shell's `PATH`. The installer prints the
 exact directory (`npm config get prefix` + `/bin`, or `\...\npm` on
 Windows) — add it, or just restart your terminal.
-
-**Every tool fails with `spawn macula-cli ENOENT` although the install
-succeeded.** The MCP client was launched with a `PATH` that does not carry
-the directory macula-cli's installer put the binary in (`~/.local/bin`, or
-`%LOCALAPPDATA%\macula-cli` on Windows) -- typical for a client started from a
-desktop session rather than the terminal where you added the `PATH` line.
-Since 0.13.0 this server looks in that directory itself when the binary is not
-on `PATH`; `MACULA_CLI_INSTALL_DIR` points it elsewhere and `MACULA_CLI_BIN` pins
-an exact binary.
 
 **opencode.** Detected and configured by `macula-mcp-install` since 0.13.0
 (`~/.config/opencode/opencode.json`, under `mcp`). opencode accepts comments in
@@ -168,8 +125,9 @@ Against a procedure that's advertised, the result payload comes back
 directly: `{"result": ..., "responded_by": "<hex>", "duration_ms": N}`.
 
 **`prove_identity: true`** signs a `{citizen_did, timestamp, procedure}`
-ownership proof with this server's default identity (`macula-cli identity
-sign`) and merges `citizen_did` + `proof` into `args`, which is exactly what
+ownership proof with this server's default identity (in-process
+`Identity.sign()`, via `citizenship.ts`'s `signIdentity()`) and merges
+`citizen_did` + `proof` into `args`, which is exactly what
 hecate-citizens' and hecate-mail's `*_ownership_proof` verifiers expect. The
 proof is bound to the procedure named in the same call and to a fresh timestamp
 (60 s skew on the verifying side), and it can only be for this server's own
@@ -254,10 +212,9 @@ a publish you're about to issue in the same turn.
 
 ### `mesh_put` / `mesh_get`
 
-Content-addressed artifact exchange, base64 in and out. `mesh_put` writes
-the decoded bytes to a temp file and runs `macula-cli content put`
-underneath (deleted after); `mesh_get` reads `content_base64` straight out
-of `macula-cli content get --json`'s own envelope, no temp file needed.
+Content-addressed artifact exchange, base64 in and out. `mesh_put`/
+`mesh_get` decode/encode the base64 directly and call `@macula-io/ts`'s
+`Session.putContent`/`getContent` in-process — no temp file, no subprocess.
 
 ```json
 { "mcid_hex": "01559bc39a0c5ce17377e28ef7bb1cad6707c3d685a4f4a974bd8023301084fe4f1d", "size_bytes": 28 }
@@ -269,10 +226,10 @@ reliable, cross-station is best-effort.
 
 ### `mesh_hello` / `mesh_agents` / `mesh_goodbye`
 
-**The one exception to "every tool is a one-shot `macula-cli` subprocess."**
+**One of the three exceptions to "every tool is a one-shot connect/act/close."**
 Together these manage this server's own standing presence: an
 `agent.hello` heartbeat plus a durable subscription to everyone else's,
-backed by one `macula-cli daemon` this server starts and manages
+backed by two persistent `@macula-io/ts` `Session`s this server starts and manages
 internally the first time `mesh_hello` is called, and keeps running until
 `mesh_goodbye` or process exit. See the [README's own Presence
 section](../README.md#presence) for the architecture; this section is
@@ -400,10 +357,10 @@ A second call while a session is still pending reuses it rather than creating
 another; an expired session is reported and a new call gets a fresh link.
 Already joined: the tool reports the membership and does nothing else.
 
-The session is created with a proof of possession (`macula-cli identity sign`
-over `{node_id, timestamp, "macula_portal.join_session"}`), so nobody can
-start a session for a key they do not hold and talk a person into confirming
-it.
+The session is created with a proof of possession (in-process
+`Identity.sign()` over `{node_id, timestamp, "macula_portal.join_session"}`),
+so nobody can start a session for a key they do not hold and talk a person
+into confirming it.
 
 Where it lands: `~/.config/macula-mcp/realm/<node_id>.json`, 0600, holding the
 org identity, the portal refresh token and the realm certificate. Delete the
@@ -412,18 +369,16 @@ token is revoked there.
 
 ### `mesh_serve` / `mesh_unserve`
 
-**The second exception to "one-shot subprocess," and a bigger one than
-presence.** Every other tool here, presence included, is something THIS
-agent initiates. `mesh_serve` creates a STANDING INBOUND TRIGGER: once a
-procedure is registered, any mesh caller can invoke the registered shell
-command on this machine, repeatedly, for as long as it stays registered.
-Requires `macula-cli` >= 0.3.0's `serve -daemon -exec` — the only
-registration mode that computes a reply per call rather than something
-fixed at registration time.
+**The second exception to "one-shot connect/act/close," and a bigger one
+than presence.** Every other tool here, presence included, is something
+THIS agent initiates. `mesh_serve` creates a STANDING INBOUND TRIGGER:
+once a procedure is registered, any mesh caller can invoke the registered
+shell command on this machine, repeatedly, for as long as it stays
+registered.
 
-`mesh_serve` starts its own serve-daemon on first use (a fourth identity,
-`MACULA_MCP_SERVE_IDENTITY`, separate from default/watch/presence), then
-registers the procedure. The command's stdin is the caller's own JSON
+`mesh_serve` opens its own persistent Session on first use (a fourth
+identity, `MACULA_MCP_SERVE_IDENTITY`, separate from default/watch/presence),
+then registers the procedure on it. The command's stdin is the caller's own JSON
 payload (never shell-interpolated into the command string, so a
 malicious caller's payload can't inject shell syntax); its stdout becomes
 the reply:
@@ -436,9 +391,10 @@ the reply:
 }
 ```
 
-A separate `macula-cli call` process reaching it over the real mesh,
-genuinely computed per call — verified live with three different inputs,
-three different correctly-computed replies, not a cached value:
+A separate `mesh_call` reaching it over the real mesh (from another
+macula-mcp process, in this verification), genuinely computed per call —
+verified live with three different inputs, three different
+correctly-computed replies, not a cached value:
 
 ```json
 {
@@ -502,13 +458,11 @@ temp directory, deleted when the process exits** — it is the identity
 `mesh_call`/`mesh_publish`/`mesh_put`/`mesh_get` use (not `mesh_watch`'s
 separate one, see §2, or presence's own THIRD one, below). This is a
 deliberate fix, not a regression: before v0.4.0 every non-watch tool
-shared macula-cli's own persisted default identity across every
-concurrent process on the machine, which verified live to fail 5/6 of
-the time under real concurrent use (6 concurrent calls under the shared
-identity, 1 succeeded; 6 concurrent calls under 6 distinct identities,
-all 6 succeeded). One real consequence worth knowing: running `macula-cli identity` by hand on the
-same machine now reports a DIFFERENT node ID than this resource — they
-used to match. Pin either identity to a fixed path with
+shared one persisted default identity across every concurrent process on
+the machine, which verified live to fail 5/6 of the time under real
+concurrent use (6 concurrent calls under the shared identity, 1
+succeeded; 6 concurrent calls under 6 distinct identities, all 6
+succeeded). Pin either identity to a fixed path with
 `MACULA_MCP_IDENTITY` / `MACULA_MCP_WATCH_IDENTITY` if you want a stable
 node ID across restarts, or to restore the old shared-identity behavior;
 a pinned path is never auto-deleted, only a freshly minted one is.
@@ -597,5 +551,5 @@ at all (the exact shape that failed before), all eight respond correctly
 
 - [`README.md`](../README.md) — what macula-mcp is, architecture, tool/resource tables, status
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — building/testing this server itself, and the code conventions to follow when extending it
-- [`macula-io/macula-cli`](https://github.com/macula-io/macula-cli)'s own [HOW-TO guide](https://github.com/macula-io/macula-cli/blob/master/guides/HOWTO.md) — the identity-collision and argv-ordering gotchas were both found and documented there first
+- [`macula-io/macula-cli`](https://github.com/macula-io/macula-cli)'s own [HOW-TO guide](https://github.com/macula-io/macula-cli/blob/master/guides/HOWTO.md) — a separate project this one no longer depends on, but the identity-collision gotcha (§3 above) was found and documented there first
 - [`macula-io/macula-station`](https://github.com/macula-io/macula-station)'s `docs/` — real production incidents, useful context for what a tool-call failure might mean station-side

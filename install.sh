@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # Installs macula-mcp for Linux and macOS end to end: checks Node.js,
-# installs macula-cli if it isn't already on PATH (macula-mcp shells out
-# to it for every mesh operation), npm-installs @macula-io/mcp globally,
-# then registers the 'macula' MCP server with every detected MCP client
-# (Claude Code, Claude Desktop, Cursor, Windsurf).
+# npm-installs @macula-io/mcp globally, then registers the 'macula' MCP
+# server with every detected MCP client (Claude Code, Claude Desktop,
+# Cursor, Windsurf).
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.sh | bash
 #
 # Env overrides:
 #   MACULA_MCP_VERSION           pin a version (e.g. "0.3.0") instead of latest
-#   MACULA_MCP_SKIP_CLI_INSTALL  skip the macula-cli prerequisite step
 #   MACULA_MCP_SKIP_CONFIGURE    install the package but don't register any MCP client
 set -euo pipefail
 
@@ -27,20 +25,7 @@ if [ "$node_major" -lt 24 ]; then
 fi
 need npm
 
-# ---- 2. macula-cli (prerequisite: macula-mcp shells out to it) ------------
-
-if [ -n "${MACULA_MCP_SKIP_CLI_INSTALL:-}" ]; then
-  log "MACULA_MCP_SKIP_CLI_INSTALL set, skipping the macula-cli check."
-elif command -v macula-cli >/dev/null 2>&1; then
-  log "macula-cli already on PATH ($(macula-cli --version 2>&1 | head -1)), leaving it as-is."
-else
-  log "macula-cli not found, installing it first..."
-  curl -fsSL https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash
-  hash -r
-  need macula-cli
-fi
-
-# ---- 3. @macula-io/mcp itself --------------------------------------------------
+# ---- 2. @macula-io/mcp itself --------------------------------------------------
 
 pkg="@macula-io/mcp"
 if [ -n "${MACULA_MCP_VERSION:-}" ]; then
@@ -49,17 +34,10 @@ fi
 
 log "installing ${pkg} globally..."
 install_err="$(mktemp)"
-# --allow-scripts is the bare package name, never $pkg -- it's an
-# allowlist keyed on package identity, not an install spec, so a
-# version-suffixed $pkg (MACULA_MCP_VERSION set) would never match.
-# npm v12 (2026-07) disabled install-time lifecycle scripts by default;
-# without this flag, macula-cli's own postinstall step in package.json
-# silently no-ops on npm v12+ (no error, it just doesn't run) instead of
-# keeping macula-cli current the way this installer's own README/HOWTO.md
-# describe. Harmless on pre-v12 npm: verified locally, it's just an
-# "Unknown cli config" warning there, not a failure -- scripts already
-# ran unconditionally on those versions anyway.
-if ! npm install -g --allow-scripts="@macula-io/mcp" "$pkg" 2>"$install_err"; then
+# No --allow-scripts needed: this package ships zero lifecycle scripts of
+# its own (mesh operations run in-process via @macula-io/ts, so there is
+# nothing left to fetch or version-check at install time).
+if ! npm install -g "$pkg" 2>"$install_err"; then
   cat "$install_err" >&2
   rm -f "$install_err"
   die "npm install -g ${pkg} failed (see above). If this is an EACCES/permission error, npm's
@@ -79,7 +57,7 @@ fi
 
 log "installed: $(macula-mcp --version 2>&1 || echo "@macula-io/mcp")"
 
-# ---- 4. Register with detected MCP clients ---------------------------------
+# ---- 3. Register with detected MCP clients ---------------------------------
 
 if [ -n "${MACULA_MCP_SKIP_CONFIGURE:-}" ]; then
   log "MACULA_MCP_SKIP_CONFIGURE set, skipping MCP client registration."

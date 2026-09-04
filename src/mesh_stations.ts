@@ -42,7 +42,7 @@ import { z } from "zod";
 // go through @macula-io/ts now -- the 0.12.0 vendor refresh added realm
 // support to Session.call, closing the one gap that used to force the
 // second half onto a macula-cli subprocess. See README.md/CHANGELOG.md.
-import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { call, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";

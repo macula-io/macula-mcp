@@ -2,18 +2,21 @@
 //
 // The agent's hands. A peer advertises a procedure; the agent calls it
 // over the mesh instead of a local sandbox or a US SaaS runner.
-// macula-cli does the actual macula:call over QUIC as a one-shot
-// subprocess (connect, call, exit) and returns the RESULT payload or a
-// BOLT#4-vocabulary error.
+// macula_ts_client.ts's call() does the actual QUIC call, connecting
+// fresh, calling, and closing again for each invocation (see its own
+// header for why that's the deliberate shape here, not a shared
+// connection pool), and returns the RESULT payload or a BOLT#4-
+// vocabulary error.
 //
-// Unlike the old daemon-backed version, this needs a target station:
-// macula-cli isn't already connected to one the way a standing daemon
-// was. `host` defaults to MACULA_MESH_STATION (or macula-cli's own
-// well-known demo station) so most callers never need to think about it.
+// This needs a target station: there is no standing connection already
+// dialed the way presence's/serving's/observing's own persistent
+// Sessions are. `host` defaults to MACULA_MESH_STATION (or this
+// project's own well-known demo station default, see mesh_config.ts's
+// DEFAULT_STATIONS) so most callers never need to think about it.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation, splitRealmPrefix, ucanPath } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation, splitRealmPrefix, ucanPath } from "./mesh_config.js";
 import { call } from "./macula_ts_client.js";
 import { signIdentity, withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
@@ -38,7 +41,7 @@ export function registerMeshCall(server: McpServer): void {
       args: z
         .record(z.unknown())
         .optional()
-        .describe("Structured arguments for the procedure (plain JSON; macula-cli encodes the wire)."),
+        .describe("Structured arguments for the procedure (plain JSON; this server encodes the wire)."),
       timeout_ms: z
         .number()
         .int()

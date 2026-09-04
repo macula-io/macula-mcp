@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => ({
   isTapped: vi.fn(),
 }));
 // Boundary mock, same pattern as presence.test.ts's own: replace the module
-// rooms.ts talks to the mesh THROUGH (macula_ts_client.js), not macula_cli.js
-// -- rooms.ts no longer imports identity()/publish() from there at all.
+// rooms.ts talks to the mesh THROUGH (macula_ts_client.js), not mesh_config.js
+// -- rooms.ts only ever imports pure config (defaultIdentityPath) from there.
 vi.mock("./macula_ts_client.js", () => ({ publish: mocks.publish, tsIdentity: mocks.tsIdentity }));
 vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId }));
 vi.mock("./lobby_observer.js", () => ({

@@ -6,23 +6,19 @@ const SIG = "ab".repeat(64);
 
 // Boundary mock, same pattern as rooms.test.ts/mesh_stations.test.ts: replace
 // the module citizenship.ts now talks to the mesh THROUGH (macula_ts_client.js)
-// for signing and calling -- discoverProcedureRealm stays real/unmocked here,
-// it's still macula_cli.ts's own (out of scope for this cutover, see
-// citizenship.ts's own callThenDirect/signIdentity doc comments).
+// for signing, calling, AND realm discovery -- all three are in-process now
+// (discoverProcedureRealm's own macula-cli-backed DHT scan was migrated here
+// as part of the macula-cli removal, see citizenship.ts's own register() doc).
 const mocks = vi.hoisted(() => ({
   signOwnershipProof: vi.fn(),
   callThenDirect: vi.fn(),
   discoverProcedureRealm: vi.fn(),
 }));
-vi.mock("./macula_ts_client.js", () => ({ signOwnershipProof: mocks.signOwnershipProof, callThenDirect: mocks.callThenDirect }));
-// register()'s only other seam (discoverProcedureRealm) is still macula_cli.ts's
-// own -- out of scope for this cutover, see citizenship.ts's callThenDirect/
-// signIdentity doc comments -- so it's the one macula_cli.js export mocked here,
-// same partial-override shape ring_service.test.ts used for the same reason.
-vi.mock("./macula_cli.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./macula_cli.js")>();
-  return { ...actual, discoverProcedureRealm: mocks.discoverProcedureRealm };
-});
+vi.mock("./macula_ts_client.js", () => ({
+  signOwnershipProof: mocks.signOwnershipProof,
+  callThenDirect: mocks.callThenDirect,
+  discoverProcedureRealm: mocks.discoverProcedureRealm,
+}));
 
 describe("signIdentity", () => {
   const IDENTITY_PATH = "/tmp/macula-mcp-test-identity.seed";

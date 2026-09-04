@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Identity, PubsubEvent, Session } from "@macula-io/ts";
 import { closeRoster, listAgents } from "./roster.js";
 
-// Boundary mock, same pattern as ring_service.test.ts's ./serve.js/
-// ./macula_cli.js mocks and mesh_call.test.ts's own convention: replace
+// Boundary mock, same pattern as ring_service.test.ts's ./serve.js mock
+// and mesh_call.test.ts's own convention: replace
 // the module presence.ts talks to the mesh THROUGH, not the mesh
 // client library itself -- presence.ts never imports @macula-io/ts's
 // Session/Identity classes directly except as types.

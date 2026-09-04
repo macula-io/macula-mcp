@@ -2,8 +2,7 @@
 # Uninstalls macula-mcp: unregisters the 'macula' entry from every
 # detected MCP client's config (via the installed macula-mcp-uninstall,
 # while it's still present), then npm-uninstalls the @macula-io/mcp package
-# globally. Leaves macula-cli and its identity alone -- separate concern,
-# see macula-cli's own uninstall.sh/uninstall.ps1 for that.
+# globally.
 #
 # --purge removes a LEGACY persisted identity at
 # ~/.macula-mcp/watch-identity.seed, if one exists. Since v0.4.0,
@@ -53,4 +52,4 @@ elif [ -e "$legacy_watch_identity" ]; then
   log "left ${legacy_watch_identity} in place (leftover from a pre-0.4.0 install) -- pass --purge to remove it"
 fi
 
-log "done. macula-cli itself was NOT touched -- see its own uninstall.sh/uninstall.ps1."
+log "done."

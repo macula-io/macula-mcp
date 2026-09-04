@@ -1,10 +1,8 @@
 #!/usr/bin/env node
-// macula-mcp install — wire macula-cli into every detected MCP client's
+// macula-mcp install — wire macula-mcp into every detected MCP client's
 // config in one shot.
 //
 // Scope:
-//   * Detects an installed macula-cli binary (identity probe, no
-//     network), prints its node ID for visual confirmation.
 //   * Detects installed MCP clients (Claude Code, Claude Desktop,
 //     Cursor, Windsurf) by their canonical paths.
 //   * Safe-merges a `macula` mcpServers entry into each — idempotent
@@ -14,18 +12,17 @@
 //     before writing.
 //
 // Reworked 2026-08-29: this used to detect a running hecate-daemon and
-// offer to fetch+launch one; hecate-daemon is now treated as obsolete
-// and macula-mcp shells out to macula-cli instead (src/macula_cli.ts).
-// If macula-cli isn't found, this prints the install command rather
-// than fetching a binary itself -- macula-cli already ships its own
-// tested cross-platform install.sh/install.ps1, no reason to duplicate
-// that fetch/verify logic here.
+// offer to fetch+launch one; hecate-daemon is now treated as obsolete.
+// (2026-09-04) The macula-cli binary probe that used to run first here
+// is gone too -- this package no longer shells out to a separately
+// installed macula-cli for anything (mesh operations run in-process via
+// @macula-io/ts, see macula_ts_client.ts), so there is nothing left to
+// detect or advise installing before the registered MCP entry works.
 //
 // Exit codes: 0 = ok, 1 = bad input, 2 = no MCP clients detected.
 
 import { createInterface } from "node:readline/promises";
 import { detect } from "../install/platform.js";
-import { probe } from "../install/existing_cli.js";
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
 import { parseSelection } from "../install/selection.js";
 
@@ -58,9 +55,8 @@ function help(): void {
 
 Usage: macula-mcp-install [--force] [--only <client[,client,...]>]
 
-Detects installed MCP clients and registers the 'macula' MCP server,
-which shells out to macula-cli for mesh operations. Idempotent;
-safe-merges into existing configs and backs up first.
+Detects installed MCP clients and registers the 'macula' MCP server.
+Idempotent; safe-merges into existing configs and backs up first.
 
 Supported MCP clients:
   claude-code, claude-desktop, cursor, windsurf
@@ -131,21 +127,7 @@ async function main(): Promise<void> {
   const p = detect();
   info(`platform: ${p.label}`);
 
-  // 1) Probe for an installed macula-cli binary.
-  const cp = await probe();
-  if (cp.available && cp.nodeId) {
-    ok(`macula-cli found`);
-    info(`node id:  ${cp.nodeId}`);
-  } else {
-    warn(`macula-cli not found on PATH`);
-    info("macula-mcp shells out to macula-cli for every mesh operation --");
-    info("install it before the registered MCP entry will actually work:");
-    info("  curl -fsSL https://raw.githubusercontent.com/macula-io/macula-cli/master/install.sh | bash");
-    info("  (Windows: irm https://raw.githubusercontent.com/macula-io/macula-cli/master/install.ps1 | iex)");
-    info("Continuing with MCP-config registration anyway.");
-  }
-
-  // 2) Detect MCP clients.
+  // Detect MCP clients.
   const requested = args.only.length > 0 ? args.only : null;
   let targets = (requested ? ALL.filter((c) => requested.includes(c.CLIENT_ID)) : detected());
   if (targets.length === 0) {
@@ -162,7 +144,7 @@ async function main(): Promise<void> {
     info(`registering with: ${targets.map((c) => c.CLIENT_LABEL).join(", ")}`);
   }
 
-  // 3) Register macula entry in each.
+  // Register macula entry in each.
   for (const client of targets) {
     await configureOne(client);
   }

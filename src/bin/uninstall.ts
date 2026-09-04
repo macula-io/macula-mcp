@@ -2,9 +2,11 @@
 // macula-mcp uninstall — remove the `macula` entry from every
 // detected MCP client's config. Idempotent.
 //
-// Does NOT remove the macula-cli binary or its persisted identity
-// (see macula-cli's own uninstall.sh/uninstall.ps1 for that). The
-// MCP integration is the only thing this command touches.
+// Does NOT remove this agent's persisted mesh identity/roster/transcript
+// files under ~/.config/macula-mcp and ~/.macula-mcp (see
+// uninstall.sh/uninstall.ps1's own --purge for the one legacy leftover
+// they know how to clean up). The MCP integration is the only thing
+// this command touches.
 
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
 
@@ -35,8 +37,7 @@ function help(): void {
 Usage: macula-mcp-uninstall [--all]
 
 Removes the 'macula' MCP server entry from every detected MCP
-client's config. The macula-cli binary and your persisted identity
-are NOT touched.
+client's config. Your persisted mesh identity is NOT touched.
 
 Flags:
   --all     Touch every supported client config, not just those whose

@@ -37,7 +37,7 @@
 
 import { spawn } from "node:child_process";
 import type { Session, JsonValue } from "@macula-io/ts";
-import { onShutdown, serveAdvertiseIdentityPath, serveIdentityPath } from "./macula_cli.js";
+import { onShutdown, serveAdvertiseIdentityPath, serveIdentityPath } from "./mesh_config.js";
 import { connectWithFallback, loadOrGenerateIdentity, toCliError } from "./macula_ts_client.js";
 
 interface Registration {

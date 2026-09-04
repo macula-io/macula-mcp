@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 // macula-mcp status — at-a-glance report of:
-//   * whether macula-cli is installed and functional
 //   * which MCP clients are installed
 //   * which already have a `macula` entry configured
 //
@@ -10,7 +9,6 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { detect } from "../install/platform.js";
-import { probe } from "../install/existing_cli.js";
 import { ALL, type ClientAdapter } from "../install/mcp_clients/index.js";
 
 const VERSION = "0.4.0";
@@ -20,8 +18,7 @@ function help(): void {
 
 Usage: macula-mcp-status
 
-Read-only diagnostic. Reports macula-cli availability and MCP-client
-configuration state.
+Read-only diagnostic. Reports MCP-client configuration state.
 `);
 }
 
@@ -34,15 +31,6 @@ async function main(): Promise<void> {
 
   const p = detect();
   line("platform", p.label);
-
-  const cp = await probe();
-  if (cp.available && cp.nodeId) {
-    line("macula-cli", "available");
-    line("  node id", cp.nodeId);
-  } else {
-    line("macula-cli", "NOT found on PATH");
-    if (cp.reason) line("  reason", cp.reason);
-  }
 
   console.log("");
   console.log("MCP clients:");

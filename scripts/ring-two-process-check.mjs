@@ -12,9 +12,10 @@
 // are otherwise scoped per logical session, and three agents from one
 // shell would share a node id and get each other kicked) and its own
 // SQLite stores under a temp dir, so nothing here touches the operator's
-// ~/.macula-mcp. Needs macula-cli >= 0.5.1 for the direct-dial check
-// (MACULA_CLI_BIN points at a local build). Exit code 0 only if every
-// expectation held.
+// ~/.macula-mcp. Direct-dial is in-process (citizenship.ts's
+// callThenDirect, via @macula-io/ts's Session.callDirect/resolveDirect)
+// -- no separate binary or version floor to worry about. Exit code 0
+// only if every expectation held.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -28,8 +29,21 @@ const DIST = join(HERE, "..", "dist");
 const role = process.argv[2] ?? "orchestrate";
 
 function isolatedEnv(dir, extra = {}) {
+  // CLAUDE_CODE_SESSION_ID deleted, not spread through: mesh_config.ts's
+  // per-ROOM observe identity (observeRoomIdentityPath, used by every
+  // room a ring opens or joins) has no env var override -- its scope key
+  // is CLAUDE_CODE_SESSION_ID if set, else this process's own PPID. All
+  // three processes here inherit the SAME CLAUDE_CODE_SESSION_ID when
+  // this script itself runs inside a real Claude Code session, which
+  // would give them the SAME scope key for the SAME room topic -- two or
+  // three Sessions fighting over one identity, each reconnect kicking
+  // the others, forever. Deleting it makes each process fall back to its
+  // own distinct PPID instead, same as genuinely separate macula-mcp
+  // processes would have.
+  const env = { ...process.env };
+  delete env.CLAUDE_CODE_SESSION_ID;
   return {
-    ...process.env,
+    ...env,
     MACULA_MCP_ROSTER_DB: join(dir, "roster.sqlite3"),
     MACULA_MCP_LOBBY_TRANSCRIPT_DB: join(dir, "transcript.sqlite3"),
     MACULA_MCP_RINGS_DB: join(dir, "rings.sqlite3"),
@@ -37,10 +51,23 @@ function isolatedEnv(dir, extra = {}) {
     // Every identity explicitly per process: the operator's shell may pin
     // MACULA_MCP_IDENTITY (this session's own MCP server does), and three
     // processes sharing one node id get each other kicked off the station.
+    // All seven of mesh_config.ts's fixed per-concern identities are
+    // listed here, not just the ones this script happened to need first --
+    // presenceGoodbyeIdentityPath()/MACULA_MCP_PRESENCE_GOODBYE_IDENTITY
+    // and serveAdvertiseIdentityPath()/MACULA_MCP_SERVE_ADVERTISE_IDENTITY
+    // were added after this script was first written and are just as real
+    // a collision risk as the original five once three processes share a
+    // scope key -- confirmed live: without these two, the caller's and
+    // both callees' agent.goodbye subscriptions (presence's SECOND Session)
+    // shared one identity and kicked each other in an endless loop, the
+    // exact "2 failures... room-tap reconnect flakiness" CHANGELOG.md's
+    // 0.18.0 entry describes -- it was this, not the mesh itself.
     MACULA_MCP_IDENTITY: join(dir, "default.identity"),
     MACULA_MCP_PRESENCE_IDENTITY: join(dir, "presence.identity"),
+    MACULA_MCP_PRESENCE_GOODBYE_IDENTITY: join(dir, "presence-goodbye.identity"),
     MACULA_MCP_WATCH_IDENTITY: join(dir, "watch.identity"),
     MACULA_MCP_SERVE_IDENTITY: join(dir, "serve.identity"),
+    MACULA_MCP_SERVE_ADVERTISE_IDENTITY: join(dir, "serve-advertise.identity"),
     MACULA_MCP_OBSERVE_IDENTITY: join(dir, "observe.identity"),
     MACULA_MCP_NO_CITIZENSHIP: "1",
     ...extra,
@@ -100,6 +127,7 @@ function withTimeout(p, ms, what) {
 async function orchestrate() {
   const base = mkdtempSync(join(tmpdir(), "macula-mcp-ring-check-"));
   mkdirSync(join(base, "caller"), { recursive: true });
+  delete process.env.CLAUDE_CODE_SESSION_ID; // see isolatedEnv's own doc -- this process needs its own distinct scope key too, not just the two callees'
   Object.assign(process.env, isolatedEnv(join(base, "caller")));
   const results = [];
   const check = (name, ok, detail) => { results.push({ name, ok: ok ? 1 : 0, detail }); console.log(`${ok ? "ok  " : "FAIL"} ${name}${detail ? ` -- ${detail}` : ""}`); };

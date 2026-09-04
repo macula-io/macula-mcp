@@ -5,13 +5,10 @@
 // back an MCID (Macula Content ID, 34-byte content hash, surfaced as
 // 68 hex chars). Another node's agent fetches it by that hex MCID.
 //
-// mesh_put writes the base64 content to a temp file and runs
-// `macula-cli content put`, deleting the temp file after -- macula-cli's
-// own put command is file-based (composable, scriptable, testable from a
-// real terminal too), while MCP's put tool hands over in-memory base64
-// bytes; the temp file is the bridge between those two shapes. mesh_get
-// needs no such bridge: `macula-cli content get --json` already returns
-// content_base64 directly in its envelope.
+// mesh_put/mesh_get decode/encode the base64 directly, in-process, and
+// call @macula-io/ts's Session.putContent/getContent (macula_ts_client.ts's
+// artifactPut/artifactGet) -- no temp file, no subprocess, no bridge
+// between two different shapes to worry about.
 //
 // No accountable fact_id anymore (that was hecate-daemon's ReckonDB audit
 // trail, dropped with the daemon).
@@ -22,7 +19,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { artifactGet, artifactPut } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";

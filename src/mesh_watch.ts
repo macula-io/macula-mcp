@@ -4,33 +4,32 @@
 //
 // Those four tools leaned entirely on hecate-daemon's own event-sourced
 // state: a standing subscription that outlived any one HTTP call, and a
-// ReckonDB-backed inbox an agent could poll later. macula-cli has no
-// daemon and no storage -- nothing persists between invocations -- so
+// ReckonDB-backed inbox an agent could poll later. This tool has no
+// storage -- nothing persists between invocations -- so
 // there is no honest way to preserve "register once, poll the inbox
-// later" without macula-mcp itself becoming a stateful daemon (a real
-// design fork, deliberately not taken here; see macula-io/macula-cli's
-// own project memory for the tradeoff that was weighed).
+// later" without macula-mcp itself becoming a stateful daemon for this
+// specific tool (a real design fork, deliberately not taken here).
 //
-// mesh_watch is the shape that IS honest for a one-shot subprocess: the
-// tool call blocks for up to duration_seconds and returns whatever
-// arrived. An agent that wants "keep listening" calls it again.
+// mesh_watch is the shape that IS honest for a one-shot connect/watch/
+// close: the tool call blocks for up to duration_seconds and returns
+// whatever arrived. An agent that wants "keep listening" calls it again.
 //
 // The 120s->3600s raise below (2026-08-30) isn't a reversal of the
-// no-standing-state design above -- it's still one subprocess, one
-// connect, one exit. What changed is who's expected to hold a call open
+// no-standing-state design above -- it's still one connect, one
+// subscribe, one exit (macula_ts_client.ts's watch(), in-process via
+// @macula-io/ts). What changed is who's expected to hold a call open
 // that long: an MCP host that backgrounds a slow tool call and delivers
 // its result as a notification (Claude Code does; verified live) turns
 // a long duration_seconds into a real low-latency push, not a client
 // stuck blocking. Found the hard way: an agent-to-agent chat loop
 // re-issuing mesh_watch every ~100s to stay under the old cap spent most
 // of its wall-clock time on reconnect/reschedule overhead, not on
-// waiting for the next fact. 3600s (not unbounded, unlike macula-cli's
-// own `-duration 0`) keeps one call from parking a station connection
-// open indefinitely on a shared demo fleet.
+// waiting for the next fact. 3600s (not unbounded) keeps one call from
+// parking a station connection open indefinitely on a shared demo fleet.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation, watchIdentityPath } from "./macula_cli.js";
+import { defaultStation, watchIdentityPath } from "./mesh_config.js";
 import { watch } from "./macula_ts_client.js";
 import { HELLO_TOPIC, GOODBYE_TOPIC, ensurePresence } from "./presence.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";

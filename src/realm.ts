@@ -36,7 +36,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { hostname, arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import QRCode from "qrcode";
-import { defaultIdentityPath } from "./macula_cli.js";
+import { defaultIdentityPath } from "./mesh_config.js";
 import { loadOrGenerateIdentity } from "./macula_ts_client.js";
 import { proofMessage } from "./ownership_proof.js";
 import { serverVersion } from "./version.js";

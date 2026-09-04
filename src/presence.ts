@@ -64,13 +64,12 @@
 // dedupe -- "on a duplicate dial from the same identity, the prior
 // worker is sent a graceful close"), which would otherwise make the
 // hello and goodbye subscriptions take turns kicking each other
-// offline forever. See macula_cli.ts's presenceGoodbyeIdentityPath()
+// offline forever. See mesh_config.ts's presenceGoodbyeIdentityPath()
 // for the second identity this needs.
 //
 // The heartbeat stays a one-shot connect-publish-close (via
-// macula_ts_client's publish(), under defaultIdentityPath() --
-// unchanged from macula_cli.ts's own old publish(), which used the
-// same identity) rather than riding either subscribe Session: the
+// macula_ts_client's publish(), under defaultIdentityPath()) rather
+// than riding either subscribe Session: the
 // default identity is shared with every ordinary one-shot mesh_call/
 // mesh_publish/mesh_get, none of which hold it open -- turning the
 // heartbeat into a THIRD standing connection under that identity would
@@ -111,7 +110,7 @@ import {
   presenceGoodbyeIdentityPath,
   presenceIdentityPath,
   stationArgs,
-} from "./macula_cli.js";
+} from "./mesh_config.js";
 import { connectWithFallback, loadOrGenerateIdentity, publish, toCliError, tsIdentity } from "./macula_ts_client.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 import * as lobbyObserver from "./lobby_observer.js";

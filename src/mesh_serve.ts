@@ -10,16 +10,17 @@
 // string itself, so a malicious caller's payload can't inject shell
 // syntax); its stdout becomes the reply. A non-zero exit, a timeout, or
 // invalid JSON on stdout all become a normal error reply to that
-// caller -- verified live (macula-io/macula-cli) to never affect any
-// OTHER procedure this same call has registered.
+// caller (serve.ts's runExec, scoped per registration on the same
+// Session) rather than affecting any OTHER procedure this same call has
+// registered.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./macula_cli.js";
+import { defaultStation } from "./mesh_config.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as serveModule from "./serve.js";
 
-/** Mirrors macula-cli's own -exec-timeout default; never let a misconfigured caller leave a hung command running indefinitely. */
+/** Never let a misconfigured caller leave a hung command running indefinitely. */
 const DEFAULT_TIMEOUT_SECONDS = 10;
 const MAX_TIMEOUT_SECONDS = 60;
 

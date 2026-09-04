@@ -35,10 +35,10 @@ function policyOf(contact_policy: Policy, allowlist: string[] = []): ContactPoli
 
 vi.mock("./serve.js", () => ({ serve: vi.fn(), unserve: vi.fn() }));
 vi.mock("./rooms.js", () => ({ joinRoom: vi.fn(), isJoined: vi.fn().mockReturnValue(false), joinedRoomCount: vi.fn().mockReturnValue(0) }));
-// No macula_cli.js mock needed here any more: ring_service.ts's real signer
+// No mesh_config.js mock needed here any more: ring_service.ts's real signer
 // (citizenship.ts's signIdentity, since the cutover to @macula-io/ts) is
-// pure local Ed25519 signing via Identity.sign() -- no macula-cli subprocess,
-// no ENOENT risk on a runner that doesn't have it on PATH. The socket tests
+// pure local Ed25519 signing via Identity.sign() -- no subprocess at all,
+// no ENOENT risk on a runner that doesn't have a binary on PATH. The socket tests
 // below deliberately leave `deps.sign` unset (proving the relay wiring
 // itself works end to end, real signIdentity included) and that is now safe
 // to run for real, unmocked.
@@ -370,8 +370,9 @@ describe("handlerCommand", () => {
 describe("the local relay socket (serveConnection), connected to for real", () => {
   // Everything above calls handleRing() directly, the same shortcut the
   // rest of this suite always has -- it never proves the actual inbound
-  // path (macula-cli's daemon -> the shipped ring_handler.js relay ->
-  // this Unix socket -> serveConnection -> handleRing) works end to end.
+  // path (serve.ts's own persistent Session -> the shipped
+  // ring_handler.js relay -> this Unix socket -> serveConnection ->
+  // handleRing) works end to end.
   // Found missing by the release review. The two-process live check
   // (scripts/ring-two-process-check.mjs) covers this against a real
   // station; this is the offline version of the same claim.

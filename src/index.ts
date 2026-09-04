@@ -2,16 +2,24 @@
 // macula-mcp — a Model Context Protocol server that exposes the Macula mesh to
 // any agent harness (Claude Code, Cursor, Cline, Continue, ...).
 //
-// Topology: thin client. macula-mcp speaks MCP over stdio to the agent, and
-// shells out to macula-cli (macula-io/macula-cli), a scriptable CLI built
-// directly on macula-go. macula-mcp owns no mesh logic of its own -- macula-cli
-// does the QUIC handshake/call/publish/watch/content transfer, either as a
-// one-shot subprocess per tool call, or, for three narrow standing exceptions
-// (presence.ts's mesh_hello/mesh_goodbye/mesh_agents/mesh_read_inbox, serve.ts's
-// mesh_serve/mesh_unserve, and lobby_observer.ts's mesh_observe_lobby/
-// mesh_lobby_transcript/mesh_unobserve_lobby), as one long-lived `macula-cli
-// daemon` per exception this server manages internally for as long as it needs it.
-// (2026-08-31) presence.ts now starts lobby_observer's daemon too, alongside
+// Topology: thin client, but a direct one. macula-mcp speaks MCP over
+// stdio to the agent, and talks QUIC/DHT/Macula RPC to the mesh itself,
+// in-process, via the vendored @macula-io/ts SDK (macula_ts_client.ts) --
+// no subprocess, no separately-installed binary, nothing else in the
+// dependency chain to keep in version lockstep. Most tools below are a
+// one-shot connect/act/close (mirroring the "connect, do the thing, exit"
+// shape a scriptable CLI would have had, without actually spawning one --
+// see macula_ts_client.ts's own header). Three narrow standing exceptions
+// hold a persistent @macula-io/ts Session instead, for as long as this
+// server process runs: presence.ts's mesh_hello/mesh_goodbye/mesh_agents/
+// mesh_read_inbox (two Sessions, one per subscribed topic), serve.ts's
+// mesh_serve/mesh_unserve (one Session, plus a second lazily for direct-
+// dial DHT advertisement), and lobby_observer.ts's mesh_observe_lobby/
+// mesh_lobby_transcript/mesh_unobserve_lobby (one Session per watched
+// topic: central, plus one more per concurrently-tapped room). Each
+// exception owns its own identity/identities -- see mesh_config.ts's own
+// doc comment for why a shared one would collide.
+// (2026-08-31) presence.ts starts lobby_observer's watch too, alongside
 // its own, so mesh_hello alone gets an agent all three -- see presence.ts's
 // own doc comment. (2026-08-31, later the same day) presence.ts's
 // ensurePresence() is now also called at the top of every genuinely
@@ -23,21 +31,14 @@
 // is called. mesh_serve/mesh_unserve deliberately excluded -- see
 // presence.ts's own top comment and mesh_etiquette.ts's Serving section.
 //
-//   agent harness  --MCP/stdio-->  macula-mcp  --spawns, parses stdout-->  macula-cli  --QUIC-->  mesh
+//   agent harness  --MCP/stdio-->  macula-mcp  --QUIC-->  Macula mesh
 //
-// Reworked 2026-08-29 from a hecate-daemon-backed design (HTTP over a
-// local Unix socket) to a one-shot-subprocess-per-call one: hecate-daemon is
-// a leftover of an abandoned local browser/UI plan and is no longer
-// something this server should depend on. That rework's own doc comment
-// (see mesh_watch.ts) explained why a standing subscription wasn't rebuilt
-// on top of macula-cli: it had no daemon of its own at the time, so
-// mesh_watch (bounded, synchronous) replaced the old subscribe/unsubscribe/
-// subscriptions/inbox quartet instead. macula-cli gained a real daemon mode
-// later (2026-08-30) -- presence.ts, and now serve.ts, are this server
-// narrowly taking that fork back up, each scoped to exactly one use
-// (agent-presence heartbeat+roster; served procedures), each with its OWN
-// identity and daemon rather than sharing one, not a wholesale return to
-// the old design.
+// This server has no dependency on hecate-daemon (a leftover of an
+// abandoned local browser/UI plan) or on macula-cli (macula-io/macula-cli,
+// a separate scriptable CLI this project shelled out to through 2026-09,
+// before the tool-by-tool cutover to @macula-io/ts completed -- see
+// CHANGELOG.md for that migration's history). Neither is installed,
+// spawned, or version-checked by anything in this package any more.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -154,8 +155,9 @@ registerEtiquette(server);
 // that support MCP prompts), not the agent; see mesh_help.ts.
 registerHelp(server);
 
-// Tools — actions, each a one-shot macula-cli subprocess call. Every
-// one below (mesh_read_inbox and the room tools included) also
+// Tools — actions, each a one-shot connect/act/close through
+// @macula-io/ts (see macula_ts_client.ts). Every one below
+// (mesh_read_inbox and the room tools included) also
 // calls presence.ensurePresence(server) at its own entry point --
 // fire-and-forget, never blocking this tool's own result on it -- so
 // presence starts itself the first time any of these actually runs.
@@ -164,7 +166,7 @@ registerHelp(server);
 registerMeshCall(server);
 registerMeshArtifact(server);
 registerMeshDht(server);
-// mesh_list_stations is a composition of two macula-cli calls (a DHT
+// mesh_list_stations is a composition of two mesh calls (a DHT
 // lookup, then the discovered call), not one -- see mesh_stations.ts.
 registerMeshListStations(server);
 // mesh_recall/mesh_remember: the same discover-then-call composition,

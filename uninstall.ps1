@@ -1,8 +1,7 @@
 # Uninstalls macula-mcp: unregisters the 'macula' entry from every
 # detected MCP client's config (via the installed macula-mcp-uninstall,
 # while it's still present), then npm-uninstalls the @macula-io/mcp package
-# globally. Leaves macula-cli and its identity alone -- separate concern,
-# see macula-cli's own uninstall.ps1 for that.
+# globally.
 #
 # -Purge removes a LEGACY persisted identity at
 # %USERPROFILE%\.macula-mcp\watch-identity.seed, if one exists. Since
@@ -49,12 +48,8 @@ if ($installed) {
     Write-Host "@macula-io/mcp not found as a global npm package -- nothing to remove there."
 }
 
-# Node's os.homedir() (used by macula_cli.ts), not any XDG/AppData
-# convention -- on Windows that's %USERPROFILE%. Different from
-# macula-cli's own Go-based os.UserConfigDir(), which DOES split
-# %LOCALAPPDATA% (binary) from %AppData% (identity) -- checked here
-# rather than assumed, after getting exactly that distinction wrong
-# once already writing this same file.
+# Node's os.homedir() (used by mesh_config.ts), not any XDG/AppData
+# convention -- on Windows that's %USERPROFILE%.
 $legacyWatchIdentity = Join-Path "$env:USERPROFILE\.macula-mcp" "watch-identity.seed"
 if ($Purge) {
     if (Test-Path $legacyWatchIdentity) {
@@ -65,4 +60,4 @@ if ($Purge) {
     Write-Host "left $legacyWatchIdentity in place (leftover from a pre-0.4.0 install) -- pass -Purge to remove it"
 }
 
-Write-Host "done. macula-cli itself was NOT touched -- see its own uninstall.ps1."
+Write-Host "done."

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MaculaCliError, splitRealmPrefix } from "./macula_cli.js";
+import { MaculaCliError, splitRealmPrefix } from "./mesh_config.js";
 
 // The io.macula realm, sha256("io.macula"), as a DHT listing prints it.
 const REALM = "ABB81B5A614B63551B400B810648C0C8A78EFAD845442630C94B46CC95D2FCD1";

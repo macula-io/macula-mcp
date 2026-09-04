@@ -1,12 +1,16 @@
-// In-process replacement for the subset of macula_cli.ts's subprocess
-// calls this server no longer needs a macula-cli binary for: call,
-// publish, watch, the three DHT find-* ops, content put/get, the bare
-// identity() read, ownership-proof signing, and call-then-direct-dial.
-// Talks to @macula-io/ts's Session/Identity directly -- no subprocess,
-// no --json envelope, no daemon for these specific operations.
+// The mesh client every tool actually talks through: call, publish,
+// watch, the three DHT find-* ops (plus discoverProcedureRealm, the
+// find-then-filter citizenship.ts's realm lookup needs), content
+// put/get, the bare identity() read, ownership-proof signing, and
+// call-then-direct-dial. Talks to @macula-io/ts's Session/Identity
+// directly -- no subprocess, no --json envelope, no daemon for any of
+// this (this module is what the original macula-cli-shelling-out
+// src/macula_cli.ts was replaced by, tool by tool, through 2026-09;
+// that file is gone -- see mesh_config.ts for what of it survives:
+// pure station/identity config with no subprocess involved).
 //
-// Deliberately NOT a like-for-like port of every macula_cli.ts
-// capability: mesh_call's own `direct` option is still NOT wired to
+// Deliberately NOT a like-for-like port of every capability the old
+// subprocess client had: mesh_call's own `direct` option is still NOT wired to
 // Session.callDirect()/resolveDirect() -- those exist on Session (since
 // the direct-dial cutover below landed) and ARE used internally by
 // callThenDirect() further down, but routing mesh_call's caller-facing
@@ -32,7 +36,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { Identity, MaculaCallError as TsCallError, Session, type JsonValue } from "@macula-io/ts";
-import { MaculaCliError, defaultStations, stationArgs } from "./macula_cli.js";
+import { MaculaCliError, defaultStations, stationArgs } from "./mesh_config.js";
 import { proofMessage } from "./ownership_proof.js";
 
 const DEFAULT_PORT = 4433;
@@ -126,10 +130,11 @@ function assertDirectNotRequested(direct: boolean | undefined, tool: string): vo
 }
 
 /** Reads a UCAN token from `path` (MACULA_MCP_UCAN, same file-path convention
- * macula_cli.ts's ucanPath() already established). Deliberately just an
+ * mesh_config.ts's ucanPath() already established). Deliberately just an
  * existence/non-empty sanity check -- NOT an identity-pairing check. An
- * earlier draft of this feature (macula_cli.ts's assertUcanUsableWithIdentity,
- * still uncommitted in this tree, not touched here) required MACULA_MCP_IDENTITY
+ * earlier draft of this feature (an assertUcanUsableWithIdentity that once
+ * lived alongside the now-deleted subprocess client, never wired up here)
+ * required MACULA_MCP_IDENTITY
  * to point at the token's own <audience> on the premise that presenting a UCAN
  * from any other identity "would never verify" -- a Fable review of this exact
  * codebase traced the real verify chain (Erlang's authorize_policy +
@@ -190,11 +195,11 @@ export async function call(args: {
   realm?: string;
   direct?: boolean;
   identityPath: string;
-  /** MACULA_MCP_UCAN's file path, if set (see macula_cli.ts's ucanPath()) --
+  /** MACULA_MCP_UCAN's file path, if set (see mesh_config.ts's ucanPath()) --
    * when present, attaches the token there to this call via
    * Session.callWithUcan instead of Session.call. Harmless to set against a
    * procedure that isn't UCAN-gated (macula-go ignores an unneeded token on
-   * the wire, same as macula-cli's own -ucan flag always did). */
+   * the wire). */
   ucanPath?: string;
 }): Promise<TsCallResult> {
   assertDirectNotRequested(args.direct, "mesh_call");
@@ -229,10 +234,10 @@ export interface TsIdentitySignResult {
  * verifies identically wherever it lands (hecate-citizens,
  * hecate-mail, another macula-mcp's ring_service.ts) and this is not a
  * second, independently-drifting reimplementation of that byte layout.
- * Matches macula-cli's own `identity sign --procedure <string>` output
- * shape, which this replaces (see citizenship.ts/ring_service.ts/
- * mesh_ring.ts/mesh_call.ts, all previously calling macula_cli.ts's
- * identitySign()).
+ * Matches the old macula-cli `identity sign --procedure <string>` output
+ * shape this once replaced (see citizenship.ts/ring_service.ts/
+ * mesh_ring.ts/mesh_call.ts, every one of which signs through this
+ * function now rather than a subprocess call).
  *
  * Pure local Ed25519 signing via Identity.sign() -- no network, unlike
  * every function above; only the identity file is touched, and unlike
@@ -480,6 +485,31 @@ export async function findRecordsByType(args: {
     const records = recs.map(decodeRecord);
     return { host, type, count: records.length, records };
   });
+}
+
+/**
+ * The realm `procedure` is currently advertised under, from the DHT
+ * visible at `host` -- the discover-then-call step citizenship.ts's
+ * register() needs, since hecate_citizens.register_presence (like every
+ * hecate service) is never served under the all-zero realm and there is
+ * no other way to learn its realm than from its own advertisement. Same
+ * composition mesh_stations.ts/mesh_memory.ts already do inline for
+ * their own single call site; factored out here because citizenship.ts's
+ * register() is called on every renewal (every DEFAULT_RENEW_SECONDS,
+ * not just once), so it is worth a shared, testable function rather than
+ * a third copy of the same find-then-filter.
+ */
+export async function discoverProcedureRealm(args: { host?: string; procedure: string; identityPath: string }): Promise<string> {
+  const discovered = await findRecordsByType({ host: args.host, recordType: "procedure_advertisement", identityPath: args.identityPath });
+  const match = discovered.records.find((r) => r.procedure_advertisement?.procedure === args.procedure);
+  const realm = match?.procedure_advertisement?.realm;
+  if (!realm) {
+    throw new MaculaCliError(
+      `${args.procedure} is not currently advertised on the mesh (checked ${discovered.count} procedure_advertisement ` +
+        `record(s) visible from ${discovered.host})`,
+    );
+  }
+  return realm;
 }
 
 // ---- content ------------------------------------------------------------

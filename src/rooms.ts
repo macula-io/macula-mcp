@@ -49,7 +49,7 @@
 // than carry a number that meant nothing; each envelope's own
 // message_id/sent_at is the real, useful ordering signal.
 
-import { defaultIdentityPath } from "./macula_cli.js";
+import { defaultIdentityPath } from "./mesh_config.js";
 import { publish, tsIdentity } from "./macula_ts_client.js";
 import * as presence from "./presence.js";
 import * as lobbyObserver from "./lobby_observer.js";

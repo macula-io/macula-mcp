@@ -36,7 +36,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./macula_cli.js";
+import { defaultStation } from "./mesh_config.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";

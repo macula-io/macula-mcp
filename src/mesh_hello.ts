@@ -33,7 +33,7 @@
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./macula_cli.js";
+import { defaultStation } from "./mesh_config.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 

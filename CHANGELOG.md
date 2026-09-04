@@ -214,14 +214,49 @@ fires on a `v*` tag push, not on every commit to `main`).
   fix above) resolved a real station identity/host/port and got back a real, signed reply over a genuine
   one-hop QUIC dial — not gossip-routed.
 
+### Removed
+- **`macula-cli` is no longer a dependency of this project at all.** This is the capstone of the migration
+  documented throughout this 0.18.0 section above: every tool had already been cut over to
+  `@macula-io/ts`, and `citizenship.ts`'s `register()` was the one remaining subprocess-backed call (its
+  realm discovery, a DHT `find-records-by-type` scan) — moved in-process too, as
+  `macula_ts_client.ts`'s new `discoverProcedureRealm()`. With nothing left calling it, `src/macula_cli.ts`'s
+  entire subprocess-execution surface (`spawn`/`execFile`, the `--json` argv builder, `call`/`publish`/
+  `watch`/`serve -daemon`/`daemon status`/`daemon stop`/the three DHT `find-*`/`content put`/`content get`,
+  `identity`/`identity sign`, and all of `checkCliVersion`/`MIN_MACULA_CLI_VERSION`/`extractSemver`/
+  `isOlder`/`binPath`/`installedCliCandidates`) was deleted outright, not deprecated in place. The file's
+  remaining genuinely CLI-independent parts (station defaults, the seven per-concern identity seed-file
+  paths, the shutdown-hook registry, `MaculaCliError`, `splitRealmPrefix`) survive, renamed to
+  `src/mesh_config.ts` — a file named `macula_cli` implying a CLI dependency that no longer exists would
+  have been actively misleading to keep.
+- `scripts/postinstall.mjs` (the hook that fetched/updated a separately-installed `macula-cli` binary on
+  `npm install -g`) is deleted, along with `package.json`'s own `postinstall` script and its `files` entry —
+  this package now ships **zero lifecycle scripts of its own**. `install.sh`/`install.ps1` no longer probe
+  for or install `macula-cli` (step removed entirely, not just skippable), and no longer need
+  `--allow-scripts` (there is nothing left for that flag to unblock). `MACULA_MCP_SKIP_CLI_INSTALL` is gone;
+  `install/existing_cli.ts` (the macula-cli-binary probe `macula-mcp-install`/`macula-mcp-status` used to
+  run first) is deleted, and both commands' output no longer mentions macula-cli at all.
+  `macula-mcp-doctor`'s own `checkCliVersion`/`MIN_MACULA_CLI_VERSION` check (an entirely separate concern
+  from its real smoke test, which is unaffected) is gone the same way. `MACULA_CLI_BIN`/
+  `MACULA_CLI_INSTALL_DIR` are no longer read anywhere.
+- Grepped the whole repo for "macula-cli" (case-insensitive) after this pass: what's left is (a) this
+  CHANGELOG's own historical entries, accurate as written, and (b) a handful of source comments comparing
+  current behavior to what the old subprocess client used to do, or advising a human operator who wants to
+  mint a UCAN by hand (`macula-cli ucan mint ...` — a real, separate, still-existing tool this package no
+  longer depends on or installs, but that a human may still reach for outside of macula-mcp entirely). None
+  of it names macula-cli as something this package requires, installs, or shells out to.
+
 ### Known gaps (real, not hidden — see README.md)
 - `@macula-io/ts` itself now supports non-default realms, direct-dial, and `Identity.sign()` (0.12.0, see
   above), and `macula_ts_client.ts` now routes realm through (see above) — but `mesh_call`'s own
   caller-facing `direct` OPTION is NOT wired up yet: `assertDirectNotRequested()` still throws a clear error
   for it instead of using `@macula-io/ts`'s `callDirect`/`resolveDirect` (which `citizenship.ts`'s
-  `callThenDirect()` now uses internally for the ring/citizenship flows above), so UCAN-gated capabilities
-  (which require `direct: true`) still need `macula-cli`'s path for `mesh_call` specifically. That is real,
-  scoped follow-up work, not attempted in this pass.
+  `callThenDirect()` now uses internally for the ring/citizenship flows above). This gap got a real edge
+  since the Removed section above: reaching a UCAN-gated capability (which requires `direct: true`) through
+  `mesh_call` used to have a fallback — a separately-installed `macula-cli`, invoked by hand, outside this
+  server — and now that macula-cli is not something this project depends on or advises installing, that
+  fallback is gone too. `mesh_call`'s `direct: true` genuinely cannot reach a UCAN-gated capability at all
+  right now; wiring it to `callDirect`/`resolveDirect` is real, scoped follow-up work, not attempted in this
+  pass.
 - The DHT tools no longer report `verified`/`verify_error` — `@macula-io/ts` does not verify a record's
   signature or expiry on the caller's behalf yet (documented in its own `findRecord`/`findRecords`/
   `findRecordsByType`). A caller that needs to trust a record's payload must check the signature itself.

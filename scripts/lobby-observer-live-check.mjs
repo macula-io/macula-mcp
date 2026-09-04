@@ -35,7 +35,7 @@ const lobbyObserver = await import(join(DIST, "lobby_observer.js"));
 const transcript = await import(join(DIST, "lobby_transcript.js"));
 const envelope = await import(join(DIST, "envelope.js"));
 const tsClient = await import(join(DIST, "macula_ts_client.js"));
-const cli = await import(join(DIST, "macula_cli.js"));
+const cfg = await import(join(DIST, "mesh_config.js"));
 
 const results = [];
 function check(name, ok, detail) {
@@ -95,9 +95,9 @@ async function main() {
   //    a second connection under its exact identity -- the station's per-identity dedupe kicks
   //    the first one (macula_station_listener.erl), the same technique presence.ts's own live
   //    verification used. Then confirm the tap is still receiving events afterward.
-  const roomIdentityPath = cli.observeRoomIdentityPath(roomTopic);
+  const roomIdentityPath = cfg.observeRoomIdentityPath(roomTopic);
   const forcedIdentity = tsClient.loadOrGenerateIdentity(roomIdentityPath);
-  const { host } = cli.stationArgs();
+  const { host } = cfg.stationArgs();
   const { host: h, port } = parseHostPort(host);
   console.log(`forcing a duplicate connection under the room tap's own identity against ${h}:${port} to trigger the station's kick...`);
   const forcedSession = await Session.connect(h, port, forcedIdentity);
