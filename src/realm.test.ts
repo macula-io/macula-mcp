@@ -146,6 +146,36 @@ describe("credential store", () => {
     expect(realm.status(NODE)).toEqual({ portal: "https://portal.test", joined: false });
     expect(realm.status(undefined).joined).toBe(false);
   });
+
+  it("a credential written before RealmCredential.tier existed defaults to citizen -- every one on disk before this field came exclusively from the full Hanko join flow", async () => {
+    await writeFile(
+      join(dir, `${NODE}.json`),
+      JSON.stringify({
+        node_id: NODE,
+        portal: "https://portal.test",
+        org_identity: "mri:org:io.macula/rgfaber",
+        refresh_token: "mrt_1",
+        joined_at: "2026-09-02T14:00:00Z",
+      }),
+      "utf8",
+    );
+    expect(realm.loadCredential(NODE)?.tier).toBe("citizen");
+    expect(realm.status(NODE).tier).toBe("citizen");
+  });
+
+  it("a device-tier credential (device_membership.ts's auto-join) round-trips its tier through status()", () => {
+    realm.storeCredential({
+      node_id: NODE,
+      portal: "io.macula",
+      org_identity: "mri:org:io.macula",
+      refresh_token: "",
+      joined_at: "2026-09-04T00:00:00Z",
+      citizen_did: NODE,
+      ucan: "eyJ.device.token",
+      tier: "device",
+    });
+    expect(realm.status(NODE).tier).toBe("device");
+  });
 });
 
 describe("join flow against a fake portal", () => {
@@ -235,6 +265,7 @@ describe("join flow against a fake portal", () => {
     expect(after.org_identity).toBe("mri:org:io.macula/rgfaber");
     expect(after.citizen_did).toBe(NODE);
     expect(after.has_ucan).toBe(true);
+    expect(after.tier).toBe("citizen");
     expect(realm.loadCredential(NODE)?.cert_pem).toBe("PEM");
     expect(realm.loadCredential(NODE)?.ucan).toBe("eyJ.fake.token");
     expect(realm.status(NODE).pending).toBeUndefined();

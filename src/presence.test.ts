@@ -36,6 +36,11 @@ vi.mock("./ring_service.js", () => ({
 vi.mock("./realm.js", () => ({
   orgHandle: vi.fn().mockReturnValue(undefined),
   status: vi.fn().mockReturnValue({ joined: 0 }),
+  loadCredential: vi.fn().mockReturnValue(undefined),
+  storeCredential: vi.fn(),
+}));
+vi.mock("./device_membership.js", () => ({
+  ensureAutoJoin: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { connectWithFallback, loadOrGenerateIdentity, publish, tsIdentity } from "./macula_ts_client.js";

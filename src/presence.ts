@@ -117,6 +117,7 @@ import * as lobbyObserver from "./lobby_observer.js";
 import * as ringService from "./ring_service.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
+import * as deviceMembership from "./device_membership.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";
@@ -392,6 +393,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     // called mesh_unobserve_lobby earlier without a full mesh_goodbye --
     // calling mesh_hello again is "make sure I'm still fully present."
     await lobbyObserver.start({ host: state.host });
+    await deviceMembership.ensureAutoJoin({ host: state.host, nodeId: state.nodeId });
     const citizen = await citizenship.start({
       host: state.host,
       nodeId: state.nodeId,
@@ -476,8 +478,10 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   }
 
   await beat(); // announce immediately rather than waiting a full interval
-  // Visible (hello) first, then a citizen: registration is bounded and
-  // never fails presence -- see citizenship.ts.
+  // Visible (hello) first, then realm membership and citizenship: both
+  // are bounded and never fail presence -- see device_membership.ts/
+  // citizenship.ts.
+  await deviceMembership.ensureAutoJoin({ host: args.host, nodeId });
   const citizen = await citizenship.start({
     host: args.host,
     nodeId,

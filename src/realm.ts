@@ -57,6 +57,15 @@ export function credentialPath(nodeId: string): string {
   return join(realmDir(), `${nodeId}.json`);
 }
 
+/**
+ * "device": DeviceKeyOwnershipProof-only, silent, no human involved --
+ * device_membership.ts's auto-join. "citizen": Hanko-bound human, via
+ * this module's own portal join-session flow below. A citizen-tier
+ * credential is strictly stronger; device_membership.ts's
+ * ensureAutoJoin() never overwrites one with a device-tier credential.
+ */
+export type RealmTier = "device" | "citizen";
+
 export interface RealmCredential {
   node_id: string;
   portal: string;
@@ -69,6 +78,8 @@ export interface RealmCredential {
   citizen_did?: string;
   /** Membership UCAN (io.macula as issuer, citizen_did as audience) -- see citizen_did's own doc for why it names a device key today. Undefined against an older/unconfigured portal. */
   ucan?: string;
+  /** Defaults to "citizen" on load when absent: every credential written before this field existed came exclusively from the full Hanko join flow below. */
+  tier?: RealmTier;
 }
 
 export function loadCredential(nodeId: string): RealmCredential | undefined {
@@ -76,7 +87,8 @@ export function loadCredential(nodeId: string): RealmCredential | undefined {
   if (!existsSync(path)) return undefined;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as RealmCredential;
-    return typeof parsed.org_identity === "string" && typeof parsed.refresh_token === "string" ? parsed : undefined;
+    if (typeof parsed.org_identity !== "string" || typeof parsed.refresh_token !== "string") return undefined;
+    return { ...parsed, tier: parsed.tier ?? "citizen" };
   } catch {
     return undefined;
   }
@@ -261,6 +273,8 @@ export interface RealmStatus {
   citizen_did?: string;
   /** Whether a membership UCAN was issued -- never the token itself here, that's a bearer credential and stays in the credential file only. */
   has_ucan?: boolean;
+  /** "device" (silent, DeviceKeyOwnershipProof-only auto-join) or "citizen" (Hanko-bound human) -- see RealmCredential.tier. Undefined when not joined at all. */
+  tier?: RealmTier;
   pending?: { session_id: string; join_url: string; expires_at: string };
   error?: string;
 }
@@ -280,6 +294,7 @@ export function status(nodeId: string | undefined): RealmStatus {
       credential_path: credentialPath(nodeId),
       citizen_did: cred.citizen_did,
       has_ucan: Boolean(cred.ucan),
+      tier: cred.tier,
     };
   }
   return {
@@ -313,6 +328,7 @@ async function pollOnce(fetchImpl: FetchLike): Promise<void> {
         joined_at: new Date().toISOString(),
         citizen_did: outcome.citizen_did,
         ucan: outcome.ucan,
+        tier: "citizen",
       });
       lastError = undefined;
       clearPending();
