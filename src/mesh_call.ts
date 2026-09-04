@@ -13,9 +13,9 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation, identitySign, splitRealmPrefix, ucanPath } from "./macula_cli.js";
+import { defaultIdentityPath, defaultStation, splitRealmPrefix, ucanPath } from "./macula_cli.js";
 import { call } from "./macula_ts_client.js";
-import { withIdentityProof } from "./citizenship.js";
+import { signIdentity, withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 
@@ -100,7 +100,7 @@ export function registerMeshCall(server: McpServer): void {
         // Split here, before signing: an ownership proof is bound to the
         // procedure name the server checks, which is the bare one.
         const { procedure, realm } = splitRealmPrefix(rawProcedure, rawRealm);
-        const callArgs = prove_identity ? withIdentityProof(args, await identitySign({ procedure })) : args;
+        const callArgs = prove_identity ? withIdentityProof(args, signIdentity(procedure)) : args;
         const res = await call({
           host,
           procedure,

@@ -108,7 +108,6 @@ async function orchestrate() {
   const rooms = await import(join(DIST, "rooms.js"));
   const ringsMod = await import(join(DIST, "rings.js"));
   const citizenship = await import(join(DIST, "citizenship.js"));
-  const cli = await import(join(DIST, "macula_cli.js"));
   const transcript = await import(join(DIST, "lobby_transcript.js"));
   const envelope = await import(join(DIST, "envelope.js"));
 
@@ -178,7 +177,7 @@ async function orchestrate() {
     // 4. a forged proof is declined before policy
     const r4room = (await rooms.openRoom({ purpose: "forged" })).room_topic;
     const forgedArgs = ringsMod.buildRingArgs({ from: me.node_id, to: openReady.node_id, purpose: "forged proof", room_topic: r4room });
-    const badSigned = await cli.identitySign({ procedure: "hecate_citizens.register_presence" });
+    const badSigned = citizenship.signIdentity("hecate_citizens.register_presence");
     const r4 = await citizenship.callThenDirect({ procedure: ringsMod.ringProcedure(openReady.node_id), callArgs: citizenship.withIdentityProof({ ...forgedArgs }, badSigned), timeoutMs: 20_000 });
     const rep4 = ringsMod.parseRingReply(r4.payload);
     check("a proof minted for another procedure is declined as unverified", rep4?.answer === 2 && /unverified/.test(rep4.reason ?? ""), JSON.stringify(r4.payload));

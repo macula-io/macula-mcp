@@ -83,6 +83,11 @@ describe("ring answers", () => {
     expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: 1, already_answered: 1 })).toMatchObject({ already_answered: 1 });
     expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: true })).toBeUndefined();
   });
+
+  it("reconstructs a nested proven when the acknowledgement carries one (reserved shape, see RingAnswerReply's own doc)", () => {
+    const proven = { citizen_did: ME, proof: { timestamp: 1, signature: "ab" } };
+    expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: 1, proven })).toEqual({ ring_id: "f".repeat(32), received: 1, proven });
+  });
 });
 
 describe("parseRingReply", () => {
@@ -92,6 +97,18 @@ describe("parseRingReply", () => {
     expect(parseRingReply({ ring_id: "f".repeat(32), answer: true })).toBeUndefined();
     expect(parseRingReply({ ring_id: "f".repeat(32), answer: 4 })).toBeUndefined();
     expect(parseRingReply(null)).toBeUndefined();
+  });
+
+  it("reconstructs the callee's nested proven exactly as ring_service.ts's provenReply actually sends it -- {citizen_did, proof} under a `proven` key, not flat on the reply (regression: parseProven used to be called on the reply itself, so this always came back undefined and mesh_ring.ts's placeRing treated every real accept/decline as unproven)", () => {
+    const proven = { citizen_did: ME, proof: { timestamp: 1_756_857_600_000, signature: "ab".repeat(64) } };
+    const wireReply = { ring_id: "f".repeat(32), answer: 1, room_topic: ROOM, proven };
+    expect(parseRingReply(wireReply)).toEqual({ ring_id: "f".repeat(32), answer: 1, room_topic: ROOM, proven });
+  });
+
+  it("leaves proven undefined (not thrown) when it's missing, malformed, or flat on the reply instead of nested", () => {
+    expect(parseRingReply({ ring_id: "f".repeat(32), answer: 1 })).toEqual({ ring_id: "f".repeat(32), answer: 1 });
+    expect(parseRingReply({ ring_id: "f".repeat(32), answer: 1, proven: { citizen_did: ME } })).toEqual({ ring_id: "f".repeat(32), answer: 1 });
+    expect(parseRingReply({ ring_id: "f".repeat(32), answer: 1, citizen_did: ME, proof: { timestamp: 1, signature: "ab" } })).toEqual({ ring_id: "f".repeat(32), answer: 1 });
   });
 });
 

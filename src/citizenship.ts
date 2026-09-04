@@ -16,8 +16,10 @@
 // pubkey, hex) -- the same one mesh_call/mesh_publish act as and the one
 // agent.hello announces. No new key: the whole point of the ownership
 // proof hecate_citizens.register_presence demands is that only the holder
-// of that key can register it, and macula-cli's `identity sign` produces
-// exactly that proof from the default identity file.
+// of that key can register it, and signIdentity() below (Identity.sign()
+// via @macula-io/ts, no macula-cli subprocess -- see macula_ts_client.ts's
+// signOwnershipProof) produces exactly that proof from the default
+// identity file.
 //
 // Registration is presence, not identity: entries expire (hecate-citizens'
 // own TTL is ~20 min), so this re-registers every DEFAULT_RENEW_SECONDS,
@@ -33,7 +35,8 @@
 // Opt out with MACULA_MCP_NO_CITIZENSHIP=1: registering puts this agent
 // in a public directory, same category of decision as presence's own
 // agent.hello broadcast (see presence.ts on why that is on by default).
-import { call, discoverProcedureRealm, identitySign } from "./macula_cli.js";
+import { defaultIdentityPath, discoverProcedureRealm } from "./macula_cli.js";
+import { callThenDirect as callThenDirectTs, signOwnershipProof, type TsCallResult, type TsIdentitySignResult } from "./macula_ts_client.js";
 
 export const REGISTER_PROCEDURE = "hecate_citizens.register_presence";
 export const CITIZEN_KIND = "agent";
@@ -123,7 +126,7 @@ export function registerArgs(input: {
  */
 export function withIdentityProof(
   args: Record<string, unknown> | undefined,
-  signed: { node_id: string; timestamp: number; signature: string },
+  signed: TsIdentitySignResult,
 ): Record<string, unknown> {
   return {
     ...(args ?? {}),
@@ -150,26 +153,37 @@ function readOk(payload: unknown): { ok: boolean; expires_at?: number; error?: s
  * two (seen live 2026-09-02 as temporary_relay_failure on the very first
  * registration of a fresh install), while the service's own direct-dial
  * DHT record is still there. Same advice mesh_call's own `direct` doc
- * gives a caller, applied here automatically.
+ * gives a caller, applied here automatically. Thin wrapper over
+ * macula_ts_client.ts's callThenDirect, pinned to this server's own
+ * default identity -- the same identity every mesh_call/mesh_publish
+ * call uses, and the one signIdentity() below signs proofs for.
  */
-export async function callThenDirect(args: Parameters<typeof call>[0]): Promise<Awaited<ReturnType<typeof call>>> {
-  try {
-    return await call(args);
-  } catch (plain) {
-    try {
-      return await call({ ...args, direct: true });
-    } catch (direct) {
-      const p = plain instanceof Error ? plain.message : String(plain);
-      const d = direct instanceof Error ? direct.message : String(direct);
-      throw new Error(`${p}; direct-dial retry: ${d}`);
-    }
-  }
+export async function callThenDirect(args: {
+  host?: string;
+  procedure: string;
+  callArgs?: Record<string, unknown>;
+  timeoutMs?: number;
+  realm?: string;
+}): Promise<TsCallResult> {
+  return callThenDirectTs({ ...args, identityPath: defaultIdentityPath() });
+}
+
+/**
+ * An ownership proof for `procedure`, signed by this server's own
+ * default identity -- macula_ts_client.ts's signOwnershipProof pinned to
+ * defaultIdentityPath(), the same identity register()/mesh_call's
+ * prove_identity/ring_service.ts/mesh_ring.ts all act as. Replaces
+ * macula_cli.ts's identitySign() (a macula-cli `identity sign`
+ * subprocess) for every caller of this module.
+ */
+export function signIdentity(procedure: string): TsIdentitySignResult {
+  return signOwnershipProof(defaultIdentityPath(), procedure);
 }
 
 /** One registration attempt against the directory. Throws on any failure; callers record, never propagate. */
 export async function register(input: { host?: string; nodeId: string; displayName: string }): Promise<{ realm: string; expires_at?: number }> {
   const realm = await discoverProcedureRealm({ host: input.host, procedure: REGISTER_PROCEDURE });
-  const signed = await identitySign({ procedure: REGISTER_PROCEDURE });
+  const signed = signIdentity(REGISTER_PROCEDURE);
   if (signed.node_id !== input.nodeId) {
     throw new Error(`identity sign returned node_id ${signed.node_id}, presence announced ${input.nodeId}`);
   }

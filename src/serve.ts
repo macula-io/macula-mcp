@@ -1,13 +1,16 @@
 // Serving: mesh_serve/mesh_unserve manage this process's own registered
-// mesh procedures -- since 2026-09, a single persistent @macula-io/ts
-// Session this process holds directly in memory, not a macula-cli
-// daemon subprocess anymore. The daemon existed ONLY to let separate
-// one-shot macula-cli subprocess invocations share one connection; that
-// reason disappears entirely once macula-ts is called in-process, since
-// this Node process can just hold the Session object itself for as
-// long as anything is registered on it. No control-socket, no NDJSON
-// protocol, no separate identity-per-daemon-kind supervision -- see
-// README.md/CHANGELOG.md for the full before/after.
+// mesh procedures -- since 2026-09, a persistent @macula-io/ts Session
+// this process holds directly in memory, not a macula-cli daemon
+// subprocess anymore. The daemon existed ONLY to let separate one-shot
+// macula-cli subprocess invocations share one connection; that reason
+// disappears entirely once macula-ts is called in-process, since this
+// Node process can just hold the Session object itself for as long as
+// anything is registered on it. No control-socket, no NDJSON protocol,
+// no separate identity-per-daemon-kind supervision -- see README.md/
+// CHANGELOG.md for the full before/after. A SECOND Session (its own
+// identity, opened lazily on first use) is held alongside it purely for
+// direct: true's DHT advertisement -- see ServeState.directAdvertise's
+// own doc for why that can never share the serving Session above.
 //
 // The exec behavior (a served procedure answered by running a local
 // shell command once per inbound call, JSON on stdin/stdout) used to
@@ -34,7 +37,7 @@
 
 import { spawn } from "node:child_process";
 import type { Session, JsonValue } from "@macula-io/ts";
-import { onShutdown, serveIdentityPath } from "./macula_cli.js";
+import { onShutdown, serveAdvertiseIdentityPath, serveIdentityPath } from "./macula_cli.js";
 import { connectWithFallback, loadOrGenerateIdentity, toCliError } from "./macula_ts_client.js";
 
 interface Registration {
@@ -43,10 +46,30 @@ interface Registration {
   stop: () => Promise<void>;
 }
 
+interface DirectAdvertiseSession {
+  session: Session;
+  identity: ReturnType<typeof loadOrGenerateIdentity>;
+}
+
 interface ServeState {
   session: Session;
   identity: ReturnType<typeof loadOrGenerateIdentity>;
   registrations: Map<string, Registration>;
+  /**
+   * Lazily opened the first time serve() is called with direct: true --
+   * a SEPARATE Session and identity from the one above, never the same
+   * one. putProcedureAdvertisement() (called on this session, below) and
+   * an active serve() (running on `session` above) can never share one
+   * connection: @macula-io/ts's own #requireHandleNotServing guard
+   * rejects that combination outright, since putProcedureAdvertisement's
+   * PutRecord CALL would race serve()'s own reads of the shared control
+   * stream on the same connection -- found live 2026-09-04, every
+   * direct-dial registration (ring_service.ts's ring endpoint included)
+   * failed to register at all until this existed. See
+   * serveAdvertiseIdentityPath()'s own doc for why a distinct identity
+   * here is by design, not a workaround.
+   */
+  directAdvertise?: DirectAdvertiseSession;
 }
 
 let state: ServeState | undefined;
@@ -65,6 +88,18 @@ async function ensureSession(host: string | undefined): Promise<ServeState> {
   return newState;
 }
 
+/** Connects (once; reused after) the second Session direct-dial registration
+ * needs -- see ServeState.directAdvertise's own doc for why this cannot be
+ * the same Session/identity `serve()` runs on. Tries `host` first, same
+ * connectWithFallback discipline as everything else in this file. */
+async function ensureDirectAdvertiseSession(s: ServeState, host: string | undefined): Promise<Session> {
+  if (s.directAdvertise) return s.directAdvertise.session;
+  const identity = loadOrGenerateIdentity(serveAdvertiseIdentityPath());
+  const session = await connectWithFallback(identity, host);
+  s.directAdvertise = { session, identity };
+  return session;
+}
+
 /** Synchronous best-effort teardown only -- what onShutdown registers, same
  * reasoning as presence.ts's own stopSync: a SIGINT/SIGTERM handler cannot
  * reliably wait on an async close. An abrupt process kill just drops the
@@ -72,6 +107,7 @@ async function ensureSession(host: string | undefined): Promise<ServeState> {
 function stopSync(): void {
   if (!state) return;
   state.identity.dispose();
+  state.directAdvertise?.identity.dispose();
   state = undefined;
 }
 
@@ -172,7 +208,13 @@ export async function serve(args: ServeArgs): Promise<ServeResult> {
     s.registrations.set(args.procedure, { exec: args.exec, execTimeoutSeconds: execTimeoutMs / 1000, stop });
 
     if (args.direct) {
-      await s.session.putProcedureAdvertisement(args.procedure, s.session.stationNodeId, {
+      // servingStation is `s.session`'s OWN resolved station (the one
+      // actually serve()-ing `procedure`) -- deliberately not the direct-
+      // advertise session's, which could in principle land on a different
+      // station via its own connectWithFallback if the primary happened
+      // to be briefly unreachable for that second connect.
+      const directSession = await ensureDirectAdvertiseSession(s, args.host);
+      await directSession.putProcedureAdvertisement(args.procedure, s.session.stationNodeId, {
         ttlMs: args.ttlSeconds ? args.ttlSeconds * 1000 : undefined,
       });
     }
@@ -214,6 +256,15 @@ export async function unserve(procedure: string): Promise<UnserveResult> {
       // best effort -- stopSync below tears down either way
     } finally {
       s.identity.dispose();
+    }
+    if (s.directAdvertise) {
+      try {
+        await s.directAdvertise.session.close(s.directAdvertise.identity);
+      } catch {
+        // best effort, same as the main session's own close above
+      } finally {
+        s.directAdvertise.identity.dispose();
+      }
     }
     state = undefined;
     sessionClosed = true;

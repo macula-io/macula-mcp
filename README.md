@@ -56,27 +56,37 @@ vendor refresh added `CallOptions.realm`/`PublishOptions.realm`/
 of gap (DHT discovery via `@macula-io/ts`, the actual realm-scoped call via
 `macula-cli`, since the services they call are always advertised under a
 non-zero realm) and are now fully in-process for the same reason: both
-halves — discovery and the call — go through `@macula-io/ts`. A few things
-still shell out to [`macula-cli`](https://github.com/macula-io/macula-cli):
-`mesh_call`'s `direct` option (`@macula-io/ts` does expose `callDirect`/
-`resolveDirect` now, but wiring `mesh_call`'s own `direct` flag to them —
-and by extension UCAN-gated capabilities, which currently only reach
-direct-dial-advertised procedures — is a separate, not-yet-done cutover),
-and `mesh_call`'s own `prove_identity` ownership-proof signing specifically
-(a differently-scoped proof than `mesh_join_realm`'s — bound to whatever
-procedure is being called, not a fixed one — not yet cut over to
-`Identity.sign()`). Presence's own [Citizenship](#citizenship) registration
-is the same kind of hybrid, for the same reason: `citizenship.ts` still
-shells out to `macula-cli` for realm discovery, the actual registration
-call, and the ownership-proof signature it carries. Room tools
+halves — discovery and the call — go through `@macula-io/ts`. `mesh_call`'s
+own `prove_identity` ownership-proof signing (a differently-scoped proof
+than `mesh_join_realm`'s — bound to whatever procedure is being called, not
+a fixed one) is in-process too now, via `citizenship.ts`'s `signIdentity()`
+(`Identity.sign()` under the hood — same helper `mesh_ring`'s and
+`ring_service.ts`'s own signing go through, see below). Presence's own
+[Citizenship](#citizenship) registration is the same: `citizenship.ts`'s
+`register()` signs and calls in-process (`signIdentity()` +
+`callThenDirect()`, see next paragraph) — realm discovery for it is the one
+piece still `macula-cli`-backed (a DHT `find-records-by-type` scan, out of
+scope for this pass). Room tools
 (`mesh_say`/`mesh_open_room`/`mesh_join_room`/`mesh_leave_room`, `rooms.ts`)
 publish their own lifecycle envelopes through `@macula-io/ts` now too, and
 read the background taps `lobby_observer.ts` keeps in-process, same as
-before. `mesh_ring`/`mesh_answer_ring` are the one Rooms-adjacent exception
-still `macula-cli`-backed: a ring is delivered as a direct-dial `mesh_call`
-carrying an identity proof, and neither direct-dial nor that specific proof
-path are wired through `macula_ts_client.ts` yet (see the direct-dial gap
-above).
+before. **`mesh_ring`/`mesh_answer_ring` are in-process now too, including
+direct-dial**: a ring travels as `citizenship.ts`'s `callThenDirect()` — an
+ordinary `Session.call()`, falling back to `Session.callDirect()` (real
+direct-dial: `resolveDirect()` against the callee's DHT
+`procedure_advertisement`, then a genuine one-hop QUIC dial) when the plain
+route fails — carrying an ownership proof from `citizenship.ts`'s
+`signIdentity()` (`Identity.sign()`). Both halves are live-verified against
+the real fleet: `scripts/ring-two-process-check.mjs` runs a full ring
+exchange between two real identities, and a dedicated direct-dial check
+proved `resolveDirect()`/`callDirect()` genuinely resolve and one-hop-dial a
+real, running `ring_service.ts` endpoint and get a real signed reply back
+— not gossip-routed. `mesh_call`'s own `direct` option is the one remaining
+gap (`@macula-io/ts` exposes `callDirect`/`resolveDirect`, and
+`citizenship.ts`'s `callThenDirect()` now uses them — but wiring
+`mesh_call`'s own caller-facing `direct: true` flag to them, and by
+extension UCAN-gated capabilities, which currently only reach direct-dial-
+advertised procedures, is a separate, not-yet-done cutover).
 See CHANGELOG.md for the full list of what changed and the known gaps (no
 record-signature verification on the DHT tools yet, no
 `responded_by`/`seq` on some results — including the room tools' own
@@ -459,9 +469,10 @@ Since 0.13.0 presence also registers this agent in hecate-citizens, and
 renews it every 5 minutes (the directory's own entries expire after ~20).
 The `citizen_did` is the default identity's node ID -- the one `mesh_call`
 acts as and `agent.hello` announces -- proved with a fresh
-`{citizen_did, timestamp, procedure}` signature from `macula-cli identity
-sign`, so only the holder of that key can register it. `mesh_hello` and
-`mesh://identity` both report the outcome:
+`{citizen_did, timestamp, procedure}` signature from `citizenship.ts`'s
+`signIdentity()` (`Identity.sign()`, in-process via `@macula-io/ts`, no
+`macula-cli` subprocess), so only the holder of that key can register it.
+`mesh_hello` and `mesh://identity` both report the outcome:
 
 ```json
 "citizen_did": "4f76…d7a0",
@@ -731,6 +742,7 @@ and troubleshooting.
 | `MACULA_MCP_PRESENCE_IDENTITY` | Same, for the `agent.hello` Session presence holds open (a third identity, separate from both of the above for the same collision reason). | persisted per logical session (`~/.config/macula-mcp/identities/<kind>-<session>.seed`, scoped by `CLAUDE_CODE_SESSION_ID` else the parent pid — a restart of this same session reuses it, a different session gets its own) |
 | `MACULA_MCP_PRESENCE_GOODBYE_IDENTITY` | Same, for the SECOND Session presence holds open, subscribed to `agent.goodbye` (a sixth identity — see [Presence](#presence) for why this can't share `MACULA_MCP_PRESENCE_IDENTITY`'s connection). | persisted per logical session (`~/.config/macula-mcp/identities/<kind>-<session>.seed`, scoped by `CLAUDE_CODE_SESSION_ID` else the parent pid — a restart of this same session reuses it, a different session gets its own) |
 | `MACULA_MCP_SERVE_IDENTITY`    | Same, for the persistent Session `mesh_serve`/`mesh_unserve` hold open (a fourth identity, separate from all of the above for the same collision reason).               | persisted per logical session (`~/.config/macula-mcp/identities/<kind>-<session>.seed`, scoped by `CLAUDE_CODE_SESSION_ID` else the parent pid — a restart of this same session reuses it, a different session gets its own) |
+| `MACULA_MCP_SERVE_ADVERTISE_IDENTITY` | Same, for the SECOND Session `mesh_serve` opens for `direct: true`'s DHT advertisement (a seventh identity — `Session.putProcedureAdvertisement()` can never share the Session `serve()` itself runs on, see `serve.ts`'s own doc). Only ever signs a DHT record; the identity recorded there doesn't need to match the one actually serving. | persisted per logical session (`~/.config/macula-mcp/identities/<kind>-<session>.seed`, scoped by `CLAUDE_CODE_SESSION_ID` else the parent pid — a restart of this same session reuses it, a different session gets its own) |
 | `MACULA_MCP_OBSERVE_IDENTITY`  | Same, for the central (`agents.lobby`) Session `mesh_observe_lobby`/`mesh_unobserve_lobby` hold open (a fifth identity, separate from all of the above for the same collision reason). Every concurrently-tapped ROOM gets its own additional identity too, one per room topic -- see [Observing](#observing) -- with no env var override (there's no fixed slot to pin; it's minted from the room's own topic and persists the same way, one seed file per room ever tapped). | persisted per logical session (`~/.config/macula-mcp/identities/<kind>-<session>.seed`, scoped by `CLAUDE_CODE_SESSION_ID` else the parent pid — a restart of this same session reuses it, a different session gets its own) |
 | `MACULA_MCP_NO_CITIZENSHIP`    | Set to anything to skip registering this agent in hecate-citizens (see [Citizenship](#citizenship)); `mesh://identity` then reports `citizenship.disabled`.                              | unset: register on presence start, renew every 5 min |
 | `MACULA_MCP_CITIZEN_DISPLAY_NAME` | The name this agent shows in hecate-citizens. Pins it outright.                                                                                                                   | `operator_name`, else the realm handle (once joined), else the harness label, else `"macula-mcp agent"` |

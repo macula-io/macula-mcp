@@ -169,15 +169,59 @@ fires on a `v*` tag push, not on every commit to `main`).
   `documentIdFor(relativePath)` hash for a `mesh_remember_directory` file), then confirmed gone from a
   follow-up `mesh_recall` search — see `scripts/mesh-stations-memory-live-check.mjs`.
 
+- **`citizenship.ts`/`ring_service.ts`/`rings.ts`/`mesh_ring.ts` (backing `mesh_call`'s `prove_identity`,
+  `mesh_ring`, `mesh_answer_ring`) cut over to `@macula-io/ts`**, closing the `prove_identity`/ring gap the
+  previous release flagged. New `macula_ts_client.ts` functions: `signOwnershipProof(identityPath, procedure)`
+  (`Identity.sign()` over `ownership_proof.ts`'s own `proofMessage` byte layout — the SAME helper its
+  `verifyOwnershipProof()` uses, not a second, independently-drifting implementation of that layout) and
+  `callThenDirect(...)` (an ordinary `session.call()`, falling back to `session.callDirect()` — real
+  direct-dial, not a stub — on failure, both attempts sharing one connection so a genuinely dead session
+  fails both for the same underlying reason instead of masking it). `citizenship.ts` gets a thin `signIdentity()`
+  / `callThenDirect()` pair pinned to this server's own default identity, replacing `macula_cli.ts`'s
+  `identitySign()`/CLI-subprocess `call()` at every call site: `citizenship.ts`'s own `register()`,
+  `ring_service.ts`'s `handleRing`/`answerPendingRing`, `mesh_ring.ts`'s `placeRing`, and `mesh_call.ts`'s
+  `prove_identity` option. `rings.ts`'s local SQLite bookkeeping (already on `node:sqlite`) is untouched —
+  only the mesh-transport calls moved.
+- **Found and fixed two real, pre-existing bugs while live-verifying the above** (neither introduced by this
+  cutover, both were already broken on `main`):
+  - `rings.ts`'s `parseProven()` was called on the whole reply object (`payload.citizen_did`/`payload.proof`)
+    but `ring_service.ts`'s `provenReply` actually nests the proof under a `proven` key
+    (`{..., proven: {citizen_did, proof}}`) — so `parseRingReply`/`parseRingAnswerReply` silently dropped
+    every real reply's proof, and `mesh_ring.ts`'s `placeRing` treated every genuine accept/decline as
+    unproven-and-unreachable, defeating the hijack-protection the 2026-09-03 release review added. Fixed by
+    having both callers pass `p.proven` (the nested value) instead of `p` itself; `parseProven()`'s own
+    contract is unchanged. New regression coverage in `rings.test.ts` (confirmed RED against the pre-fix
+    code) and live-confirmed: `scripts/ring-two-process-check.mjs`'s accepted-ring check now genuinely
+    verifies the callee's signature instead of accidentally short-circuiting to "not verifiably signed."
+  - `serve.ts`'s `direct: true` path called `Session.putProcedureAdvertisement()` on the SAME `Session`
+    already running `serve()` — @macula-io/ts's own `#requireHandleNotServing` guard rejects that
+    combination outright (`putProcedureAdvertisement`'s `PutRecord` CALL would race `serve()`'s reads of the
+    shared control stream), so every direct-dial registration — `ring_service.ts`'s ring endpoint included —
+    failed to register at all. Fixed with a SECOND, lazily-opened `Session` (new seventh identity,
+    `serveAdvertiseIdentityPath()` / `MACULA_MCP_SERVE_ADVERTISE_IDENTITY`) dedicated to the DHT
+    advertisement, naming the SERVING session's own resolved station (not the advertise session's, which
+    could in principle land on a different one via its own fallback). New `serve.test.ts` (0 coverage
+    before this), confirmed RED against the pre-fix code (4/5 new tests failed without the second Session).
+- Live-verified against the real production fleet: `scripts/ring-two-process-check.mjs` (13/15 checks —
+  the 2 failures are `lobby_observer.ts` room-tap reconnect flakiness under concurrent load, pre-existing,
+  unrelated to this cutover), including a real accepted ring with a verified callee signature, a deferred
+  ring answered and carried back as a proven `ring_answer`, an unreachable ghost node whose error message
+  shows BOTH the plain-call and the direct-dial-retry attempts genuinely ran
+  (`unknown_error ...; direct-dial retry: directdial: resolve ... procedure has no direct-dial advertisement`),
+  and a forged-procedure proof correctly declined via the new `citizenship.signIdentity()`/`callThenDirect()`.
+  A separate, dedicated check proved the direct-dial SUCCESS half specifically: `session.resolveDirect()` +
+  `session.callDirect()` against a real, running `ring_service.ts` endpoint (registered via the `serve.ts`
+  fix above) resolved a real station identity/host/port and got back a real, signed reply over a genuine
+  one-hop QUIC dial — not gossip-routed.
+
 ### Known gaps (real, not hidden — see README.md)
 - `@macula-io/ts` itself now supports non-default realms, direct-dial, and `Identity.sign()` (0.12.0, see
-  above), and `macula_ts_client.ts` now routes realm through (see above) — but direct-dial is NOT wired up
-  yet: `assertDirectNotRequested()` still throws a clear error for `mesh_call`'s `direct` option instead of
-  using `@macula-io/ts`'s `callDirect`/`resolveDirect`, so UCAN-gated capabilities (which require
-  `direct: true`) still need `macula-cli`'s path for that option. That is real, scoped follow-up work, not
-  attempted in this pass. `mesh_call`'s `prove_identity` likewise still shells out to `macula-cli`'s
-  `identity sign` — `Identity.sign()` is now used for `mesh_join_realm`'s own (differently-scoped) proof, but
-  wiring it through `mesh_call`'s `prove_identity` path too is separate, not-yet-done work.
+  above), and `macula_ts_client.ts` now routes realm through (see above) — but `mesh_call`'s own
+  caller-facing `direct` OPTION is NOT wired up yet: `assertDirectNotRequested()` still throws a clear error
+  for it instead of using `@macula-io/ts`'s `callDirect`/`resolveDirect` (which `citizenship.ts`'s
+  `callThenDirect()` now uses internally for the ring/citizenship flows above), so UCAN-gated capabilities
+  (which require `direct: true`) still need `macula-cli`'s path for `mesh_call` specifically. That is real,
+  scoped follow-up work, not attempted in this pass.
 - The DHT tools no longer report `verified`/`verify_error` — `@macula-io/ts` does not verify a record's
   signature or expiry on the caller's behalf yet (documented in its own `findRecord`/`findRecords`/
   `findRecordsByType`). A caller that needs to trust a record's payload must check the signature itself.

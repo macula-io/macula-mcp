@@ -57,8 +57,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { defaultStation, identitySign, onShutdown } from "./macula_cli.js";
-import { callThenDirect, withIdentityProof } from "./citizenship.js";
+import { defaultStation, onShutdown } from "./macula_cli.js";
+import { callThenDirect, signIdentity, withIdentityProof } from "./citizenship.js";
 import * as serve from "./serve.js";
 import * as rooms from "./rooms.js";
 import { verifyOwnershipProof } from "./ownership_proof.js";
@@ -292,7 +292,7 @@ export interface HandleDeps {
   policy?: ContactPolicy;
   now?: number;
   joinRoom?: (args: { host?: string; room_topic: string; openedBy?: string }) => Promise<unknown>;
-  /** Signs a reply's proof. Defaults to the real identitySign; tests substitute a fixture signer. */
+  /** Signs a reply's proof. Defaults to the real signIdentity (citizenship.ts); tests substitute a fixture signer. */
   sign?: (procedure: string) => Promise<{ node_id: string; timestamp: number; signature: string }>;
 }
 
@@ -306,7 +306,7 @@ export type HandleReply = RingReply | RingAnswerReply | { answer: Answer; reason
 export async function handleRing(payload: unknown, deps: HandleDeps = {}): Promise<HandleReply> {
   const nodeId = deps.nodeId ?? state?.nodeId;
   if (!nodeId) return { answer: ANSWER.declined, reason: "ring service is not active" };
-  const sign = deps.sign ?? ((procedure) => identitySign({ procedure }));
+  const sign = deps.sign ?? (async (procedure) => signIdentity(procedure));
   if (typeof payload === "object" && payload !== null && (payload as Record<string, unknown>).kind === "ring_answer") {
     return handleRingAnswer(payload, nodeId, deps);
   }
@@ -450,7 +450,7 @@ export async function answerPendingRing(
   const notify =
     deps.notify ??
     (async (input) => {
-      const signed = await identitySign({ procedure: ringAnswerProofProcedure(ring.peer, ring.ring_id, args.answer) });
+      const signed = signIdentity(ringAnswerProofProcedure(ring.peer, ring.ring_id, args.answer));
       const res = await callThenDirect({ host: input.host, procedure: input.procedure, callArgs: withIdentityProof(input.callArgs, signed), timeoutMs: NOTIFY_TIMEOUT_MS });
       return res.payload;
     });

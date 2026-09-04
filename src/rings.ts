@@ -70,13 +70,27 @@ export interface Proof {
   signature: string;
 }
 
-/** The {citizen_did, proof} pair every ring-endpoint message carries, in both directions. */
+/** The {citizen_did, proof} pair every ring-endpoint REPLY carries, nested under its own `proven` key (distinct from a ring/ring_answer's own top-level citizen_did/proof, which handleRing/handleRingAnswer check directly against ringProblems/ringAnswerProblems -- see ring_service.ts). */
 export interface Proven {
   citizen_did: string;
   proof: Proof;
 }
 
-export function parseProven(payload: Record<string, unknown>): Proven | undefined {
+/**
+ * Parses a `proven` value: `{citizen_did, proof: {timestamp, signature}}`.
+ * Takes the VALUE of a `proven` field, not the reply object it lives on --
+ * pass `payload.proven`, not `payload` itself. (Fixed 2026-09-04: this used
+ * to be called with the whole reply object and read `payload.citizen_did`/
+ * `payload.proof` directly, which never matched provenReply's actual wire
+ * shape -- ring_service.ts nests those under `proven`, so every real
+ * accepted/declined reply's proof was silently dropped and mesh_ring.ts's
+ * placeRing treated every genuine acceptance as unproven-and-unreachable.
+ * Caught live while adding real (unmocked) parseRingReply coverage for the
+ * @macula-io/ts cutover -- pre-existing, unrelated to that cutover itself.)
+ */
+export function parseProven(proven: unknown): Proven | undefined {
+  if (typeof proven !== "object" || proven === null) return undefined;
+  const payload = proven as Record<string, unknown>;
   const p = payload.proof;
   if (typeof payload.citizen_did !== "string" || typeof p !== "object" || p === null) return undefined;
   const pp = p as Record<string, unknown>;
@@ -238,7 +252,7 @@ export function parseRingAnswerReply(payload: unknown): RingAnswerReply | undefi
   if (typeof payload !== "object" || payload === null) return undefined;
   const p = payload as Record<string, unknown>;
   if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id) || p.received !== 1) return undefined;
-  const proven = parseProven(p);
+  const proven = parseProven(p.proven);
   return { ring_id: p.ring_id, received: 1, ...(p.already_answered === 1 ? { already_answered: 1 as const } : {}), ...(proven ? { proven } : {}) };
 }
 
@@ -261,7 +275,7 @@ export function parseRingReply(payload: unknown): RingReply | undefined {
   if (typeof p.ring_id === "string") reply.ring_id = p.ring_id;
   if (typeof p.room_topic === "string") reply.room_topic = p.room_topic;
   if (typeof p.reason === "string") reply.reason = p.reason;
-  const proven = parseProven(p);
+  const proven = parseProven(p.proven);
   if (proven) reply.proven = proven;
   return reply;
 }

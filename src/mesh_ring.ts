@@ -10,16 +10,17 @@
 // here writes into a topic the callee never agreed to watch.
 //
 // Composition of ordinary calls: open a room if none was given
-// (rooms.ts), sign (identitySign), call (plain, then direct-dial, the
-// same fallback citizenship.ts uses), then on acceptance read the
-// transcript for the callee's participant_joined, which their side
-// publishes BEFORE answering 1 -- so "joined" here means the room is
-// genuinely two-sided, not that a reply said so.
+// (rooms.ts), sign (citizenship.ts's signIdentity), call (plain, then
+// direct-dial, citizenship.ts's own callThenDirect), then on acceptance
+// read the transcript for the callee's participant_joined, which their
+// side publishes BEFORE answering 1 -- so "joined" here means the room
+// is genuinely two-sided, not that a reply said so.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation, identity, identitySign } from "./macula_cli.js";
-import { callThenDirect, withIdentityProof } from "./citizenship.js";
+import { defaultIdentityPath, defaultStation } from "./macula_cli.js";
+import { tsIdentity } from "./macula_ts_client.js";
+import { callThenDirect, signIdentity, withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
@@ -76,7 +77,7 @@ export type PlaceRingResult =
  * mistakes; an unreachable callee is a RESULT, not an error.
  */
 export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
-  const me = presence.currentNodeId() ?? (await identity()).node_id;
+  const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
   if (args.to === me) throw new RingError("that is this agent's own node id");
   let roomTopic = args.room_topic;
   if (roomTopic === undefined) {
@@ -98,7 +99,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
     // a different one. Conflating the two (found live by the release
     // review, 2026-09-03: this call signed the bare name, ring_service.ts
     // verified against the bound one) made every ring bad_signature.
-    const signed = await identitySign({ procedure: ringProofProcedure(args.to, ring.ring_id) });
+    const signed = signIdentity(ringProofProcedure(args.to, ring.ring_id));
     const res = await callThenDirect({ host: args.host, procedure, callArgs: withIdentityProof({ ...ring }, signed), timeoutMs: CALL_TIMEOUT_MS });
     payload = res.payload;
   } catch (e) {

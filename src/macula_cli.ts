@@ -221,7 +221,7 @@ const identityDir = join(homedir(), ".config", "macula-mcp", "identities");
  */
 const scopeKey = process.env.CLAUDE_CODE_SESSION_ID ?? `ppid-${process.ppid}`;
 
-function mintIdentityPath(kind: "default" | "watch" | "presence" | "presence-goodbye" | "serve" | "observe"): string {
+function mintIdentityPath(kind: "default" | "watch" | "presence" | "presence-goodbye" | "serve" | "serve-advertise" | "observe"): string {
   mkdirSync(identityDir, { recursive: true });
   return join(identityDir, `${kind}-${scopeKey}.seed`);
 }
@@ -322,6 +322,32 @@ let cachedServeIdentityPath: string | undefined;
 export function serveIdentityPath(): string {
   if (process.env.MACULA_MCP_SERVE_IDENTITY) return process.env.MACULA_MCP_SERVE_IDENTITY;
   return (cachedServeIdentityPath ??= mintIdentityPath("serve"));
+}
+
+let cachedServeAdvertiseIdentityPath: string | undefined;
+/**
+ * A SEVENTH identity, dedicated to serve.ts's own direct-dial DHT
+ * advertisement (Session.putProcedureAdvertisement) -- separate from
+ * serveIdentityPath()'s own serving connection because
+ * putProcedureAdvertisement() and an active serve() can never share one
+ * Session: putProcedureAdvertisement's own PutRecord CALL would race
+ * serve()'s reads of the shared control stream on the same connection
+ * (@macula-io/ts's own #requireHandleNotServing guard rejects the
+ * combination outright -- found live 2026-09-04, every direct-dial
+ * registration on this module failed with exactly that error until
+ * serve.ts opened a second Session on this identity for the role --
+ * see serve.ts's own doc). This identity only ever signs a DHT
+ * procedure_advertisement record; the advertiser identity recorded
+ * there does not need to match the identity actually serving the
+ * procedure (see @macula-io/ts's directdial.ts doc on its trust model --
+ * the serving_station field putProcedureAdvertisement is given, not the
+ * advertiser's own identity, is what a direct-dial caller ultimately
+ * pins its one-hop dial against), so a distinct identity here is by
+ * design, not a workaround.
+ */
+export function serveAdvertiseIdentityPath(): string {
+  if (process.env.MACULA_MCP_SERVE_ADVERTISE_IDENTITY) return process.env.MACULA_MCP_SERVE_ADVERTISE_IDENTITY;
+  return (cachedServeAdvertiseIdentityPath ??= mintIdentityPath("serve-advertise"));
 }
 
 let cachedObserveIdentityPath: string | undefined;

@@ -1,24 +1,24 @@
 // In-process replacement for the subset of macula_cli.ts's subprocess
 // calls this server no longer needs a macula-cli binary for: call,
-// publish, watch, the three DHT find-* ops, content put/get, and the
-// bare identity() read. Talks to @macula-io/ts's Session/Identity
-// directly -- no subprocess, no --json envelope, no daemon for these
-// specific operations.
+// publish, watch, the three DHT find-* ops, content put/get, the bare
+// identity() read, ownership-proof signing, and call-then-direct-dial.
+// Talks to @macula-io/ts's Session/Identity directly -- no subprocess,
+// no --json envelope, no daemon for these specific operations.
 //
 // Deliberately NOT a like-for-like port of every macula_cli.ts
-// capability: @macula-io/ts does not yet expose direct-dial (as used by
-// mesh_call's own `direct` option -- callDirect/resolveDirect DO exist
-// on Session now, but wiring mesh_call's `direct` flag to them is a
-// separate, not-yet-done cutover, see mesh_call.ts) or ownership-proof
-// signing (identitySign() stays on macula_cli.ts's subprocess path for
-// that -- see mesh_call.ts). realm WAS in this list until the 0.12.0
-// vendor refresh added CallOptions.realm/PublishOptions.realm/
-// SubscribeOptions.realm to Session.call/publish/subscribe -- call(),
-// publish() and watch() below now thread a caller-supplied realm
-// straight through. Every function below still throws a clear
-// MaculaCliError (reused, not a new error type, so reply.ts's
-// describeCliError keeps working unchanged) for a capability it can't
-// yet honor, rather than silently ignoring the parameter.
+// capability: mesh_call's own `direct` option is still NOT wired to
+// Session.callDirect()/resolveDirect() -- those exist on Session (since
+// the direct-dial cutover below landed) and ARE used internally by
+// callThenDirect() further down, but routing mesh_call's caller-facing
+// `direct: true` flag through them is a separate, not-yet-done cutover
+// (see mesh_call.ts's assertDirectNotRequested / call() below). realm
+// WAS in this "not yet" list too, until the 0.12.0 vendor refresh added
+// CallOptions.realm/PublishOptions.realm/SubscribeOptions.realm to
+// Session.call/publish/subscribe -- call(), publish() and watch() below
+// now thread a caller-supplied realm straight through. call() itself
+// still throws a clear MaculaCliError (reused, not a new error type, so
+// reply.ts's describeCliError keeps working unchanged) for `direct`,
+// rather than silently ignoring it.
 //
 // Connects fresh per one-shot call, same "connect, do the thing, exit"
 // semantics macula-cli's own one-shot subcommands had -- deliberately
@@ -33,6 +33,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname } from "node:path";
 import { Identity, MaculaCallError as TsCallError, Session, type JsonValue } from "@macula-io/ts";
 import { MaculaCliError, defaultStations, stationArgs } from "./macula_cli.js";
+import { proofMessage } from "./ownership_proof.js";
 
 const DEFAULT_PORT = 4433;
 
@@ -209,6 +210,96 @@ export async function call(args: {
           realm: args.realm,
         });
     return { procedure: args.procedure, payload, duration_ms: Date.now() - start };
+  });
+}
+
+// ---- ownership-proof signing ---------------------------------------------
+
+export interface TsIdentitySignResult {
+  node_id: string;
+  timestamp: number;
+  signature: string;
+}
+
+/**
+ * An ownership proof for `procedure`, signed by the identity at
+ * `identityPath`: {node_id, timestamp, procedure} exactly as
+ * ownership_proof.ts's proofMessage lays the bytes out -- the SAME
+ * helper its own verifyOwnershipProof() uses, so a proof signed here
+ * verifies identically wherever it lands (hecate-citizens,
+ * hecate-mail, another macula-mcp's ring_service.ts) and this is not a
+ * second, independently-drifting reimplementation of that byte layout.
+ * Matches macula-cli's own `identity sign --procedure <string>` output
+ * shape, which this replaces (see citizenship.ts/ring_service.ts/
+ * mesh_ring.ts/mesh_call.ts, all previously calling macula_cli.ts's
+ * identitySign()).
+ *
+ * Pure local Ed25519 signing via Identity.sign() -- no network, unlike
+ * every function above; only the identity file is touched, and unlike
+ * the macula-cli subprocess this replaces, there is no process to spawn
+ * at all. Sign right before the call, never ahead (see
+ * MAX_PROOF_SKEW_MS in ownership_proof.ts).
+ */
+export function signOwnershipProof(identityPath: string, procedure: string): TsIdentitySignResult {
+  const identity = loadOrGenerateIdentity(identityPath);
+  try {
+    const node_id = Buffer.from(identity.nodeId).toString("hex");
+    const timestamp = Date.now();
+    const signature = Buffer.from(identity.sign(proofMessage(node_id, timestamp, procedure))).toString("hex");
+    return { node_id, timestamp, signature };
+  } finally {
+    identity.dispose();
+  }
+}
+
+// ---- call, then direct-dial on failure -----------------------------------
+
+/**
+ * The same connect-do-the-thing-exit shape as call() above, but tries an
+ * ordinary session.call() first and, only on failure, retries the
+ * identical call as session.callDirect() before giving up -- matching
+ * citizenship.ts's/ring_service.ts's/mesh_ring.ts's existing plain-then-
+ * direct fallback semantics. An ordinary (gossip-routed) call depends on
+ * inter-station gossip having already carried a route from `host` to
+ * whoever serves `procedure`; during a fleet rollout, or against a peer
+ * this station hasn't gossiped with yet, that route is exactly what's
+ * missing for a minute or two (temporary_relay_failure), while the
+ * target's own direct-dial DHT record is already there -- see
+ * citizenship.ts's callThenDirect doc for where this was first observed
+ * live. Both attempts share ONE connection/identity (session.callDirect()
+ * only touches this Session to query the DHT; the one-hop dial itself is
+ * a separate connection macula-go opens, pins, and closes internally --
+ * see @macula-io/ts's directdial.ts), so a genuinely dead connection
+ * fails both attempts for the same underlying reason rather than masking
+ * it. On a double failure, both errors are combined into one message
+ * (`${plain}; direct-dial retry: ${direct}`), the same shape the old
+ * macula-cli-backed two-subprocess version gave.
+ */
+export async function callThenDirect(args: {
+  host?: string;
+  procedure: string;
+  callArgs?: Record<string, unknown>;
+  timeoutMs?: number;
+  realm?: string;
+  identityPath: string;
+}): Promise<TsCallResult> {
+  const start = Date.now();
+  return withSession(args.host, args.identityPath, async (session) => {
+    const payload = toJsonValue(args.callArgs ?? {});
+    const opts = { deadlineMs: args.timeoutMs, realm: args.realm };
+    try {
+      const result = await session.call(args.procedure, payload, opts);
+      return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
+    } catch (plain) {
+      try {
+        const result = await session.callDirect(args.procedure, payload, opts);
+        return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
+      } catch (direct) {
+        const p = plain instanceof Error ? plain.message : String(plain);
+        const d = direct instanceof Error ? direct.message : String(direct);
+        throw new Error(`${p}; direct-dial retry: ${d}`);
+      }
+    }
   });
 }
 
