@@ -187,8 +187,8 @@ describe("public room discovery", () => {
 });
 
 describe("tapRoom() / untapRoom()", () => {
-  it("throws if the observer isn't active", () => {
-    expect(() => lobbyObserver.tapRoom(newRoomTopic(), { joined: 1 })).toThrow(/not active/);
+  it("throws if the observer isn't active", async () => {
+    await expect(lobbyObserver.tapRoom(newRoomTopic(), { joined: 1 })).rejects.toThrow(/not active/);
   });
 
   it("tapping the same room twice just upgrades joined 0 -> 1 without a second Session", async () => {

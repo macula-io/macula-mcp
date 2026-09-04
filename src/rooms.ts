@@ -96,7 +96,7 @@ async function ensureTapped(args: { host?: string; room_topic: string }): Promis
   await lobbyObserver.start({ host: args.host });
   if (lobbyObserver.isTapped(args.room_topic)) return;
   const me = selfNodeId();
-  lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
+  await lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
   const rejoined = buildEnvelope({ room_topic: args.room_topic, from: me, kind: "participant_joined", text: "" });
   await publish({ host: args.host, topic: args.room_topic, fact: { ...rejoined }, identityPath: defaultIdentityPath() });
 }
@@ -130,7 +130,7 @@ export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
   });
   // Tap BEFORE publishing so the opener's own first fact is in its transcript too;
   // on a failed publish, untap (see the module header) so nothing leaks.
-  lobbyObserver.tapRoom(roomTopic, { joined: 1 });
+  await lobbyObserver.tapRoom(roomTopic, { joined: 1 });
   try {
     await publish({ host: args.host, topic: roomTopic, fact: { ...opened }, identityPath: defaultIdentityPath() });
   } catch (e) {
@@ -172,7 +172,7 @@ export async function joinRoom(args: { host?: string; room_topic: string; opened
   }
   await lobbyObserver.start({ host: args.host });
   const me = selfNodeId();
-  lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
+  await lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
   const joined = buildEnvelope({ room_topic: args.room_topic, from: me, kind: "participant_joined", text: "" });
   try {
     await publish({ host: args.host, topic: args.room_topic, fact: { ...joined }, identityPath: defaultIdentityPath() });

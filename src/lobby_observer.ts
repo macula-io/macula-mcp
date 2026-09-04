@@ -274,12 +274,12 @@ function stopLegSync(leg: Leg): void {
  * registers it in `forState.roomTaps` immediately -- BEFORE the connect
  * even begins, so a concurrent tapRoom()/untapRoom() call sees it right
  * away and a caller's own openRoom()/joinRoom() (which taps before
- * publishing, deliberately) doesn't race an empty map. The connect
- * itself is fire-and-forget: tapRoom() is a sync function rooms.ts never
- * awaits, matching the old watchTopicOnDaemon()'s own "spawn and don't
- * wait" shape. A first-connect failure does not throw or drop the tap --
- * it logs and hands off to scheduleReconnect(), the same self-healing
- * every later disconnect gets (see this module's own header).
+ * publishing, deliberately) doesn't race an empty map. A first-connect
+ * failure does not throw or drop the tap -- it logs and hands off to
+ * scheduleReconnect(), the same self-healing every later disconnect
+ * gets (see this module's own header); tapRoom() below awaits this
+ * function's own attempt settling (success OR a logged failure) before
+ * it resolves, so that self-healing behavior is unchanged either way.
  */
 function tapRoomLeg(forState: ObserverState, roomTopic: string, joined: 0 | 1): void {
   const identity = loadOrGenerateIdentity(observeRoomIdentityPath(roomTopic));
@@ -345,7 +345,11 @@ function tapPublicRoomIfNew(centralPayload: unknown): void {
     state.droppedForCap += 1;
     return;
   }
-  tapRoom(env.room_topic, { joined: 0 });
+  // Deliberately not awaited: this is a passive reaction to someone ELSE's
+  // room_opened fact, not immediately followed by a publish of our own
+  // that needs the tap to already be live -- unlike rooms.ts's own
+  // openRoom()/joinRoom()/ensureTapped(), which do await tapRoom() now.
+  void tapRoom(env.room_topic, { joined: 0 });
 }
 
 /**
@@ -356,15 +360,32 @@ function tapPublicRoomIfNew(centralPayload: unknown): void {
  * agent's own decision, not something a resource bound should silently
  * drop. Throws if the observer isn't active -- callers await start()
  * first.
+ *
+ * Awaits the tap's own first connect+subscribe attempt settling before
+ * resolving -- found live 2026-09-04 (the ring-two-process-check script's
+ * own "open" round trip, re-verified after a prior connectivity outage):
+ * without this, rooms.ts's openRoom()/joinRoom()/ensureTapped() published
+ * their own first fact and returned to the CALLER (who then published
+ * a reply) before the callee's subscribe() had necessarily registered
+ * with the station -- a real, reproducible gap in the exact "the tap
+ * was already running before your message went out" guarantee mesh_say's
+ * own tool description promises. A connect FAILURE still doesn't throw
+ * here (tapRoomLeg's own catch already logs it and schedules a
+ * reconnect, the same self-healing every later disconnect gets) --
+ * this only waits for that first attempt to settle, success or not,
+ * rather than racing ahead of it.
  */
-export function tapRoom(roomTopic: string, opts: { joined: 0 | 1 }): void {
+export async function tapRoom(roomTopic: string, opts: { joined: 0 | 1 }): Promise<void> {
   if (!state) throw new Error("lobby observer is not active -- start() it before tapping a room");
   const existing = state.roomTaps.get(roomTopic);
   if (existing) {
     if (opts.joined === 1) existing.joined = 1;
+    if (existing.inFlight) await existing.inFlight.catch(() => {});
     return;
   }
   tapRoomLeg(state, roomTopic, opts.joined);
+  const leg = state.roomTaps.get(roomTopic);
+  if (leg?.inFlight) await leg.inFlight.catch(() => {});
 }
 
 /** Stops watching `roomTopic`. No-op if it wasn't tapped. Removes it from the map immediately (so isTapped() reflects it right away); the actual Session close and identity dispose run in the background. */
