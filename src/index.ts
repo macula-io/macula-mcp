@@ -43,6 +43,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
+import * as presence from "./presence.js";
 import { registerIdentity } from "./mesh_identity.js";
 import { registerEtiquette } from "./mesh_etiquette.js";
 import { registerHelp } from "./mesh_help.js";
@@ -65,6 +66,7 @@ import { registerMeshUnserve } from "./mesh_unserve.js";
 import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
 import { serverVersion } from "./version.js";
 import { registerMeshJoinRealm } from "./mesh_join_realm.js";
+import * as serve from "./serve.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -224,8 +226,64 @@ registerMeshUnserve(server);
 // description and mesh_etiquette.ts.
 registerMeshLobbyObserver(server);
 
+/** Bounds how long the graceful shutdown below is allowed to take before this
+ * process force-exits anyway -- a real network operation (presence's
+ * goodbye publish, a served procedure's Session close) could in principle
+ * hang if the mesh is in a bad state, and a client that has already gone
+ * away is not waiting around for a perfectly clean exit. */
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+/** Runs when the MCP client goes away -- a clean disconnect, a crash, or a
+ * killed harness all look the same here: the stdio pipe just closes.
+ * Without this, nothing in this process ever noticed (found live
+ * 2026-09-04: only SIGINT/SIGTERM were hooked, and those only run a
+ * SYNCHRONOUS best-effort teardown with no goodbye publish -- a closed
+ * stdio transport left the process running indefinitely, still
+ * heartbeating agent.hello under a persistent identity and holding every
+ * QUIC connection open, since an active subscribe() deliberately keeps
+ * Node's event loop alive and reconnect just re-arms it). This runs the
+ * SAME graceful, ASYNC teardown a deliberate mesh_goodbye already does
+ * (presence.stop(): publishes a real goodbye, then tears down ring
+ * service, lobby observer and both presence legs) plus serve.ts's own
+ * equivalent for any standing served procedures (which presence.stop()
+ * does not touch -- a separate, deliberately independent exposure, see
+ * presence.ts's own top comment), bounded by SHUTDOWN_TIMEOUT_MS so a
+ * stuck network call can never keep this process alive forever either.
+ *
+ * Guarded against running twice -- both process.stdin's own 'end'/'close'
+ * events AND (belt-and-suspenders) the MCP SDK's own server.onclose can
+ * fire for the same disconnect.
+ */
+let shuttingDown = false;
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error("macula-mcp: MCP transport closed -- shutting down gracefully");
+  await Promise.race([
+    Promise.allSettled([presence.stop(), serve.stopAll()]),
+    new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS).unref()),
+  ]);
+  process.exit(0);
+}
+
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
+  // Belt-and-suspenders: wired for whatever SDK version/code path DOES call
+  // Server#close() explicitly.
+  server.server.onclose = () => {
+    void shutdown();
+  };
+  // The REAL fix, verified against the actual installed SDK: StdioServerTransport
+  // itself only ever listens for 'data'/'error' on stdin (read its
+  // node_modules/@modelcontextprotocol/sdk/.../server/stdio.js -- there is no
+  // 'end'/'close' listener anywhere in it, so nothing calls transport.close()
+  // when the pipe actually closes, and server.onclose above never fires on its
+  // own for a real stdio disconnect). Reproduced live: closing a spawned child's
+  // stdin left it running past a 15s wait with server.onclose alone wired.
+  // Listening for stdin's own 'end'/'close' directly is what actually detects a
+  // real client disconnect for this transport.
+  process.stdin.on("end", () => void shutdown());
+  process.stdin.on("close", () => void shutdown());
   await server.connect(transport);
   // stderr is safe; stdout is the MCP channel.
   console.error("macula-mcp ready (stdio)");

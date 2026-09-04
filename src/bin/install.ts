@@ -25,8 +25,9 @@ import { createInterface } from "node:readline/promises";
 import { detect } from "../install/platform.js";
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
 import { parseSelection } from "../install/selection.js";
+import { serverVersion } from "../version.js";
 
-const VERSION = "0.4.0";
+const VERSION = serverVersion();
 
 interface Args {
   force: boolean;

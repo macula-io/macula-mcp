@@ -31,6 +31,7 @@
 // the same pass, so it's gone rather than kept as an unused export.
 
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -357,6 +358,38 @@ export function observeIdentityPath(): string {
 export function observeRoomIdentityPath(roomTopic: string): string {
   mkdirSync(identityDir, { recursive: true });
   return join(identityDir, `observe-room-${roomTopic}-${scopeKey}.seed`);
+}
+
+/**
+ * One identity PER REGISTERED PROCEDURE serve.ts is concurrently serving --
+ * not a fixed slot the way serveIdentityPath() used to be. @macula-io/ts's
+ * Session allows only one active serve() per connection (the SDK's own
+ * stated contract -- confirmed live 2026-09: presence's own ring endpoint
+ * registering first silently starved any real mesh_serve call sharing the
+ * old single serveIdentityPath() session, and the reverse order broke the
+ * ring registration instead), so serving N procedures concurrently now
+ * means N independent connections -- and two connections sharing one node
+ * ID get the older one closed by the station (the same per-identity dedupe
+ * every identity in this file exists to avoid), so every concurrently
+ * -served procedure needs its own identity, on top of
+ * serveAdvertiseIdentityPath()'s own, separate, SHARED identity for the
+ * direct-dial DHT advertisement leg (that leg never serves anything -- it
+ * only issues ordinary CALLs -- so it isn't subject to this same
+ * one-serve-per-Session constraint and can stay shared across every
+ * registration, unlike the serving identity below).
+ *
+ * Hashed rather than embedded verbatim (unlike observeRoomIdentityPath's
+ * roomTopic, which envelope.ts's isRoomTopic already constrains to a safe
+ * charset): a procedure name is caller-supplied free text with no such
+ * guarantee, so this uses a short, deterministic, filename-safe digest
+ * instead of trusting it directly in a path. No env var override, same
+ * reasoning as observeRoomIdentityPath: a dynamically-registered procedure
+ * has no fixed slot to override.
+ */
+export function serveProcedureIdentityPath(procedure: string): string {
+  mkdirSync(identityDir, { recursive: true });
+  const digest = createHash("sha256").update(procedure).digest("hex").slice(0, 24);
+  return join(identityDir, `serve-${digest}-${scopeKey}.seed`);
 }
 
 /**

@@ -111,6 +111,8 @@ interface Leg {
   retryTimer?: NodeJS.Timeout;
   /** Set once untapRoom()/stop() starts tearing this leg down -- suppresses any reconnect already scheduled or about to be scheduled, and tells a connect attempt still in flight to close what it just opened instead of subscribing on it. */
   closing: boolean;
+  /** The currently in-flight attachSession() call for this leg, if one is mid-flight (either a room tap's own fire-and-forget FIRST connect from tapRoomLeg, or a reconnect from scheduleReconnect) -- stopLeg() awaits this BEFORE disposing leg.identity, so an in-flight connect never has its identity yanked out from under it (found live: without this, stopLeg's identity.dispose() could race a still-connecting attachSession, so that fresh connection's own eventual close() throws into a swallowed catch and is left open until the station idles it out). */
+  inFlight?: Promise<void>;
 }
 
 /** A room tap: a Leg plus whether this agent opened or joined the room on purpose (rooms.ts), as opposed to tapping it only because it was announced publicly on central. */
@@ -203,22 +205,34 @@ async function attachSession(leg: Leg): Promise<void> {
     await session.close(leg.identity).catch(() => {});
     return;
   }
+  if (leg.session) {
+    // A reconnect: the previous session's connection already died (that's
+    // WHY we're here), but best-effort close it anyway rather than just
+    // dropping the reference -- frees the Go-side handle instead of
+    // leaking one per reconnect cycle (found live: attachSession
+    // previously just overwrote leg.session with no close, one leaked
+    // handle per reconnect).
+    await leg.session.close(leg.identity).catch(() => {});
+  }
   leg.session = session;
   leg.stopSubscription = stop;
   leg.reconnectAttempt = 0; // a successful (re)connect resets backoff for the NEXT disconnect
   leg.retryTimer = undefined;
 }
 
-/** Schedules attachSession() again after an exponential backoff, retrying itself on further failure until it succeeds or the leg starts closing. Never throws -- every failure just re-schedules. */
+/** Schedules attachSession() again after an exponential backoff, retrying itself on further failure until it succeeds or the leg starts closing. Never throws -- every failure just re-schedules. Tracks the in-flight attempt on leg.inFlight so stopLeg() can await it before disposing the identity (see Leg.inFlight's own doc). */
 function scheduleReconnect(leg: Leg): void {
   if (leg.closing) return;
   const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** leg.reconnectAttempt);
   leg.reconnectAttempt += 1;
   console.error(`lobby observer: ${leg.topic} reconnecting in ${delay}ms (attempt ${leg.reconnectAttempt})`);
   const timer = setTimeout(() => {
-    void attachSession(leg).catch((e) => {
+    const attempt = attachSession(leg).catch((e) => {
       console.error(`lobby observer: ${leg.topic} reconnect attempt failed: ${e instanceof Error ? e.message : String(e)}`);
       scheduleReconnect(leg);
+    });
+    leg.inFlight = attempt.finally(() => {
+      if (leg.inFlight === attempt) leg.inFlight = undefined;
     });
   }, delay);
   timer.unref(); // a pending reconnect attempt alone shouldn't keep the process alive
@@ -238,10 +252,11 @@ async function connectCentralLeg(host: string | undefined, identityPath: string,
   return leg;
 }
 
-/** Graceful async teardown: waits for the subscription to actually stop and the Session to actually close (if one was ever established) before disposing the identity. Used by stop() and untapRoom(), which can afford to let this run in the background without blocking their own (sync, for untapRoom) return. */
+/** Graceful async teardown: waits for the subscription to actually stop and the Session to actually close (if one was ever established) before disposing the identity. Used by stop() and untapRoom(), which can afford to let this run in the background without blocking their own (sync, for untapRoom) return. Awaits any in-flight connect/reconnect FIRST (see Leg.inFlight's own doc) -- that attempt will see leg.closing and clean itself up using the still-valid identity, rather than racing this function's own identity.dispose() below. */
 async function stopLeg(leg: Leg): Promise<void> {
   leg.closing = true;
   if (leg.retryTimer) clearTimeout(leg.retryTimer);
+  if (leg.inFlight) await leg.inFlight.catch(() => {});
   await leg.stopSubscription().catch(() => {});
   if (leg.session) await leg.session.close(leg.identity).catch(() => {});
   leg.identity.dispose();
@@ -287,9 +302,12 @@ function tapRoomLeg(forState: ObserverState, roomTopic: string, joined: 0 | 1): 
     joined,
   };
   forState.roomTaps.set(roomTopic, leg);
-  void attachSession(leg).catch((e) => {
+  const attempt = attachSession(leg).catch((e) => {
     console.error(`lobby observer: room tap ${roomTopic} failed to connect, retrying: ${e instanceof Error ? e.message : String(e)}`);
     scheduleReconnect(leg);
+  });
+  leg.inFlight = attempt.finally(() => {
+    if (leg.inFlight === attempt) leg.inFlight = undefined;
   });
 }
 

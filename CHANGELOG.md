@@ -5,6 +5,53 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.19.0] - 2026-09-04
+
+### Fixed
+- **`mesh_serve` could only ever serve ONE procedure per process, and `presence`'s own ring endpoint silently
+  claimed that one slot.** `serve.ts` held every registration on a single shared `@macula-io/ts` `Session`,
+  but a `Session` only ever serves one procedure at a time (its own stated contract) — since `presence.ts`
+  registers this agent's `agent.<node_id>.ring` endpoint (`ring_service.ts`) the moment presence starts, and
+  presence starts on nearly every mesh tool call, any real `mesh_serve` call after that failed with an
+  internal "Session is already serving" error the caller couldn't act on (the reverse order broke the ring
+  registration instead, silently). Fixed by giving every registration — the ring endpoint included — its
+  OWN persistent `Session` and its OWN identity (`mesh_config.ts`'s new `serveProcedureIdentityPath()`,
+  hashed per procedure). The shared direct-dial advertisement leg (`putProcedureAdvertisement`) stays
+  shared across registrations, deliberately — it never calls `Session.serve()`, so it was never part of the
+  bug. Live-verified: presence's ring endpoint plus two independently-registered `mesh_serve` procedures now
+  all serve concurrently and answer real calls; unserving one leaves the others untouched.
+- **`mesh_call`'s `direct: true` unconditionally threw**, even after `@macula-io/ts` gained real direct-dial
+  support earlier this same day — the flag was simply never wired to it. `macula_ts_client.ts`'s `call()`
+  now routes `direct: true` through `Session.callDirect`/`callDirectWithUcan` (the same primitives
+  `callThenDirect()` already used successfully for its own automatic fallback), instead of refusing outright.
+  Live-verified against the real fleet, including with `MACULA_MCP_UCAN` attached via `callDirectWithUcan`
+  using a deliberately mismatched token audience (the bearer-token property holds through the direct path
+  too).
+- **The server never exited when its MCP client disconnected** — a dropped pipe, a crashed harness, or a
+  killed parent process all left it running forever, still heartbeating `agent.hello` under a persistent
+  identity and holding every QUIC connection open, since an active `subscribe()` deliberately keeps Node's
+  event loop alive. Root cause, found the hard way: the installed MCP SDK's `StdioServerTransport` never
+  detects its own stdin closing — it only ever listens for `data`/`error`, so nothing calls `.close()` (and
+  `Server#onclose` never fires) on a real client disconnect. Fixed by listening for `process.stdin`'s own
+  `end`/`close` events directly and running the same graceful async teardown a deliberate `mesh_goodbye`
+  already does (publish a real goodbye, stop ring service/lobby observer/presence, stop any served
+  procedures), bounded by a 10s timeout so a stuck network call can't keep the process alive either.
+  `Server#onclose` is still wired too, belt-and-suspenders, for whatever code path does call `.close()`
+  explicitly. Live-verified: a spawned server, driven through a real MCP handshake, with its stdio closed —
+  now publishes a real `agent.goodbye` (received by an independent watcher session) and exits with code 0 on
+  its own, no external kill needed.
+- Two resource leaks in `presence.ts`'s/`lobby_observer.ts`'s reconnect logic, found by the same review:
+  a reconnected leg's previous (dead) `Session` was never `close()`d, just overwritten (one leaked Go-side
+  handle per reconnect cycle); and `stopLeg()` could dispose a leg's identity while a reconnect was still
+  mid-flight, so that fresh connection's own eventual `close()` threw into a swallowed catch and was left
+  open until the station idled it out. Both fixed: the old session is now closed before being replaced, and
+  `stopLeg()` awaits any in-flight connect/reconnect attempt before touching the identity.
+- Doc/version leftovers: `mesh_call`'s `direct` description no longer claims it's unsupported; the UCAN
+  provisioning error message no longer tells the user to run a `macula-cli` command that no longer exists in
+  this project; `macula-mcp-doctor`/`-install`/`-uninstall`/`-status` no longer report a hardcoded, long-stale
+  `0.4.0` — they read the real package version now (`version.ts`'s `serverVersion()`), the same fix `index.ts`
+  itself already got for the identical bug.
+
 ## [0.18.0] - 2026-09-04
 
 ### Changed

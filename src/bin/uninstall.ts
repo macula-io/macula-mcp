@@ -9,8 +9,9 @@
 // this command touches.
 
 import { ALL, detected, type ClientAdapter } from "../install/mcp_clients/index.js";
+import { serverVersion } from "../version.js";
 
-const VERSION = "0.4.0";
+const VERSION = serverVersion();
 
 interface Args {
   all: boolean; // touch every supported client, not just detected

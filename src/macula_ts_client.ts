@@ -119,16 +119,6 @@ export async function withSession<T>(
   }
 }
 
-function assertDirectNotRequested(direct: boolean | undefined, tool: string): void {
-  if (direct) {
-    throw new MaculaCliError(
-      `${tool}: direct-dial was requested, but @macula-io/ts does not implement direct-dial (directdial.Call/` +
-        "Resolve) yet -- not supported by this server's in-process implementation. UCAN-gated capabilities, " +
-        "which require direct-dial, cannot be reached this way yet.",
-    );
-  }
-}
-
 /** Reads a UCAN token from `path` (MACULA_MCP_UCAN, same file-path convention
  * mesh_config.ts's ucanPath() already established). Deliberately just an
  * existence/non-empty sanity check -- NOT an identity-pairing check. An
@@ -149,8 +139,9 @@ function assertDirectNotRequested(direct: boolean | undefined, tool: string): vo
 function readUcanToken(path: string): string {
   if (!existsSync(path)) {
     throw new MaculaCliError(
-      `MACULA_MCP_UCAN is set to "${path}" but that file doesn't exist -- provision the token first ` +
-        "(macula-cli ucan mint ...) before making a call that needs it.",
+      `MACULA_MCP_UCAN is set to "${path}" but that file doesn't exist -- provision a token there first ` +
+        "(e.g. via @macula-io/ts's own Ucan.mint(), or hand-place a token another agent minted) before " +
+        "making a call that needs it.",
     );
   }
   const token = readFileSync(path, "utf8").trim();
@@ -193,27 +184,33 @@ export async function call(args: {
   callArgs?: Record<string, unknown>;
   timeoutMs?: number;
   realm?: string;
+  /** Resolve the procedure's direct-dial DHT advertisement and call its
+   * serving station directly, in one hop, via Session.callDirect/
+   * callDirectWithUcan -- instead of Session.call/callWithUcan, which
+   * depend on inter-station gossip already having a route. Routed through
+   * the SAME direct-dial primitives callThenDirect() below already uses
+   * successfully; this just exposes the choice to the caller instead of
+   * only ever using direct-dial as an automatic fallback. */
   direct?: boolean;
   identityPath: string;
   /** MACULA_MCP_UCAN's file path, if set (see mesh_config.ts's ucanPath()) --
    * when present, attaches the token there to this call via
-   * Session.callWithUcan instead of Session.call. Harmless to set against a
-   * procedure that isn't UCAN-gated (macula-go ignores an unneeded token on
-   * the wire). */
+   * Session.callWithUcan/callDirectWithUcan instead of Session.call/
+   * callDirect. Harmless to set against a procedure that isn't UCAN-gated
+   * (macula-go ignores an unneeded token on the wire). */
   ucanPath?: string;
 }): Promise<TsCallResult> {
-  assertDirectNotRequested(args.direct, "mesh_call");
   const start = Date.now();
   return withSession(args.host, args.identityPath, async (session) => {
+    const jsonArgs = toJsonValue(args.callArgs ?? {});
+    const opts = { deadlineMs: args.timeoutMs, realm: args.realm };
     const payload = args.ucanPath
-      ? await session.callWithUcan(args.procedure, toJsonValue(args.callArgs ?? {}), readUcanToken(args.ucanPath), {
-          deadlineMs: args.timeoutMs,
-          realm: args.realm,
-        })
-      : await session.call(args.procedure, toJsonValue(args.callArgs ?? {}), {
-          deadlineMs: args.timeoutMs,
-          realm: args.realm,
-        });
+      ? args.direct
+        ? await session.callDirectWithUcan(args.procedure, jsonArgs, readUcanToken(args.ucanPath), opts)
+        : await session.callWithUcan(args.procedure, jsonArgs, readUcanToken(args.ucanPath), opts)
+      : args.direct
+        ? await session.callDirect(args.procedure, jsonArgs, opts)
+        : await session.call(args.procedure, jsonArgs, opts);
     return { procedure: args.procedure, payload, duration_ms: Date.now() - start };
   });
 }

@@ -10,8 +10,9 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { detect } from "../install/platform.js";
 import { ALL, type ClientAdapter } from "../install/mcp_clients/index.js";
+import { serverVersion } from "../version.js";
 
-const VERSION = "0.4.0";
+const VERSION = serverVersion();
 
 function help(): void {
   console.log(`macula-mcp status ${VERSION}

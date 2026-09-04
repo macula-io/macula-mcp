@@ -21,8 +21,9 @@ import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ALL } from "../install/mcp_clients/index.js";
+import { serverVersion } from "../version.js";
 
-const VERSION = "0.4.0";
+const VERSION = serverVersion();
 const TIMEOUT_MS = 30_000; // a cold `npx` fetch from the registry can be slow
 
 interface Args {

@@ -76,14 +76,10 @@ export function registerMeshCall(server: McpServer): void {
             "temporary_relay_failure) even though the target is live and reachable. direct-dial sidesteps " +
             "that gap, at the cost of failing outright if the provider only advertised the plain way " +
             "(\"procedure has no direct-dial advertisement\"). Prefer this whenever a plain call fails " +
-            "against a target you otherwise know is up. NOT CURRENTLY SUPPORTED: this server's in-process " +
-            "@macula-io/ts client doesn't implement direct-dial yet, so setting this to true always throws " +
-            "before any call is attempted. In practice this also means a UCAN-gated capability generally " +
-            "isn't reachable through mesh_call yet either -- not because gating requires direct-dial at the " +
-            "protocol level (it doesn't; that's just how today's gated capabilities happen to be advertised), " +
-            "but because this client can't do the one-hop dial they're currently only reachable through. A " +
-            "MACULA_MCP_UCAN token still gets attached to an ordinary (non-direct) call regardless, and works " +
-            "fine against anything reachable that way.",
+            "against a target you otherwise know is up. If this server's own MACULA_MCP_UCAN is set, the " +
+            "token still gets attached (via callDirectWithUcan) -- this is how a UCAN-gated capability is " +
+            "actually reached, since today's gated capabilities happen to be advertised direct-dial only " +
+            "(a deployment fact, not a protocol requirement).",
         ),
       prove_identity: z
         .boolean()

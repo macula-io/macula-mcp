@@ -1,16 +1,42 @@
 // Serving: mesh_serve/mesh_unserve manage this process's own registered
-// mesh procedures -- since 2026-09, a persistent @macula-io/ts Session
+// mesh procedures -- since 2026-09, persistent @macula-io/ts Sessions
 // this process holds directly in memory, not a macula-cli daemon
 // subprocess anymore. The daemon existed ONLY to let separate one-shot
 // macula-cli subprocess invocations share one connection; that reason
 // disappears entirely once macula-ts is called in-process, since this
-// Node process can just hold the Session object itself for as long as
-// anything is registered on it. No control-socket, no NDJSON protocol,
-// no separate identity-per-daemon-kind supervision -- see README.md/
-// CHANGELOG.md for the full before/after. A SECOND Session (its own
-// identity, opened lazily on first use) is held alongside it purely for
-// direct: true's DHT advertisement -- see ServeState.directAdvertise's
-// own doc for why that can never share the serving Session above.
+// Node process can just hold Session objects itself for as long as
+// anything is registered. No control-socket, no NDJSON protocol, no
+// separate identity-per-daemon-kind supervision -- see README.md/
+// CHANGELOG.md for the full before/after.
+//
+// (2026-09-04, fixed after a live-confirmed regression) ONE SESSION PER
+// REGISTERED PROCEDURE, not one shared Session serving many. The first
+// version of this cutover held a single shared Session and let
+// registrations.Map imply multiplexing many procedures on it -- but
+// @macula-io/ts's Session.serve() throws if it is already serving
+// anything (the SDK's own stated one-procedure-per-Session contract).
+// presence.ts registers this process's own ring endpoint
+// (ring_service.ts, via this module) the moment presence starts, which
+// runs on nearly every mesh tool call -- so the ring endpoint silently
+// claimed the one shared serving slot, and any real mesh_serve call
+// after that failed with "Session is already serving" naming an
+// internal Session the caller could not act on (reverse order broke the
+// ring registration instead, just as silently). Confirmed live before
+// this fix, confirmed fixed after it: every registered procedure now
+// gets its OWN Session and its OWN identity
+// (mesh_config.ts's serveProcedureIdentityPath(procedure), hashed from
+// the procedure name -- see its own doc for why a per-procedure identity
+// is required here, the same anti-duplicate-session reason presence.ts
+// and lobby_observer.ts each need multiple identities for their own
+// multiple concurrent connections).
+//
+// The direct-dial advertisement leg is DIFFERENT and stays SHARED across
+// every registration, deliberately: it never calls Session.serve() at
+// all (only Session.putProcedureAdvertisement, an ordinary CALL), so it
+// is not subject to the one-serve-per-Session constraint that caused the
+// bug above -- see ServeState... no, see ensureDirectAdvertiseSession's
+// own doc below for why one shared Session/identity is correct here, not
+// a regression of the same class.
 //
 // The exec behavior (a served procedure answered by running a local
 // shell command once per inbound call, JSON on stdin/stdout) used to
@@ -30,85 +56,89 @@
 // reconnect/replay supervisor (mirroring the Erlang reference SDK's
 // respawn_link pattern) that transparently re-established a dropped
 // connection and re-advertised everything on it. This module does not
-// yet reimplement that -- if the underlying Session's connection dies,
-// served procedures stop answering until mesh_serve is called again.
-// Deliberately not attempted in this cutover pass (see CHANGELOG); a
-// real reconnect supervisor is separate, scoped future work.
+// yet reimplement that per-registration -- if a given registration's
+// Session dies, that ONE procedure stops answering until it's
+// re-registered (every OTHER registration, being on its own independent
+// Session, is unaffected). presence.ts's and lobby_observer.ts's own
+// legs got real reconnect-with-backoff in this same effort; serving
+// hasn't yet, deliberately -- a real per-registration reconnect
+// supervisor is separate, scoped future work (see CHANGELOG).
 
 import { spawn } from "node:child_process";
-import type { Session, JsonValue } from "@macula-io/ts";
-import { onShutdown, serveAdvertiseIdentityPath, serveIdentityPath } from "./mesh_config.js";
+import type { Session, Identity, JsonValue } from "@macula-io/ts";
+import { onShutdown, serveAdvertiseIdentityPath, serveProcedureIdentityPath } from "./mesh_config.js";
 import { connectWithFallback, loadOrGenerateIdentity, toCliError } from "./macula_ts_client.js";
 
 interface Registration {
+  procedure: string;
   exec: string;
   execTimeoutSeconds: number;
+  identity: Identity;
+  session: Session;
   stop: () => Promise<void>;
 }
 
 interface DirectAdvertiseSession {
   session: Session;
-  identity: ReturnType<typeof loadOrGenerateIdentity>;
+  identity: Identity;
 }
 
-interface ServeState {
-  session: Session;
-  identity: ReturnType<typeof loadOrGenerateIdentity>;
-  registrations: Map<string, Registration>;
-  /**
-   * Lazily opened the first time serve() is called with direct: true --
-   * a SEPARATE Session and identity from the one above, never the same
-   * one. putProcedureAdvertisement() (called on this session, below) and
-   * an active serve() (running on `session` above) can never share one
-   * connection: @macula-io/ts's own #requireHandleNotServing guard
-   * rejects that combination outright, since putProcedureAdvertisement's
-   * PutRecord CALL would race serve()'s own reads of the shared control
-   * stream on the same connection -- found live 2026-09-04, every
-   * direct-dial registration (ring_service.ts's ring endpoint included)
-   * failed to register at all until this existed. See
-   * serveAdvertiseIdentityPath()'s own doc for why a distinct identity
-   * here is by design, not a workaround.
-   */
-  directAdvertise?: DirectAdvertiseSession;
-}
+const registrations = new Map<string, Registration>();
 
-let state: ServeState | undefined;
+/**
+ * The ONE Session/identity shared across every direct: true registration,
+ * lazily opened on first use -- deliberately NOT one per registration,
+ * unlike the serving Sessions above. This leg never calls Session.serve();
+ * it only issues an ordinary putProcedureAdvertisement CALL (an
+ * @macula-io/ts Session's control-stream #enqueue already serializes
+ * concurrent ordinary calls safely, the same guarantee every other
+ * one-shot tool in this server already relies on), so it is not subject
+ * to the one-serve-per-Session constraint that required splitting the
+ * serving Sessions apart above. Sharing it also means N registrations
+ * with direct: true cost one extra connection total, not N.
+ */
+let directAdvertise: DirectAdvertiseSession | undefined;
+let shutdownRegistered = false;
 
 export function isActive(): boolean {
-  return state !== undefined;
+  return registrations.size > 0;
 }
 
-async function ensureSession(host: string | undefined): Promise<ServeState> {
-  if (state) return state;
-  const identity = loadOrGenerateIdentity(serveIdentityPath());
-  const session = await connectWithFallback(identity, host);
-  const newState: ServeState = { session, identity, registrations: new Map() };
-  state = newState;
-  onShutdown(stopSync);
-  return newState;
-}
-
-/** Connects (once; reused after) the second Session direct-dial registration
- * needs -- see ServeState.directAdvertise's own doc for why this cannot be
- * the same Session/identity `serve()` runs on. Tries `host` first, same
- * connectWithFallback discipline as everything else in this file. */
-async function ensureDirectAdvertiseSession(s: ServeState, host: string | undefined): Promise<Session> {
-  if (s.directAdvertise) return s.directAdvertise.session;
+/** Connects (once; reused after) the shared direct-dial advertisement Session -- see its own doc above for why this is deliberately shared, unlike the per-registration serving Sessions. Tries `host` first, same connectWithFallback discipline as everything else in this file. */
+async function ensureDirectAdvertiseSession(host: string | undefined): Promise<Session> {
+  if (directAdvertise) return directAdvertise.session;
   const identity = loadOrGenerateIdentity(serveAdvertiseIdentityPath());
-  const session = await connectWithFallback(identity, host);
-  s.directAdvertise = { session, identity };
-  return session;
+  try {
+    const session = await connectWithFallback(identity, host);
+    directAdvertise = { session, identity };
+    return session;
+  } catch (e) {
+    identity.dispose();
+    throw e;
+  }
 }
 
-/** Synchronous best-effort teardown only -- what onShutdown registers, same
- * reasoning as presence.ts's own stopSync: a SIGINT/SIGTERM handler cannot
- * reliably wait on an async close. An abrupt process kill just drops the
- * connection; the station's own advertise entries age out on their own. */
+async function closeDirectAdvertiseSession(): Promise<void> {
+  if (!directAdvertise) return;
+  const d = directAdvertise;
+  directAdvertise = undefined;
+  try {
+    await d.session.close(d.identity);
+  } catch {
+    // best effort -- stopSync tears everything down either way
+  } finally {
+    d.identity.dispose();
+  }
+}
+
+/** Synchronous best-effort teardown only -- what onShutdown registers, same reasoning as presence.ts's own stopSync: a SIGINT/SIGTERM handler cannot reliably wait on an async close. An abrupt process kill just drops every connection; the station's own advertise entries age out on their own. */
 function stopSync(): void {
-  if (!state) return;
-  state.identity.dispose();
-  state.directAdvertise?.identity.dispose();
-  state = undefined;
+  for (const reg of registrations.values()) {
+    reg.identity.dispose();
+  }
+  registrations.clear();
+  directAdvertise?.identity.dispose();
+  directAdvertise = undefined;
 }
 
 /** Runs `execCmd` once via a shell, feeding `payload` as JSON on stdin,
@@ -195,34 +225,83 @@ export interface ServeResult {
 
 const DEFAULT_EXEC_TIMEOUT_SECONDS = 10;
 
-/** Registers procedure against this process's own persistent Session, connecting it first if needed. */
+/** Registers `args.procedure` on its OWN persistent Session+identity (see
+ * this module's own top comment for why each registration needs its own,
+ * not a shared one). Re-registering the same procedure tears down its
+ * previous Session first. */
 export async function serve(args: ServeArgs): Promise<ServeResult> {
   try {
-    const s = await ensureSession(args.host);
+    const existing = registrations.get(args.procedure);
+    if (existing) {
+      await existing.stop().catch(() => {});
+      await existing.session.close(existing.identity).catch(() => {});
+      existing.identity.dispose();
+      registrations.delete(args.procedure);
+    }
+
     const execTimeoutMs = (args.execTimeoutSeconds ?? DEFAULT_EXEC_TIMEOUT_SECONDS) * 1000;
-
-    const existing = s.registrations.get(args.procedure);
-    if (existing) await existing.stop().catch(() => {});
-
-    const stop = await s.session.serve(args.procedure, (payload) => runExec(args.exec, execTimeoutMs, payload));
-    s.registrations.set(args.procedure, { exec: args.exec, execTimeoutSeconds: execTimeoutMs / 1000, stop });
+    const identity = loadOrGenerateIdentity(serveProcedureIdentityPath(args.procedure));
+    let session: Session;
+    try {
+      session = await connectWithFallback(identity, args.host);
+    } catch (e) {
+      identity.dispose();
+      throw e;
+    }
+    let stop: () => Promise<void>;
+    try {
+      stop = await session.serve(args.procedure, (payload) => runExec(args.exec, execTimeoutMs, payload));
+    } catch (e) {
+      await session.close(identity).catch(() => {});
+      identity.dispose();
+      throw e;
+    }
+    registrations.set(args.procedure, {
+      procedure: args.procedure,
+      exec: args.exec,
+      execTimeoutSeconds: execTimeoutMs / 1000,
+      identity,
+      session,
+      stop,
+    });
 
     if (args.direct) {
-      // servingStation is `s.session`'s OWN resolved station (the one
-      // actually serve()-ing `procedure`) -- deliberately not the direct-
-      // advertise session's, which could in principle land on a different
-      // station via its own connectWithFallback if the primary happened
-      // to be briefly unreachable for that second connect.
-      const directSession = await ensureDirectAdvertiseSession(s, args.host);
-      await directSession.putProcedureAdvertisement(args.procedure, s.session.stationNodeId, {
+      // Advertise the SERVING session's own resolved station (the one
+      // actually serve()-ing `procedure`), via the SEPARATE, shared
+      // direct-advertise leg -- deliberately not the advertise session's
+      // own station, which could in principle differ via its own
+      // independent connectWithFallback if the primary happened to be
+      // briefly unreachable for that connect.
+      const directSession = await ensureDirectAdvertiseSession(args.host);
+      await directSession.putProcedureAdvertisement(args.procedure, session.stationNodeId, {
         ttlMs: args.ttlSeconds ? args.ttlSeconds * 1000 : undefined,
       });
     }
 
-    return { procedure: args.procedure, registered: true, serving: [...s.registrations.keys()] };
+    if (!shutdownRegistered) {
+      onShutdown(stopSync);
+      shutdownRegistered = true;
+    }
+
+    return { procedure: args.procedure, registered: true, serving: [...registrations.keys()] };
   } catch (e) {
     throw toCliError(e);
   }
+}
+
+/** Gracefully unregisters every active registration and closes the shared
+ * direct-advertise Session, in that order -- used by index.ts's MCP
+ * transport-close handler (see its own doc: a dropped/closed client
+ * connection must not leave served procedures standing forever, holding
+ * QUIC connections open and answering calls with nobody left to receive
+ * the results). Reuses the same per-registration teardown unserve() already
+ * does, just for everything at once rather than one procedure. Best-effort
+ * throughout (this runs during shutdown, not a path any caller is waiting
+ * on) -- a single registration failing to tear down cleanly does not stop
+ * the rest from being attempted. */
+export async function stopAll(): Promise<void> {
+  const procedures = [...registrations.keys()];
+  await Promise.all(procedures.map((p) => unserve(p).catch(() => {})));
 }
 
 export interface UnserveResult {
@@ -232,47 +311,30 @@ export interface UnserveResult {
   daemon_stopped: boolean;
 }
 
-/** Unregisters procedure. If nothing else is registered afterward, also closes the
- * Session entirely -- no reason to hold a station connection open once this process
- * has nothing left registered on it. A later mesh_serve call reconnects, same as
- * the first one. */
+/** Unregisters `procedure` and closes its own Session. If nothing else is
+ * registered afterward, also closes the shared direct-advertise Session --
+ * no reason to hold it open once nothing needs a direct-dial advertisement
+ * refreshed. A later mesh_serve call reconnects everything it needs, same
+ * as the first one. */
 export async function unserve(procedure: string): Promise<UnserveResult> {
-  if (!state) {
-    return { procedure, unregistered: false, serving: [], daemon_stopped: false };
-  }
-  const reg = state.registrations.get(procedure);
+  const reg = registrations.get(procedure);
   if (!reg) {
-    return { procedure, unregistered: false, serving: [...state.registrations.keys()], daemon_stopped: false };
+    return { procedure, unregistered: false, serving: [...registrations.keys()], daemon_stopped: false };
   }
-  await reg.stop();
-  state.registrations.delete(procedure);
+  await reg.stop().catch(() => {});
+  await reg.session.close(reg.identity).catch(() => {});
+  reg.identity.dispose();
+  registrations.delete(procedure);
 
-  let sessionClosed = false;
-  if (state.registrations.size === 0) {
-    const s = state;
-    try {
-      await s.session.close(s.identity);
-    } catch {
-      // best effort -- stopSync below tears down either way
-    } finally {
-      s.identity.dispose();
-    }
-    if (s.directAdvertise) {
-      try {
-        await s.directAdvertise.session.close(s.directAdvertise.identity);
-      } catch {
-        // best effort, same as the main session's own close above
-      } finally {
-        s.directAdvertise.identity.dispose();
-      }
-    }
-    state = undefined;
-    sessionClosed = true;
+  let allStopped = false;
+  if (registrations.size === 0) {
+    await closeDirectAdvertiseSession();
+    allStopped = true;
   }
   return {
     procedure,
     unregistered: true,
-    serving: sessionClosed ? [] : [...(state?.registrations.keys() ?? [])],
-    daemon_stopped: sessionClosed,
+    serving: [...registrations.keys()],
+    daemon_stopped: allStopped,
   };
 }
