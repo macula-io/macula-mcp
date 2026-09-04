@@ -50,26 +50,49 @@
 //    less. The reporter must never control how much scrutiny their own
 //    claim receives.
 //
-// KNOWN, CURRENTLY UNRESOLVED PREREQUISITE (2026-09-04): the design
-// calls for citizen-tier (Hanko-bound) realm membership to matter more
-// than device-tier (free, no human) when weighing a confirmation --
-// categorically, not additively, since device-tier is free to mint in
-// unlimited quantity and any finite additive threshold is therefore
-// clearable by minting enough of them. That check is NOT implemented
-// here: macula-realm's RealmUcanIssuer.mint_membership/2 currently
-// issues the IDENTICAL capability (can: "member/email-verified")
-// whether the caller went through the real Hanko join flow or the
-// device-only auto-join RPC -- there is no wire-level way to tell the
-// two apart yet, confirmed by reading both call sites
-// (macula_realm_web/joining.ex and MembershipUcanRpcHandlers). Until
-// that lands, deriveClaimStatus below deliberately never returns
-// "verified" -- only "corroborated" (a token-matching echo, tier
-// unverifiable) at best. This is an honest cap, not a placeholder: every
-// piece here is fully functional, it just cannot reach the strong
-// outcome yet because the prerequisite it depends on doesn't exist on
-// the wire. Revisit once macula-realm's issuer distinguishes tiers.
+// PREREQUISITE RESOLVED (2026-09-04, macula-realm commit 78728fe,
+// verified against source before building on it): citizen-tier (Hanko-
+// bound) and device-tier (free, no human) membership UCANs now carry
+// DIFFERENT capabilities -- can: "member/email-verified" for a real
+// Hanko join (macula_realm_web/joining.ex), can: "member/device-verified"
+// for the device-only auto-join RPC (MembershipUcanRpcHandlers). tierOf
+// below reads that distinction. Categorical, not additive, per the
+// design history above: any number of device-tier confirmations never
+// substitutes for one citizen-tier confirmation, full stop -- additive
+// weighting is defeatable by minting enough free device-tier identities,
+// so it was never a real option once that fact was named plainly.
+//
+// STILL OPEN, deliberately not decided unilaterally here: HOW a
+// confirmer's tier actually reaches deriveClaimStatus. This module stays
+// pure -- ClaimReply.tier is an input the CALLER resolves (a UCAN
+// attached to the envelope and independently verified, a live directory
+// lookup, whatever fits the actual wiring), not something this function
+// derives itself. Flagged back to the team as the one remaining
+// integration question before this can be wired into a real tool; not a
+// full design round, just a "how does proof travel" decision.
 
-export type ClaimStatus = "unconfirmed" | "disputed" | "corroborated";
+export type ClaimStatus = "unconfirmed" | "disputed" | "corroborated" | "verified";
+
+export type ConfirmerTier = "device" | "citizen";
+
+/** Exact capability strings macula-realm's RealmUcanIssuer.mint_membership/2 mints today (commit 78728fe) -- keep in sync if that ever changes. */
+const CITIZEN_TIER_CAPABILITY = "member/email-verified";
+const DEVICE_TIER_CAPABILITY = "member/device-verified";
+
+/**
+ * Reads a decoded UCAN's capability claims (its `cap` array, each
+ * {with, can}) and returns which realm-membership tier it represents --
+ * or undefined when it carries no recognized membership capability at
+ * all (not a membership UCAN, or a realm/capability this hasn't been
+ * taught about). Citizen wins if a token somehow carries both (shouldn't
+ * happen with a single mint, but favors the interpretation that requires
+ * MORE trust to have been earned, not less, if it ever does).
+ */
+export function tierOf(caps: { with: string; can: string }[]): ConfirmerTier | undefined {
+  if (caps.some((c) => c.can === CITIZEN_TIER_CAPABILITY)) return "citizen";
+  if (caps.some((c) => c.can === DEVICE_TIER_CAPABILITY)) return "device";
+  return undefined;
+}
 
 export interface ClaimVerificationResult {
   status: ClaimStatus;
@@ -90,6 +113,8 @@ interface ClaimReply {
   from: string;
   kind: "claim_confirmed" | "claim_disputed";
   text: string;
+  /** Undefined when the caller couldn't establish it -- treated the same as "device" (weakest, assume nothing until proven). */
+  tier?: ConfirmerTier;
 }
 
 const SHA_RE = /\b[0-9a-f]{7,40}\b/gi;
@@ -137,23 +162,31 @@ export function deriveClaimStatus(input: { reporterFrom: string; targetText: str
   }
 
   const tokens = extractCheckableTokens(input.targetText);
+  const confirmed = valid.filter((r) => r.kind === "claim_confirmed");
+
   if (tokens.length === 0) {
     // The reporter gave nothing checkable. Per this module's own design
     // history: a token-less claim must NEVER be easier to confirm than a
-    // token-bearing one. The intended bar is "citizen-tier confirmer
-    // supplying genuine new evidence" -- since tier isn't checkable yet
-    // (see the prerequisite note above this function), NOTHING can
-    // currently clear that bar, which is stricter than intended but the
-    // only honest option: silently accepting any confirmation here would
-    // reopen exactly the perverse incentive round 3 closed.
-    return { status: "unconfirmed", reason: "claim has no checkable evidence -- needs a citizen-tier confirmer, not verifiable yet (see known limitation)" };
+    // token-bearing one -- so ONLY a citizen-tier confirmer can move it
+    // at all, and only by supplying a genuine checkable fact of their
+    // OWN (something they personally found), not a bare "confirmed".
+    // Device-tier can't touch a token-less claim, full stop.
+    const strong = confirmed.find((r) => r.tier === "citizen" && extractCheckableTokens(r.text).length > 0);
+    if (strong) {
+      return { status: "verified", reason: `verified by ${strong.from} (citizen-tier) with independent evidence: "${strong.text}"` };
+    }
+    return { status: "unconfirmed", reason: "claim has no checkable evidence -- needs a citizen-tier confirmer supplying their own" };
   }
 
-  const confirmations = valid.filter((r) => r.kind === "claim_confirmed" && reproducesCheckableToken(input.targetText, r.text));
-  if (confirmations.length > 0) {
+  const echoing = confirmed.filter((r) => reproducesCheckableToken(input.targetText, r.text));
+  const strongEcho = echoing.find((r) => r.tier === "citizen");
+  if (strongEcho) {
+    return { status: "verified", reason: `verified by ${strongEcho.from} (citizen-tier), echoed a real fact from the claim` };
+  }
+  if (echoing.length > 0) {
     return {
       status: "corroborated",
-      reason: `independently echoed by ${confirmations.map((c) => c.from).join(", ")} -- tier not verifiable yet, weak signal only`,
+      reason: `independently echoed by ${echoing.map((c) => c.from).join(", ")} -- device-tier or tier-unknown, weak signal only`,
     };
   }
 

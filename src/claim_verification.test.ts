@@ -1,9 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { deriveClaimStatus, extractCheckableTokens, reproducesCheckableToken } from "./claim_verification.js";
+import { deriveClaimStatus, extractCheckableTokens, reproducesCheckableToken, tierOf } from "./claim_verification.js";
 
 const REPORTER = "a".repeat(64);
 const CONFIRMER = "b".repeat(64);
 const OTHER_CONFIRMER = "c".repeat(64);
+
+describe("tierOf", () => {
+  it("citizen-tier capability -> citizen", () => {
+    expect(tierOf([{ with: "mri:realm:io.macula", can: "member/email-verified" }])).toBe("citizen");
+  });
+
+  it("device-tier capability -> device", () => {
+    expect(tierOf([{ with: "mri:realm:io.macula", can: "member/device-verified" }])).toBe("device");
+  });
+
+  it("unrecognized capability -> undefined", () => {
+    expect(tierOf([{ with: "mri:realm:io.macula", can: "member/something-else" }])).toBeUndefined();
+  });
+
+  it("no capabilities at all -> undefined", () => {
+    expect(tierOf([])).toBeUndefined();
+  });
+
+  it("citizen wins if a token somehow carries both -- favors requiring more trust, not less", () => {
+    expect(
+      tierOf([
+        { with: "mri:realm:io.macula", can: "member/device-verified" },
+        { with: "mri:realm:io.macula", can: "member/email-verified" },
+      ]),
+    ).toBe("citizen");
+  });
+});
 
 describe("extractCheckableTokens", () => {
   it("finds a commit SHA", () => {
@@ -50,14 +77,61 @@ describe("deriveClaimStatus", () => {
     expect(r.reason).toBe("awaiting a qualified confirmer");
   });
 
-  it("corroborated when a different peer echoes a real token from the claim", () => {
+  it("corroborated (not verified) when a device-tier peer echoes a real token from the claim -- weak signal, tier known but insufficient", () => {
+    const r = deriveClaimStatus({
+      reporterFrom: REPORTER,
+      targetText: "fixed in 8cdf17e, full suite 283/283",
+      replies: [{ from: CONFIRMER, kind: "claim_confirmed", text: "confirmed, 283/283 holds for me too", tier: "device" }],
+    });
+    expect(r.status).toBe("corroborated");
+    expect(r.reason).toContain(CONFIRMER);
+  });
+
+  it("corroborated (not verified) when tier is unknown -- unknown is treated the same as device, never upgraded to verified by default", () => {
     const r = deriveClaimStatus({
       reporterFrom: REPORTER,
       targetText: "fixed in 8cdf17e, full suite 283/283",
       replies: [{ from: CONFIRMER, kind: "claim_confirmed", text: "confirmed, 283/283 holds for me too" }],
     });
     expect(r.status).toBe("corroborated");
+  });
+
+  it("verified when a CITIZEN-tier peer echoes a real token from a token-bearing claim", () => {
+    const r = deriveClaimStatus({
+      reporterFrom: REPORTER,
+      targetText: "fixed in 8cdf17e, full suite 283/283",
+      replies: [{ from: CONFIRMER, kind: "claim_confirmed", text: "verified, 283/283 holds", tier: "citizen" }],
+    });
+    expect(r.status).toBe("verified");
     expect(r.reason).toContain(CONFIRMER);
+  });
+
+  it("a token-less claim is NEVER confirmable by a device-tier peer, no matter what they write -- device-tier can't touch it at all", () => {
+    const r = deriveClaimStatus({
+      reporterFrom: REPORTER,
+      targetText: "done, it works now",
+      replies: [{ from: CONFIRMER, kind: "claim_confirmed", text: "verified independently, ran it myself, saw 999 pass", tier: "device" }],
+    });
+    expect(r.status).toBe("unconfirmed");
+  });
+
+  it("a token-less claim stays unconfirmed even from a citizen-tier peer if THEY don't supply their own checkable fact -- a bare rubber stamp still doesn't count, even from the strong tier", () => {
+    const r = deriveClaimStatus({
+      reporterFrom: REPORTER,
+      targetText: "done, it works now",
+      replies: [{ from: CONFIRMER, kind: "claim_confirmed", text: "confirmed, looks right", tier: "citizen" }],
+    });
+    expect(r.status).toBe("unconfirmed");
+  });
+
+  it("a token-less claim CAN reach verified, but only via a citizen-tier peer supplying genuinely new evidence of their own", () => {
+    const r = deriveClaimStatus({
+      reporterFrom: REPORTER,
+      targetText: "done, it works now",
+      replies: [{ from: CONFIRMER, kind: "claim_confirmed", text: "verified independently: ran the full suite myself, 312/312 pass", tier: "citizen" }],
+    });
+    expect(r.status).toBe("verified");
+    expect(r.reason).toContain("independent evidence");
   });
 
   it("unconfirmed when a confirming reply exists but doesn't reproduce any real token -- a bare rubber stamp", () => {
