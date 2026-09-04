@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-04
+
 ### Fixed
 - Every one-shot mesh call (`mesh_call`, `mesh_publish`, `mesh_watch`, etc.) awaited its own `Session.close()`
   before returning — including `@macula-io/ts`'s own ~250ms connection-teardown drain — paid on the hot path
@@ -1258,7 +1260,8 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/macula-io/macula-mcp/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/macula-io/macula-mcp/compare/v0.16.0...v0.19.0
 [0.16.0]: https://github.com/macula-io/macula-mcp/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/macula-io/macula-mcp/compare/v0.14.0...v0.15.0
