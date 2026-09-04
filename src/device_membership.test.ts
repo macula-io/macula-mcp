@@ -92,6 +92,13 @@ describe("parseMembershipUcanResult", () => {
     expect(parseMembershipUcanResult({ citizen_did: NODE, ucan: "eyJ.fake.token" })).toEqual({ citizen_did: NODE, ucan: "eyJ.fake.token" });
   });
 
+  it("unwraps macula-realm's own double-hex-encoded reply values (0x + hex(text), since it sends citizen_did/ucan as untagged binaries) -- reproduces the exact live payload shape seen 2026-09-04", async () => {
+    const { parseMembershipUcanResult } = await import("./device_membership.js");
+    const wrap = (text: string) => "0x" + Buffer.from(text, "utf8").toString("hex");
+    const result = parseMembershipUcanResult({ citizen_did: wrap(NODE), ucan: wrap("eyJ.fake.token") });
+    expect(result).toEqual({ citizen_did: NODE, ucan: "eyJ.fake.token" });
+  });
+
   it("throws the handler's own error text when the reply carries one", async () => {
     const { parseMembershipUcanResult } = await import("./device_membership.js");
     expect(() => parseMembershipUcanResult({ error: "missing_fields" })).toThrow(/missing_fields/);

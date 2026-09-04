@@ -111,12 +111,32 @@ export interface MembershipUcanResult {
   ucan: string;
 }
 
-/** Shapes a successful issue_membership_ucan reply ({citizen_did, ucan}), or throws with the handler's own error text/an honest "unexpected shape" message. Pure. */
+/**
+ * issue_membership_ucan's own handler sends citizen_did/ucan as raw
+ * (untagged) binaries -- Base.encode16'd text and a JWT-shaped token,
+ * both themselves already ASCII text, just never CBOR-text-tagged on
+ * the way out. macula-ts, unable to safely assume an untagged binary
+ * reply value is UTF-8, represents it defensively as "0x" + hex(bytes)
+ * instead (documented convention: a bare binary reply arrives as 0x
+ * hex). For a value that's already ASCII hex text, that's a DOUBLE
+ * hex-encoding -- confirmed live 2026-09-04: citizen_did's "0x..."
+ * value hex-decodes to this identity's own 64-char hex node_id
+ * exactly, and ucan's decodes to a genuine 3-part JWT-shaped token
+ * (header.payload.signature). Reverses exactly that: strip "0x", hex-
+ * decode the rest as UTF-8. Passes a value through unchanged if it
+ * isn't "0x"-prefixed (a future fix on macula-realm's side that starts
+ * sending these text-tagged would make this a no-op, not a break).
+ */
+function unwrapDoubleHexText(v: string): string {
+  return v.startsWith("0x") ? Buffer.from(v.slice(2), "hex").toString("utf8") : v;
+}
+
+/** Shapes a successful issue_membership_ucan reply ({citizen_did, ucan}), unwrapping macula-realm's own double-hex-encoded text values, or throws with the handler's own error text/an honest "unexpected shape" message. Pure. */
 export function parseMembershipUcanResult(payload: unknown): MembershipUcanResult {
   const p = (payload ?? {}) as Record<string, unknown>;
   if (typeof p.error === "string") throw new Error(`issue_membership_ucan refused: ${p.error}`);
   if (typeof p.citizen_did === "string" && typeof p.ucan === "string") {
-    return { citizen_did: p.citizen_did, ucan: p.ucan };
+    return { citizen_did: unwrapDoubleHexText(p.citizen_did), ucan: unwrapDoubleHexText(p.ucan) };
   }
   throw new Error(`issue_membership_ucan returned an unexpected shape: ${JSON.stringify(payload)}`);
 }
