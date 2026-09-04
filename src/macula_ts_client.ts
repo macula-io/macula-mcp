@@ -23,18 +23,31 @@
 // whatever @macula-io/ts genuinely doesn't support yet, rather than
 // silently ignoring an option it can't honor.
 //
-// Connects fresh per one-shot call, same "connect, do the thing, exit"
-// semantics macula-cli's own one-shot subcommands had -- deliberately
-// NOT a persistent shared Session for these (unlike serve.ts, where a
-// persistent Session is architecturally required, not a latency
-// nicety). A held connection-pool is a real, deferred future
-// optimization, not attempted here to keep this cutover's behavior a
-// close, easy-to-reason-about match for what macula-cli's own
-// subprocess-per-call model already did.
+// call()/publish()/watch() hold 3 simultaneous seed connections via
+// @macula-io/ts's Pool (0.14.0+, see sharedPool() below) instead of
+// connectWithFallback()'s dial-one-then-fallback -- one pool per
+// identityPath, created lazily on first use and kept for this whole
+// process's lifetime (unlike every other function here, a Pool is
+// deliberately NOT torn down per call: that persistence is the entire
+// point of holding every configured station reachable at once instead
+// of reconnecting -- and racing the station's own per-identity dedupe
+// kick -- on every tool invocation). This is a partial migration, not a
+// wholesale one: Pool exposes no callDirect/callWithUcan/findRecord*/
+// putContent/getContent equivalents, and always dials every configured
+// seed (it cannot honor "just this one station"), so callThenDirect()'s
+// direct-dial leg, every DHT/content function, and any call() with
+// `direct`/`ucanPath`/an explicit `host` override all stay on the
+// original one-shot connectWithFallback() path below, unchanged -- a
+// real, documented gap in Pool's surface, not an oversight. Connects
+// fresh per one-shot call for everything that stays on that path, same
+// "connect, do the thing, exit" semantics macula-cli's own one-shot
+// subcommands had -- deliberately NOT a persistent shared Session for
+// these (unlike serve.ts, where a persistent Session is
+// architecturally required, not a latency nicety).
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { Identity, MaculaCallError as TsCallError, Session, type JsonValue } from "@macula-io/ts";
+import { Identity, MaculaCallError as TsCallError, Pool, Session, type JsonValue, type Seed } from "@macula-io/ts";
 import { MaculaCliError, defaultStations, stationArgs } from "./mesh_config.js";
 import { proofMessage } from "./ownership_proof.js";
 
@@ -83,6 +96,63 @@ export async function connectWithFallback(identity: Identity, host?: string): Pr
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+function seedsFromStations(stations: string[]): Seed[] {
+  return stations.map(parseHostPort);
+}
+
+/**
+ * One long-lived @macula-io/ts Pool per identityPath, holding a live
+ * control-role connection to every one of defaultStations()'s configured
+ * seeds concurrently (3 by default -- see mesh_config.ts's own DEFAULT_STATIONS),
+ * instead of connectWithFallback()'s dial-one-then-fallback. Created lazily
+ * on first use and cached for this process's whole lifetime -- see this
+ * file's own header doc for why a Pool is deliberately not torn down per
+ * call, and for exactly which functions below route through it versus
+ * staying on the one-shot path.
+ *
+ * Keyed by identityPath, not a single shared pool, because a distinct
+ * identity is a distinct set of station connections: call()/publish() share
+ * the "default" identity's pool, watch() gets its own under the "watch"
+ * identity, matching the exact per-concern separation mesh_config.ts's own
+ * identity functions already establish for the one-shot path (two
+ * connections sharing one node ID get the older one kicked by the
+ * station's own per-identity dedupe -- see mesh_config.ts's own doc).
+ *
+ * The Map entry is set synchronously, before Pool.connect()'s own await,
+ * so two concurrent first-callers for the same identityPath share ONE
+ * in-flight connect rather than each independently loading the same
+ * identity file and racing to dial the same stations under it -- exactly
+ * the double-connect-one-identity collision every identity in this
+ * codebase exists to avoid. A genuine connect failure (e.g. defaultStations()
+ * misconfigured with a duplicate host:port -- Pool.connect() itself refuses
+ * that) evicts the cache entry so a later call can retry instead of being
+ * permanently stuck with a rejected promise.
+ *
+ * No onShutdown teardown is registered for these, unlike every persistent
+ * Session elsewhere in this codebase (presence.ts/serve.ts/lobby_observer.ts):
+ * their own sync teardown only disposes an Identity handle synchronously
+ * (a SIGINT/SIGTERM handler can't await Pool's own async close() anyway --
+ * see any of those modules' own stopSync doc), and process.exit(0) runs
+ * immediately after every registered hook returns in the same synchronous
+ * tick, so a fire-and-forget async pool.close() kicked off from a hook
+ * would never get a chance to run before exit regardless. Same outcome as
+ * every other module's own best-effort teardown: an abrupt kill just drops
+ * the connections, nothing attempted here is lost by skipping the hook.
+ */
+const pools = new Map<string, Promise<Pool>>();
+
+function sharedPool(identityPath: string): Promise<Pool> {
+  let pool = pools.get(identityPath);
+  if (!pool) {
+    pool = Pool.connect(seedsFromStations(defaultStations()), loadOrGenerateIdentity(identityPath)).catch((err) => {
+      pools.delete(identityPath);
+      throw err;
+    });
+    pools.set(identityPath, pool);
+  }
+  return pool;
 }
 
 /** Maps any error a Session/Identity operation can throw onto MaculaCliError
@@ -224,19 +294,32 @@ export async function call(args: {
    * depend on inter-station gossip already having a route. Routed through
    * the SAME direct-dial primitives callThenDirect() below already uses
    * successfully; this just exposes the choice to the caller instead of
-   * only ever using direct-dial as an automatic fallback. */
+   * only ever using direct-dial as an automatic fallback. Pool has no
+   * direct-dial equivalent, so setting this always uses the one-shot path
+   * below regardless of `host`. */
   direct?: boolean;
   identityPath: string;
   /** MACULA_MCP_UCAN's file path, if set (see mesh_config.ts's ucanPath()) --
    * when present, attaches the token there to this call via
    * Session.callWithUcan/callDirectWithUcan instead of Session.call/
    * callDirect. Harmless to set against a procedure that isn't UCAN-gated
-   * (macula-go ignores an unneeded token on the wire). */
+   * (macula-go ignores an unneeded token on the wire). Pool has no
+   * UCAN-attaching equivalent, so setting this always uses the one-shot
+   * path below regardless of `host`. */
   ucanPath?: string;
 }): Promise<TsCallResult> {
   const start = Date.now();
+  const jsonArgs = toJsonValue(args.callArgs ?? {});
+  if (args.host === undefined && !args.direct && !args.ucanPath) {
+    try {
+      const pool = await sharedPool(args.identityPath);
+      const payload = await pool.call(args.realm, args.procedure, jsonArgs, { deadlineMs: args.timeoutMs });
+      return { procedure: args.procedure, payload, duration_ms: Date.now() - start };
+    } catch (e) {
+      throw toCliError(e);
+    }
+  }
   return withSession(args.host, args.identityPath, async (session) => {
-    const jsonArgs = toJsonValue(args.callArgs ?? {});
     const opts = { deadlineMs: args.timeoutMs, realm: args.realm };
     const payload = args.ucanPath
       ? args.direct
@@ -310,7 +393,22 @@ export function signOwnershipProof(identityPath: string, procedure: string): TsI
  * it. On a double failure, both errors are combined into one message
  * (`${plain}; direct-dial retry: ${direct}`), the same shape the old
  * macula-cli-backed two-subprocess version gave.
+ *
+ * The plain leg routes through the shared Pool (sharedPool() above) when
+ * `host` isn't overridden, the same as call()'s own default path -- gaining
+ * the same 3-simultaneous-station resilience. Pool has no callDirect
+ * equivalent, so the direct-dial leg (only reached if the plain leg fails)
+ * always opens a fresh one-shot session via the existing
+ * connectWithFallback() path, exactly as before -- both legs still share
+ * ONE connection/identity when `host` IS overridden, unchanged from before,
+ * since a Pool cannot honor "just this one station" either.
  */
+function combineCallErrors(plain: unknown, direct: unknown): Error {
+  const p = plain instanceof Error ? plain.message : String(plain);
+  const d = direct instanceof Error ? direct.message : String(direct);
+  return new Error(`${p}; direct-dial retry: ${d}`);
+}
+
 export async function callThenDirect(args: {
   host?: string;
   procedure: string;
@@ -320,9 +418,27 @@ export async function callThenDirect(args: {
   identityPath: string;
 }): Promise<TsCallResult> {
   const start = Date.now();
+  const payload = toJsonValue(args.callArgs ?? {});
+  const opts = { deadlineMs: args.timeoutMs, realm: args.realm };
+  if (args.host === undefined) {
+    let plainErr: unknown;
+    try {
+      const pool = await sharedPool(args.identityPath);
+      const result = await pool.call(args.realm, args.procedure, payload, { deadlineMs: args.timeoutMs });
+      return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
+    } catch (e) {
+      plainErr = e;
+    }
+    return withSession(args.host, args.identityPath, async (session) => {
+      try {
+        const result = await session.callDirect(args.procedure, payload, opts);
+        return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
+      } catch (direct) {
+        throw combineCallErrors(plainErr, direct);
+      }
+    });
+  }
   return withSession(args.host, args.identityPath, async (session) => {
-    const payload = toJsonValue(args.callArgs ?? {});
-    const opts = { deadlineMs: args.timeoutMs, realm: args.realm };
     try {
       const result = await session.call(args.procedure, payload, opts);
       return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
@@ -331,9 +447,7 @@ export async function callThenDirect(args: {
         const result = await session.callDirect(args.procedure, payload, opts);
         return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
       } catch (direct) {
-        const p = plain instanceof Error ? plain.message : String(plain);
-        const d = direct instanceof Error ? direct.message : String(direct);
-        throw new Error(`${p}; direct-dial retry: ${d}`);
+        throw combineCallErrors(plain, direct);
       }
     }
   });
@@ -354,6 +468,15 @@ export async function publish(args: {
   identityPath: string;
 }): Promise<TsPublishResult> {
   const start = Date.now();
+  if (args.host === undefined) {
+    try {
+      const pool = await sharedPool(args.identityPath);
+      await pool.publish(args.realm, args.topic, toJsonValue(args.fact));
+      return { topic: args.topic, duration_ms: Date.now() - start };
+    } catch (e) {
+      throw toCliError(e);
+    }
+  }
   return withSession(args.host, args.identityPath, async (session) => {
     await session.publish(args.topic, toJsonValue(args.fact), { realm: args.realm });
     return { topic: args.topic, duration_ms: Date.now() - start };
@@ -377,6 +500,45 @@ export async function watch(args: {
   realm?: string;
   identityPath: string;
 }): Promise<TsWatchEvent[]> {
+  if (args.host === undefined) {
+    try {
+      const pool = await sharedPool(args.identityPath);
+      const events: TsWatchEvent[] = [];
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let resolveWait: (() => void) | undefined;
+      // No onClosed-triggered early exit here, unlike the one-shot path
+      // below: Pool hides a dropped link behind its own automatic
+      // reconnect-with-backoff (see @macula-io/ts's pool.ts) rather than
+      // surfacing "this session died" to a caller, so this always waits
+      // out the full durationSeconds (or the count) rather than
+      // returning early on a single station's connection dropping --
+      // a deliberate tradeoff for the added resilience of tapping every
+      // configured seed at once instead of just one.
+      const unsubscribe = await pool.subscribe(args.realm, args.topic, (evt) => {
+        events.push({
+          topic: args.topic,
+          publisher: Buffer.from(evt.publisher).toString("hex"),
+          seq: evt.seq,
+          payload: evt.payload,
+        });
+        if (args.count && events.length >= args.count) {
+          if (timer) clearTimeout(timer);
+          resolveWait?.();
+        }
+      });
+      try {
+        await new Promise<void>((resolve) => {
+          resolveWait = resolve;
+          timer = setTimeout(resolve, Math.max(1, Math.round(args.durationSeconds * 1000)));
+        });
+      } finally {
+        await unsubscribe();
+      }
+      return events;
+    } catch (e) {
+      throw toCliError(e);
+    }
+  }
   return withSession(args.host, args.identityPath, async (session) => {
     const events: TsWatchEvent[] = [];
     let stop: (() => Promise<void>) | undefined;
