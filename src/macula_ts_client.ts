@@ -98,8 +98,10 @@ export function toCliError(e: unknown): MaculaCliError {
   return new MaculaCliError(String(e));
 }
 
-/** Connects fresh with `identityPath`'s identity, runs `fn`, always closes and disposes
- * afterward -- the one-shot "connect, do the thing, exit" shape every function below shares. */
+/** Connects fresh with `identityPath`'s identity, runs `fn`, closes and disposes
+ * afterward -- the one-shot "connect, do the thing, exit" shape every function below shares.
+ * Teardown happens in the BACKGROUND (see closeInBackground) -- the caller gets `fn`'s
+ * result the moment it's ready, not after teardown too. */
 export async function withSession<T>(
   host: string | undefined,
   identityPath: string,
@@ -113,9 +115,42 @@ export async function withSession<T>(
   } catch (e) {
     throw toCliError(e);
   } finally {
-    if (session) await session.close(identity).catch(() => {});
-    identity.dispose();
+    closeInBackground(session, identity);
   }
+}
+
+/**
+ * Closes and disposes AFTER returning control to the caller, not before.
+ * macula-go's connection teardown includes an awaited ~250ms drain sleep
+ * (macula-go/connection/connection.go) that used to sit directly on every
+ * one-shot call's hot path for no benefit the caller could observe -- the
+ * result is already final by the time teardown even starts. Confirmed live
+ * 2026-09-04 this doesn't open a new race: a GRACEFUL close in flight (this
+ * function's own case) doesn't collide with an immediate reconnect under
+ * the same identity -- 5/5 trials clean, session B connects and operates
+ * normally while A's close is still draining. That's different from the
+ * real, separately-tracked bug where an UNRELATED one-shot dial (e.g.
+ * presence.ts's heartbeat) collides with an orphaned, never-closing
+ * connection under the same identity (macula_station_listener.erl's
+ * per-identity dedupe kicks the old one, ~5s delayed, confirmed live) --
+ * this function's close is never orphaned, so it was never exposed to
+ * that hazard in the first place.
+ *
+ * The identity stays alive until ITS OWN close settles (close() needs a
+ * live identity handle, e.g. to sign a goodbye frame), not disposed
+ * immediately, which would race the still-running close. Failure is
+ * swallowed -- best-effort teardown, same discipline as every other
+ * one-shot close in this codebase (presence.ts's stopLeg, etc.).
+ */
+export function closeInBackground(session: Session | undefined, identity: Identity): void {
+  if (!session) {
+    identity.dispose();
+    return;
+  }
+  void session
+    .close(identity)
+    .catch(() => {})
+    .finally(() => identity.dispose());
 }
 
 /** Reads a UCAN token from `path` (MACULA_MCP_UCAN, same file-path convention
