@@ -4,7 +4,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as realm from "./realm.js";
-import { identity } from "./macula_cli.js";
+import { defaultIdentityPath } from "./macula_cli.js";
+import { tsIdentity } from "./macula_ts_client.js";
 import { errorContent } from "./reply.js";
 import { connectedViaLabel, ensurePresence } from "./presence.js";
 
@@ -65,7 +66,7 @@ export function registerMeshJoinRealm(server: McpServer): void {
     async ({ wait_seconds }) => {
       ensurePresence(server);
       try {
-        const id = await identity();
+        const id = tsIdentity(defaultIdentityPath());
         const already = realm.status(id.node_id);
         if (already.joined) {
           return { content: [{ type: "text", text: JSON.stringify({ status: "joined", ...already }, null, 2) }] };

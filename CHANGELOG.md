@@ -123,13 +123,38 @@ fires on a `v*` tag push, not on every commit to `main`).
   three lifecycle facts plus the message, each with station-attested `publisher` matching `from`.
   `rooms.test.ts` updated to mock `macula_ts_client.js`'s `publish`/`tsIdentity` at the boundary instead of
   `macula_cli.js`'s `publish`/`identity`, same pattern as `presence.test.ts`.
+- **Vendored `@macula-io/ts` refreshed 0.9.0 → 0.12.0** (`vendor/macula-io-ts-0.12.0.tgz`, rebuilt via its own
+  `build:prebuilds` + `npm pack`), picking up three capabilities landed there since 0.9.0: `Identity.sign()`
+  (a generic Ed25519 signing primitive), realm support on `Session.call`/`callWithUcan`/`publish`/`subscribe`,
+  and direct-dial (caller-side resolve+one-hop-call, provider-side advertise-direct). Re-verified the
+  zero-install-script property still holds against the new tarball (no `install`/`postinstall`/`preinstall`
+  script on the installed package, prebuilt native addons for all five platforms present).
+- **`mesh_join_realm`'s ownership-proof signing cut over from `macula-cli`'s `identity sign` subprocess to
+  `@macula-io/ts`'s new `Identity.sign()`**, now that it exists: `realm.ts`'s `begin()` loads the default
+  identity in-process (`macula_ts_client.ts`'s `loadOrGenerateIdentity(defaultIdentityPath())` — the same
+  seed file every other in-process tool already reads/mints from) and signs `ownership_proof.ts`'s
+  `proofMessage()` directly, rather than shelling out. `proofMessage()` (already the verifier-side
+  reimplementation `mesh_ring` relies on) is reused unchanged as the single source of truth for the exact
+  byte layout hecate-citizens'/hecate-mail's `*_ownership_proof` modules require — node_id (32 raw bytes) ++
+  timestamp (8 bytes big-endian) ++ procedure (raw UTF-8), no delimiters — so this cutover cannot drift from
+  what the Erlang side verifies. `mesh_join_realm.ts` also reads its own node_id via `tsIdentity()` instead
+  of `macula-cli`'s async `identity()`, matching `mesh://identity`'s own identity source. Verified live: a
+  real join session created against the production `https://macula.io` portal (HTTP 201) with a real
+  `Identity.sign()` signature, self-checked with `verifyOwnershipProof()` and confirmed the portal itself
+  accepted it as valid proof of possession. `mesh_call`'s own `prove_identity` is a separate, narrower
+  ownership proof (bound to whatever procedure the caller is invoking, not the fixed join procedure) and is
+  intentionally NOT touched by this cutover — see the "Known gaps" note below, updated to match.
 
 ### Known gaps (real, not hidden — see README.md)
-- `@macula-io/ts` does not yet support non-default realms or direct-dial. `mesh_call`'s `realm` and `direct`
-  options now throw a clear error instead of being silently ignored — meaning UCAN-gated capabilities (which
-  require `direct: true`) still need `macula-cli`'s path via those exact same failing options; nothing
-  routes around this automatically. `mesh_call`'s `prove_identity` (ownership-proof signing) still shells
-  out to `macula-cli`'s `identity sign` for the same reason — `@macula-io/ts`'s `Identity` has no `sign()`.
+- `@macula-io/ts` itself now supports non-default realms, direct-dial, and `Identity.sign()` (0.12.0, see
+  above) — but `macula_ts_client.ts`, this server's own in-process adapter, has NOT been updated to route
+  through the new realm/direct-dial capability yet: `assertRealmSupported`/`assertDirectNotRequested` still
+  throw a clear error for `mesh_call`'s `realm`/`direct` options instead of using them, so UCAN-gated
+  capabilities (which require `direct: true`) still need `macula-cli`'s path via those exact same failing
+  options. That is real, scoped follow-up work, not attempted in this pass. `mesh_call`'s `prove_identity`
+  likewise still shells out to `macula-cli`'s `identity sign` — `Identity.sign()` is now used for
+  `mesh_join_realm`'s own (differently-scoped) proof, but wiring it through `mesh_call`'s `prove_identity`
+  path too is separate, not-yet-done work.
 - `mesh_stations` and `mesh_recall`/`mesh_remember`/`mesh_remember_directory` are a genuine hybrid: the DHT
   discovery half runs on `@macula-io/ts`, but the actual call (to `hecate_stations.list_stations` /
   `hecate-rag.*`) stays on `macula-cli`, since those services are always advertised under a non-zero realm.

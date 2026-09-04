@@ -1,19 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Identity } from "@macula-io/ts";
+import { verifyOwnershipProof } from "./ownership_proof.js";
 
-// begin()/waitForOutcome() talk to macula-cli for the identity and the
-// proof; both are the seam every other suite mocks the same way.
-vi.mock("./macula_cli.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./macula_cli.js")>();
-  return {
-    ...actual,
-    identity: async () => ({ node_id: NODE, path: "/tmp/fake-identity.seed", generated: false }),
-    identitySign: async ({ procedure }: { procedure: string }) => ({ node_id: NODE, timestamp: 1788352709318, signature: `sig-for-${procedure}` }),
-  };
-});
-
+// begin() now signs in-process (@macula-io/ts's Identity.sign(), no
+// macula-cli subprocess) against whatever identity MACULA_MCP_IDENTITY
+// points at -- nothing to mock here, the "join flow" describe below
+// points it at a real seed file and lets real Ed25519 signing run.
 import * as realm from "./realm.js";
 
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
@@ -154,6 +149,31 @@ describe("credential store", () => {
 });
 
 describe("join flow against a fake portal", () => {
+  // begin() signs via loadOrGenerateIdentity(defaultIdentityPath()) --
+  // point MACULA_MCP_IDENTITY at a real seed file so a real Ed25519
+  // identity gets loaded and used, same as the live server. NODE for
+  // this describe block is that identity's own node id, computed from
+  // the seed once so the fake-portal script/assertions below can name
+  // it -- not the arbitrary top-level NODE constant.
+  let NODE = "";
+  const SEED = new Uint8Array(32).fill(0x7a);
+
+  beforeEach(async () => {
+    const identityPath = join(dir, "identity.seed");
+    process.env.MACULA_MCP_IDENTITY = identityPath;
+    await writeFile(identityPath, SEED, { mode: 0o600 });
+    const probe = Identity.fromSeedBytes(SEED);
+    try {
+      NODE = Buffer.from(probe.nodeId).toString("hex");
+    } finally {
+      probe.dispose();
+    }
+  });
+
+  afterEach(() => {
+    delete process.env.MACULA_MCP_IDENTITY;
+  });
+
   function fakePortal(script: Array<{ status: number; body: unknown }>) {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetchImpl: realm.FetchLike = async (url, init) => {
@@ -164,15 +184,25 @@ describe("join flow against a fake portal", () => {
     return { fetchImpl, calls };
   }
 
-  it("begin creates the session with a proof bound to the join procedure and returns link + QR", async () => {
+  it("begin creates the session with a proof bound to the join procedure -- a real Identity.sign() signature over proofMessage()'s exact byte layout -- and returns link + QR", async () => {
     const portal = fakePortal([{ status: 201, body: { session_id: "s1", join_url: "https://portal.test/join/s1", expires_at: "2999-01-01T00:00:00Z" } }]);
     const began = await realm.begin({ connectedVia: "opencode 1.18.25", fetchImpl: portal.fetchImpl });
     expect(began.reused).toBe(false);
+    expect(began.node_id).toBe(NODE);
     expect(began.join_url).toBe("https://portal.test/join/s1");
     expect(began.qr_terminal.length).toBeGreaterThan(0);
     expect(portal.calls[0].url).toBe("https://portal.test/api/v1/join/sessions");
     const sent = JSON.parse(String(portal.calls[0].init?.body));
-    expect(sent.proof).toEqual({ timestamp: 1788352709318, signature: `sig-for-${realm.JOIN_PROOF_PROCEDURE}` });
+    expect(typeof sent.proof.timestamp).toBe("number");
+    expect(Math.abs(Date.now() - sent.proof.timestamp)).toBeLessThan(5_000);
+    // This is exactly hecate-citizens'/hecate-mail's *_ownership_proof
+    // check, run here against the real signature begin() produced --
+    // proof that Identity.sign() signed proofMessage()'s real byte
+    // layout, not a mismatched or malformed one that would fail
+    // silently wrong on the Erlang side.
+    expect(verifyOwnershipProof({ node_id: NODE, proof: sent.proof, procedure: realm.JOIN_PROOF_PROCEDURE })).toEqual({ ok: 1 });
+    // bound to the join procedure specifically -- a proof for any other procedure must not verify
+    expect(verifyOwnershipProof({ node_id: NODE, proof: sent.proof, procedure: "some.other.procedure" })).toEqual({ ok: 0, reason: "bad_signature" });
     expect(realm.status(NODE).pending?.session_id).toBe("s1");
     // a second begin while pending reuses the same session rather than spamming the portal
     const again = await realm.begin({ fetchImpl: portal.fetchImpl });

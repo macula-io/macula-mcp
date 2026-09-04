@@ -48,7 +48,7 @@
     "postinstall": "node scripts/postinstall.mjs"
   },
   "dependencies": {
-    "@macula-io/ts": "file:vendor/macula-io-ts-0.9.0.tgz",
+    "@macula-io/ts": "file:vendor/macula-io-ts-0.12.0.tgz",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "qrcode": "^1.5.4",
     "zod": "^3.23.0"

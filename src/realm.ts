@@ -20,8 +20,13 @@
 //
 // Proof of possession: the session is created with a signature over
 // {node_id, timestamp, "macula_portal.join_session"} from the same
-// identity (`macula-cli identity sign`), so nobody can create a session
-// for a key they do not hold and talk a person into confirming it.
+// identity, built with ownership_proof.ts's proofMessage() (the exact
+// byte layout hecate-citizens'/hecate-mail's *_ownership_proof verifiers
+// require: node_id 32 raw bytes ++ timestamp 8 bytes big-endian ++
+// procedure raw UTF-8, no delimiters) and signed in-process with
+// @macula-io/ts's Identity.sign() -- no macula-cli subprocess -- so
+// nobody can create a session for a key they do not hold and talk a
+// person into confirming it.
 //
 // Credentials live under ~/.config/macula-mcp/realm/<node_id>.json
 // (0600), keyed by the identity they belong to: a session-scoped identity
@@ -31,7 +36,9 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { hostname, arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import QRCode from "qrcode";
-import { identity, identitySign } from "./macula_cli.js";
+import { defaultIdentityPath } from "./macula_cli.js";
+import { loadOrGenerateIdentity } from "./macula_ts_client.js";
+import { proofMessage } from "./ownership_proof.js";
 import { serverVersion } from "./version.js";
 
 export const JOIN_PROOF_PROCEDURE = "macula_portal.join_session";
@@ -341,38 +348,51 @@ export interface BeginResult extends CreatedSession {
  * Create a join session for the default identity (or hand back the one
  * still pending), start polling it in the background, and return the
  * link plus its QR renderings. Throws when the portal refuses.
+ *
+ * node_id and the proof signature both come from ONE loaded Identity
+ * (the default identity's seed file, loaded/minted the same way every
+ * other in-process tool does it) so the id sent to the portal and the
+ * key that actually signed it can never drift apart.
  */
 export async function begin(input: { connectedVia?: string; fetchImpl?: FetchLike } = {}): Promise<BeginResult> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const { node_id: nodeId } = await identity();
-  if (pending && pending.node_id === nodeId && !expired(pending.expires_at)) {
+  const id = loadOrGenerateIdentity(defaultIdentityPath());
+  try {
+    const nodeId = Buffer.from(id.nodeId).toString("hex");
+    if (pending && pending.node_id === nodeId && !expired(pending.expires_at)) {
+      return {
+        node_id: nodeId,
+        reused: true,
+        session_id: pending.session_id,
+        join_url: pending.join_url,
+        expires_at: pending.expires_at,
+        qr_terminal: await qrTerminal(pending.join_url),
+        qr_png_base64: await qrPngBase64(pending.join_url),
+      };
+    }
+    clearPending();
+    // Sign right before the call, never ahead -- the verifying side
+    // enforces a 60s skew window (ownership_proof.ts's MAX_PROOF_SKEW_MS).
+    const timestamp = Date.now();
+    const signature = Buffer.from(id.sign(proofMessage(nodeId, timestamp, JOIN_PROOF_PROCEDURE))).toString("hex");
+    const created = await createSession(
+      joinRequest({ nodeId, proof: { timestamp, signature }, connectedVia: input.connectedVia }),
+      fetchImpl,
+    );
+    lastError = undefined;
+    const timer = setInterval(() => void pollOnce(fetchImpl), POLL_INTERVAL_MS);
+    timer.unref();
+    pending = { node_id: nodeId, ...created, timer, polling: false };
     return {
       node_id: nodeId,
-      reused: true,
-      session_id: pending.session_id,
-      join_url: pending.join_url,
-      expires_at: pending.expires_at,
-      qr_terminal: await qrTerminal(pending.join_url),
-      qr_png_base64: await qrPngBase64(pending.join_url),
+      reused: false,
+      ...created,
+      qr_terminal: await qrTerminal(created.join_url),
+      qr_png_base64: await qrPngBase64(created.join_url),
     };
+  } finally {
+    id.dispose();
   }
-  clearPending();
-  const signed = await identitySign({ procedure: JOIN_PROOF_PROCEDURE });
-  const created = await createSession(
-    joinRequest({ nodeId, proof: { timestamp: signed.timestamp, signature: signed.signature }, connectedVia: input.connectedVia }),
-    fetchImpl,
-  );
-  lastError = undefined;
-  const timer = setInterval(() => void pollOnce(fetchImpl), POLL_INTERVAL_MS);
-  timer.unref();
-  pending = { node_id: nodeId, ...created, timer, polling: false };
-  return {
-    node_id: nodeId,
-    reused: false,
-    ...created,
-    qr_terminal: await qrTerminal(created.join_url),
-    qr_png_base64: await qrPngBase64(created.join_url),
-  };
 }
 
 /** Wait up to `seconds` for the pending session to resolve either way; returns the status afterwards. */

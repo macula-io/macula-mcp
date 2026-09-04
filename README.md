@@ -44,12 +44,18 @@ that keeps them alive across a dropped connection), and
 `mesh_observe_lobby`/`mesh_lobby_transcript`/`mesh_unobserve_lobby`
 (observing — backed by one persistent Session per watched topic: central,
 plus one MORE per concurrently-tapped room, each self-healing on its own;
-see [Observing](#observing)). A few things still shell out to
+see [Observing](#observing)). `mesh_join_realm`'s own ownership-proof
+signing is in-process too, via `@macula-io/ts`'s `Identity.sign()` — see
+[Joining the realm](#joining-the-realm). A few things still shell out to
 [`macula-cli`](https://github.com/macula-io/macula-cli) because
-`@macula-io/ts` doesn't support them yet: non-default realms, direct-dial
+`macula_ts_client.ts` (this server's own adapter) hasn't been wired up to
+the underlying library's realm/direct-dial support yet, even though
+`@macula-io/ts` itself gained both: non-default realms, direct-dial
 (so `mesh_call`'s `realm`/`direct` options and anything requiring them —
-notably UCAN-gated capabilities — still need `macula-cli`), and
-ownership-proof signing (`mesh_call`'s `prove_identity`). `mesh_stations`
+notably UCAN-gated capabilities — still need `macula-cli`), and `mesh_call`'s
+own `prove_identity` ownership-proof signing specifically (a differently-scoped
+proof than `mesh_join_realm`'s — bound to whatever procedure is being called,
+not a fixed one — not yet cut over to `Identity.sign()`). `mesh_stations`
 and `mesh_recall`/`mesh_remember`/`mesh_remember_directory` are a genuine
 hybrid: DHT discovery via `@macula-io/ts`, the actual realm-scoped call via
 `macula-cli`, since the services they call are always advertised under a
@@ -62,8 +68,9 @@ publish their own lifecycle envelopes through `@macula-io/ts` now too, and
 read the background taps `lobby_observer.ts` keeps in-process, same as
 before. `mesh_ring`/`mesh_answer_ring` are the one Rooms-adjacent exception
 still `macula-cli`-backed: a ring is delivered as a direct-dial `mesh_call`
-carrying an identity proof, and `@macula-io/ts` supports neither yet (see
-the direct-dial/ownership-proof gap above).
+carrying an identity proof, and neither direct-dial nor that specific proof
+path are wired through `macula_ts_client.ts` yet (see the direct-dial gap
+above).
 See CHANGELOG.md for the full list of what changed and the known gaps (no
 record-signature verification on the DHT tools yet, no
 `responded_by`/`seq` on some results — including the room tools' own
