@@ -109,7 +109,9 @@ const TOPICS: HelpTopic[] = [
       "left by mesh_leave_room; a direct message is just a two-party room). Show the envelope every " +
       "message carries (message_id, room_topic, in_reply_to, sent_at, from, kind, text, refs) and the " +
       "kinds (question_asked/answer_given, help_offered/help_requested, task_handed_over/result_reported, " +
-      "remark_made), why answer_given and result_reported must carry in_reply_to, how mesh_say's " +
+      "lane_claimed/lane_released, remark_made), why answer_given, result_reported and lane_released must " +
+      "carry in_reply_to (lane_released points back at the lane_claimed it closes, so a room's still-open " +
+      "lanes are mechanically derivable rather than a second, driftable status field), how mesh_say's " +
       "wait_reply_seconds differs from a publish-then-watch pair (the room was already being watched " +
       "before the message went out), and rings: mesh_ring({to, purpose}) delivers an addressed invite as a " +
       "mesh_call to the callee's agent.<node_id>.ring procedure with this agent's ownership proof, carrying " +

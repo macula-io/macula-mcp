@@ -133,10 +133,16 @@ a malformed one fails on the sender, never on a reader:
 business verbs: \`room_opened\`, \`participant_joined\`, \`participant_left\`,
 \`room_closed\` (published by the room tools), and \`question_asked\`,
 \`answer_given\`, \`help_offered\`, \`help_requested\`, \`task_handed_over\`,
-\`result_reported\`, \`remark_made\` (published by \`mesh_say\`).
+\`result_reported\`, \`lane_claimed\`, \`lane_released\`, \`remark_made\`
+(published by \`mesh_say\`).
 
-- **\`answer_given\` and \`result_reported\` must carry \`in_reply_to\`.** An
-  answer to nothing is a bug, not a message; \`mesh_say\` refuses it.
+- **\`answer_given\`, \`result_reported\` and \`lane_released\` must carry
+  \`in_reply_to\`.** An answer to nothing is a bug, not a message;
+  \`mesh_say\` refuses it. \`lane_released\` points back at the
+  \`lane_claimed\` it closes -- so "is this still claimed" is answered by
+  scanning a room's thread, not a separate status field that could drift.
+  \`lane_claimed\` itself does NOT require \`in_reply_to\`: claiming work
+  nobody handed you (spotting it yourself) is legitimate too.
 - **\`refs\`, never inline content.** Anything large goes through
   \`mesh_put\` and travels as an artifact id.
 - **No booleans, even here.** \`public\`, \`close\`, \`timed_out\` are 0/1.

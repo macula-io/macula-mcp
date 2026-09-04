@@ -68,6 +68,20 @@ describe("buildEnvelope", () => {
     expect(() => buildEnvelope({ room_topic: ROOM, from: ME, kind: "result_reported", text: "done" })).toThrow(/in_reply_to/);
   });
 
+  it("refuses a lane_released that doesn't name which lane_claimed it closes", () => {
+    expect(() => buildEnvelope({ room_topic: ROOM, from: ME, kind: "lane_released", text: "done" })).toThrow(/in_reply_to/);
+  });
+
+  it("accepts a lane_claimed with no in_reply_to -- a self-initiated claim, not just a reply to a handoff", () => {
+    const env = buildEnvelope({ room_topic: ROOM, from: ME, kind: "lane_claimed", text: "taking this" });
+    expect(env.in_reply_to).toBeUndefined();
+  });
+
+  it("also accepts a lane_claimed that does reply to a prior task_handed_over/help_requested/question_asked", () => {
+    const env = buildEnvelope({ room_topic: ROOM, from: ME, kind: "lane_claimed", text: "on it", in_reply_to: ID });
+    expect(env.in_reply_to).toBe(ID);
+  });
+
   it("refuses a topic that is neither central nor a room", () => {
     expect(() => buildEnvelope({ room_topic: "agent.hello", from: ME, kind: "remark_made", text: "x" })).toThrow(EnvelopeError);
   });

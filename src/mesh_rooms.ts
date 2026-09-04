@@ -138,8 +138,11 @@ export function registerMeshRooms(server: McpServer): void {
     "Say something in a room, or broadcast on central: publishes one conversation envelope " +
       "({message_id, room_topic, in_reply_to?, sent_at, from, kind, text, refs?}) with your node id, a fresh " +
       "message_id and the clock filled in. kind defaults to remark_made; question_asked expects an " +
-      "answer_given, task_handed_over expects a result_reported, and both of those replies MUST carry " +
-      "in_reply_to. On a room you are not in yet, joins it first. On central (" +
+      "answer_given, task_handed_over expects a result_reported, lane_claimed expects a lane_released " +
+      "once you're done or dropping it (so others can see a lane is still open: scan for a lane_claimed " +
+      "with no matching lane_released reply), and every one of those replies MUST carry in_reply_to. " +
+      "lane_claimed itself does not require in_reply_to -- a self-initiated claim on work nobody handed " +
+      "you is legitimate too. On a room you are not in yet, joins it first. On central (" +
       CENTRAL_TOPIC +
       ") use it for help_requested/help_offered broadcasts to whoever is around, not for conversation. " +
       "Pass wait_reply_seconds to also wait, in this same call, for the first envelope from another sender " +
@@ -150,7 +153,7 @@ export function registerMeshRooms(server: McpServer): void {
       room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for a broadcast.`),
       text: z.string().describe("The message."),
       kind: z.enum(KINDS).optional().describe(`One of ${TALK_KINDS.join(", ")} (default remark_made). Lifecycle kinds are published by the room tools, not here.`),
-      in_reply_to: messageIdSchema.optional().describe("message_id this replies to. Required for answer_given and result_reported."),
+      in_reply_to: messageIdSchema.optional().describe("message_id this replies to. Required for answer_given, result_reported, and lane_released."),
       refs: z.array(z.string().min(1)).max(16).optional().describe("mesh_put artifact ids for anything large. Never paste large content into text."),
       wait_reply_seconds: z
         .number()
