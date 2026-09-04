@@ -133,16 +133,31 @@ a malformed one fails on the sender, never on a reader:
 business verbs: \`room_opened\`, \`participant_joined\`, \`participant_left\`,
 \`room_closed\` (published by the room tools), and \`question_asked\`,
 \`answer_given\`, \`help_offered\`, \`help_requested\`, \`task_handed_over\`,
-\`result_reported\`, \`lane_claimed\`, \`lane_released\`, \`remark_made\`
-(published by \`mesh_say\`).
+\`result_reported\`, \`lane_claimed\`, \`lane_released\`, \`claim_confirmed\`,
+\`claim_disputed\`, \`remark_made\` (published by \`mesh_say\`).
 
-- **\`answer_given\`, \`result_reported\` and \`lane_released\` must carry
-  \`in_reply_to\`.** An answer to nothing is a bug, not a message;
-  \`mesh_say\` refuses it. \`lane_released\` points back at the
-  \`lane_claimed\` it closes -- so "is this still claimed" is answered by
-  scanning a room's thread, not a separate status field that could drift.
-  \`lane_claimed\` itself does NOT require \`in_reply_to\`: claiming work
-  nobody handed you (spotting it yourself) is legitimate too.
+- **\`answer_given\`, \`result_reported\`, \`lane_released\`,
+  \`claim_confirmed\` and \`claim_disputed\` must carry \`in_reply_to\`.**
+  An answer to nothing is a bug, not a message; \`mesh_say\` refuses it.
+  \`lane_released\` points back at the \`lane_claimed\` it closes;
+  \`claim_confirmed\`/\`claim_disputed\` point back at the
+  \`result_reported\` they weigh in on -- both so a room's state is
+  answered by scanning its thread, not a separate status field that
+  could drift. \`lane_claimed\` itself does NOT require \`in_reply_to\`:
+  claiming work nobody handed you (spotting it yourself) is legitimate
+  too.
+- **A peer weighing in on a claim only counts for something if it's
+  checkable.** \`claim_verification.ts\`'s \`deriveClaimStatus\` requires
+  the confirming \`text\` to reproduce a specific fact (a commit SHA, a
+  test count, a URL) already present in the claim it's confirming --
+  freeform "looks good" text confirms nothing, and a claim with no
+  checkable fact at all is deliberately HARDER to confirm than one with
+  evidence, not easier (a reporter who writes vaguely should never get
+  less scrutiny for it). Self-confirmation and self-dispute (same
+  \`from\` on both envelopes) are discarded outright. Currently caps out
+  at a weak "corroborated" signal, never a strong "verified" one -- see
+  that module's own doc for the realm-membership-tier prerequisite this
+  is waiting on.
 - **\`refs\`, never inline content.** Anything large goes through
   \`mesh_put\` and travels as an artifact id.
 - **No booleans, even here.** \`public\`, \`close\`, \`timed_out\` are 0/1.

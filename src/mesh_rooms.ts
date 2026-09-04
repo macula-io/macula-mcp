@@ -144,7 +144,11 @@ export function registerMeshRooms(server: McpServer): void {
       "once you're done or dropping it (so others can see a lane is still open: scan for a lane_claimed " +
       "with no matching lane_released reply), and every one of those replies MUST carry in_reply_to. " +
       "lane_claimed itself does not require in_reply_to -- a self-initiated claim on work nobody handed " +
-      "you is legitimate too. On a room you are not in yet, joins it first. On central (" +
+      "you is legitimate too. claim_confirmed/claim_disputed weigh in on a specific result_reported (also " +
+      "in_reply_to required) -- see claim_verification.ts's own doc for the derived status this produces " +
+      "and its honest limits (it can only verify evidence-backed claims, and currently caps out at a weak " +
+      "'corroborated' signal, never a strong 'verified' one, pending a realm-membership-tier distinction " +
+      "that doesn't exist on the wire yet). On a room you are not in yet, joins it first. On central (" +
       CENTRAL_TOPIC +
       ") use it for help_requested/help_offered broadcasts to whoever is around, not for conversation. " +
       "Pass wait_reply_seconds to also wait, in this same call, for the first envelope from another sender " +
@@ -155,7 +159,7 @@ export function registerMeshRooms(server: McpServer): void {
       room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for a broadcast.`),
       text: z.string().describe("The message."),
       kind: z.enum(KINDS).optional().describe(`One of ${TALK_KINDS.join(", ")} (default remark_made). Lifecycle kinds are published by the room tools, not here.`),
-      in_reply_to: messageIdSchema.optional().describe("message_id this replies to. Required for answer_given, result_reported, and lane_released."),
+      in_reply_to: messageIdSchema.optional().describe("message_id this replies to. Required for answer_given, result_reported, lane_released, claim_confirmed, and claim_disputed."),
       refs: z.array(z.string().min(1)).max(16).optional().describe("mesh_put artifact ids for anything large. Never paste large content into text."),
       wait_reply_seconds: z
         .number()
