@@ -107,6 +107,22 @@ fires on a `v*` tag push, not on every commit to `main`).
   connect-still-in-flight race, and independent per-leg reconnect, mocked at the `macula_ts_client.ts`
   boundary the same way `presence.test.ts` does. `macula_cli.ts`'s now-unused `startDaemon()`/
   `watchTopicOnDaemon()` (their last caller) are removed.
+- **`rooms.ts`'s lifecycle envelopes (`mesh_open_room`/`mesh_join_room`/`mesh_leave_room`/`mesh_say`) now
+  publish through `macula_ts_client.ts`'s `publish()`**, not `macula-cli`'s subprocess one — the same
+  cutover `mesh_publish.ts` already took. `selfNodeId()` reads identity the same way: `tsIdentity()` (a
+  synchronous seed-file read/mint, no connection) instead of `macula-cli`'s async `identity()`. It already
+  talked to `lobby_observer.ts`'s new session-per-topic design unchanged (that module's own daemon-to-
+  in-process cutover, above, needed no matching change in `rooms.ts` — it calls `lobbyObserver.start()`/
+  `tapRoom()`/`untapRoom()`/`isTapped()` exactly as it did against the old daemon-backed version of the same
+  module). `published_seq` is gone from `mesh_open_room`/`mesh_join_room`/`mesh_leave_room`/`mesh_say`'s
+  results — `@macula-io/ts`'s `publish()` reports no sequence number at all, and the one `macula-cli`
+  reported was never real (its own README says so: current-time-millis, one per one-shot subprocess call);
+  each envelope's own `message_id`/`sent_at` is the real, useful ordering signal. Verified live against the
+  production fleet: two separate processes under two separate identities — one opens a room, the other
+  joins it, says something, and leaves — with the opener's own lobby-observer transcript recording all
+  three lifecycle facts plus the message, each with station-attested `publisher` matching `from`.
+  `rooms.test.ts` updated to mock `macula_ts_client.js`'s `publish`/`tsIdentity` at the boundary instead of
+  `macula_cli.js`'s `publish`/`identity`, same pattern as `presence.test.ts`.
 
 ### Known gaps (real, not hidden — see README.md)
 - `@macula-io/ts` does not yet support non-default realms or direct-dial. `mesh_call`'s `realm` and `direct`

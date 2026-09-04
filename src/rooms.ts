@@ -2,8 +2,9 @@
 // whoever opens it, carried to the other participants (by a ring; by a
 // public room_opened on central; or out of band), and watched in the
 // background by every participant for as long as they stay --
-// lobby_observer.ts's daemon does the watching, this module owns which
-// rooms THIS agent is in and what it says there. See
+// lobby_observer.ts's own persistent Sessions do the watching (no
+// macula-cli daemon involved any more, see its own module header), this
+// module owns which rooms THIS agent is in and what it says there. See
 // plans/PLAN_AGENT_CONVERSATIONS.md sections 2 and 3.
 //
 // A direct message is simply a two-party room. The deterministic
@@ -35,8 +36,21 @@
 //      still believed it was in was no longer watched. say() now checks
 //      both and re-taps (publishing a fresh participant_joined, which is
 //      harmless -- a re-affirmation, not a lie) before it says anything.
+//
+// (2026-09-04) Lifecycle envelopes now go out through @macula-io/ts's own
+// publish() (macula_ts_client.ts), not macula-cli's subprocess one --
+// same cutover mesh_publish.ts already took. selfNodeId() reads identity
+// the same way: tsIdentity() (a synchronous seed-file read/mint, no
+// connection) instead of macula-cli's async `identity()`. One visible
+// change: macula-cli's publish() reported a `seq` that was never a real
+// sequence number (its own README says so -- current-time-millis, one
+// per one-shot subprocess call), and @macula-io/ts's publish() reports
+// no seq at all -- `published_seq` is gone from every result here rather
+// than carry a number that meant nothing; each envelope's own
+// message_id/sent_at is the real, useful ordering signal.
 
-import { identity, publish } from "./macula_cli.js";
+import { defaultIdentityPath } from "./macula_cli.js";
+import { publish, tsIdentity } from "./macula_ts_client.js";
 import * as presence from "./presence.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import { factsAfter, lastFactId, recentFacts } from "./lobby_transcript.js";
@@ -71,9 +85,9 @@ export interface RoomState {
 
 const rooms = new Map<string, RoomState>();
 
-/** The node id every envelope from this agent carries: presence's, which is the default identity's, so mesh_agents and hecate-citizens know it by the same string. */
-async function selfNodeId(): Promise<string> {
-  return presence.currentNodeId() ?? (await identity()).node_id;
+/** The node id every envelope from this agent carries: presence's, which is the default identity's, so mesh_agents and hecate-citizens know it by the same string. tsIdentity() only reads/mints a seed file -- no connection -- so this stays synchronous. */
+function selfNodeId(): string {
+  return presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
 }
 
 /** Ensures a room is actually being watched before this agent relies on it: re-taps if the observer lost it (crash, restart) since it was last known joined. Publishes a fresh participant_joined when it had to re-tap, so the room's other participants see the same fact a first join would have produced. */
@@ -81,10 +95,10 @@ async function ensureTapped(args: { host?: string; room_topic: string }): Promis
   if (lobbyObserver.isTapped(args.room_topic)) return;
   await lobbyObserver.start({ host: args.host });
   if (lobbyObserver.isTapped(args.room_topic)) return;
-  const me = await selfNodeId();
+  const me = selfNodeId();
   lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
   const rejoined = buildEnvelope({ room_topic: args.room_topic, from: me, kind: "participant_joined", text: "" });
-  await publish({ host: args.host, topic: args.room_topic, fact: { ...rejoined } });
+  await publish({ host: args.host, topic: args.room_topic, fact: { ...rejoined }, identityPath: defaultIdentityPath() });
 }
 
 export interface OpenRoomArgs {
@@ -98,13 +112,12 @@ export interface OpenRoomArgs {
 export interface OpenRoomResult {
   room_topic: string;
   opened: Envelope;
-  published_seq: number;
   announced_on_central: 0 | 1;
 }
 
 export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
   await lobbyObserver.start({ host: args.host });
-  const me = await selfNodeId();
+  const me = selfNodeId();
   const roomTopic = newRoomTopic();
   const participants = [me, ...(args.participants ?? []).filter((n) => n !== me)];
   const opened = buildEnvelope({
@@ -118,9 +131,8 @@ export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
   // Tap BEFORE publishing so the opener's own first fact is in its transcript too;
   // on a failed publish, untap (see the module header) so nothing leaks.
   lobbyObserver.tapRoom(roomTopic, { joined: 1 });
-  let res;
   try {
-    res = await publish({ host: args.host, topic: roomTopic, fact: { ...opened } });
+    await publish({ host: args.host, topic: roomTopic, fact: { ...opened }, identityPath: defaultIdentityPath() });
   } catch (e) {
     lobbyObserver.untapRoom(roomTopic);
     throw e;
@@ -128,7 +140,7 @@ export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
   const isPublic: 0 | 1 = args.public === 1 ? 1 : 0;
   if (isPublic === 1) {
     try {
-      await publish({ host: args.host, topic: CENTRAL_TOPIC, fact: { ...opened } });
+      await publish({ host: args.host, topic: CENTRAL_TOPIC, fact: { ...opened }, identityPath: defaultIdentityPath() });
     } catch (e) {
       lobbyObserver.untapRoom(roomTopic);
       throw e;
@@ -142,13 +154,12 @@ export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
     ...(args.purpose !== undefined ? { purpose: args.purpose } : {}),
     joined_at: new Date().toISOString(),
   });
-  return { room_topic: roomTopic, opened, published_seq: res.seq, announced_on_central: isPublic };
+  return { room_topic: roomTopic, opened, announced_on_central: isPublic };
 }
 
 export interface JoinRoomResult {
   room_topic: string;
   joined: Envelope | null;
-  published_seq: number | null;
   already_joined: 0 | 1;
 }
 
@@ -157,15 +168,14 @@ export async function joinRoom(args: { host?: string; room_topic: string; opened
   if (!isRoomTopic(args.room_topic)) throw new RoomError(`not a room topic: ${args.room_topic}`);
   if (rooms.has(args.room_topic)) {
     await ensureTapped({ host: args.host, room_topic: args.room_topic });
-    return { room_topic: args.room_topic, joined: null, published_seq: null, already_joined: 1 };
+    return { room_topic: args.room_topic, joined: null, already_joined: 1 };
   }
   await lobbyObserver.start({ host: args.host });
-  const me = await selfNodeId();
+  const me = selfNodeId();
   lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
   const joined = buildEnvelope({ room_topic: args.room_topic, from: me, kind: "participant_joined", text: "" });
-  let res;
   try {
-    res = await publish({ host: args.host, topic: args.room_topic, fact: { ...joined } });
+    await publish({ host: args.host, topic: args.room_topic, fact: { ...joined }, identityPath: defaultIdentityPath() });
   } catch (e) {
     lobbyObserver.untapRoom(args.room_topic);
     throw e;
@@ -178,13 +188,12 @@ export async function joinRoom(args: { host?: string; room_topic: string; opened
     public: 0,
     joined_at: new Date().toISOString(),
   });
-  return { room_topic: args.room_topic, joined, published_seq: res.seq, already_joined: 0 };
+  return { room_topic: args.room_topic, joined, already_joined: 0 };
 }
 
 export interface LeaveRoomResult {
   room_topic: string;
   left: Envelope;
-  published_seq: number;
   closed: 0 | 1;
 }
 
@@ -192,13 +201,13 @@ export interface LeaveRoomResult {
 export async function leaveRoom(args: { host?: string; room_topic: string; close?: 0 | 1 }): Promise<LeaveRoomResult> {
   const room = rooms.get(args.room_topic);
   if (!room) throw new RoomError(`not in room ${args.room_topic}`);
-  const me = await selfNodeId();
+  const me = selfNodeId();
   const closed: 0 | 1 = args.close === 1 ? 1 : 0;
   const left = buildEnvelope({ room_topic: args.room_topic, from: me, kind: closed === 1 ? "room_closed" : "participant_left", text: "" });
-  const res = await publish({ host: args.host, topic: args.room_topic, fact: { ...left } });
+  await publish({ host: args.host, topic: args.room_topic, fact: { ...left }, identityPath: defaultIdentityPath() });
   lobbyObserver.untapRoom(args.room_topic);
   rooms.delete(args.room_topic);
-  return { room_topic: args.room_topic, left, published_seq: res.seq, closed };
+  return { room_topic: args.room_topic, left, closed };
 }
 
 /** Best effort, for mesh_goodbye: leaves every room this agent is in, closing the ones it opened. Returns how many were left. Never throws -- a goodbye must not fail on an unreachable room. */
@@ -303,7 +312,6 @@ export interface SayArgs {
 
 export interface SayResult {
   sent: Envelope;
-  published_seq: number;
   reply: ObservedEnvelope | null;
   /** 1 if a wait was requested and nothing came from another sender in time; 0 if a reply arrived; absent if no wait was requested. */
   timed_out?: 0 | 1;
@@ -329,7 +337,7 @@ export async function say(args: SayArgs): Promise<SayResult> {
   } else {
     await ensureTapped({ host: args.host, room_topic: topic });
   }
-  const me = await selfNodeId();
+  const me = selfNodeId();
   const sent = buildEnvelope({
     room_topic: topic,
     from: me,
@@ -339,8 +347,8 @@ export async function say(args: SayArgs): Promise<SayResult> {
     refs: args.refs,
   });
   const cursor = lastFactId(topic);
-  const res = await publish({ host: args.host, topic, fact: { ...sent } });
-  if (!args.waitReplySeconds) return { sent, published_seq: res.seq, reply: null };
+  await publish({ host: args.host, topic, fact: { ...sent }, identityPath: defaultIdentityPath() });
+  if (!args.waitReplySeconds) return { sent, reply: null };
 
   const deadline = Date.now() + args.waitReplySeconds * 1000;
   let after = cursor;
@@ -350,11 +358,11 @@ export async function say(args: SayArgs): Promise<SayResult> {
       after = fresh[fresh.length - 1]!.id;
       const { messages } = threadEnvelopes(fresh.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher })));
       const reply = messages.find((m) => m.from !== me && m.attested === 1);
-      if (reply) return { sent, published_seq: res.seq, reply, timed_out: 0 };
+      if (reply) return { sent, reply, timed_out: 0 };
     }
     await new Promise((resolve) => setTimeout(resolve, REPLY_POLL_MS));
   }
-  return { sent, published_seq: res.seq, reply: null, timed_out: 1 };
+  return { sent, reply: null, timed_out: 1 };
 }
 
 /** Test hook: forget every room without publishing anything. */

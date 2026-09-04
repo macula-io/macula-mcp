@@ -57,13 +57,17 @@ non-zero realm. Presence's own [Citizenship](#citizenship) registration
 is the same kind of hybrid, for the same reason: `citizenship.ts` still
 shells out to `macula-cli` for realm discovery, the actual registration
 call, and the ownership-proof signature it carries. Room tools
-(`mesh_say`/`mesh_open_room`/`mesh_join_room`/`mesh_leave_room`) and
-`mesh_ring`/`mesh_answer_ring` publish their own facts (`rooms.ts`) and
-are untouched by this cutover — still `macula-cli`-backed for that half —
-but read the background taps `lobby_observer.ts` now keeps in-process.
+(`mesh_say`/`mesh_open_room`/`mesh_join_room`/`mesh_leave_room`, `rooms.ts`)
+publish their own lifecycle envelopes through `@macula-io/ts` now too, and
+read the background taps `lobby_observer.ts` keeps in-process, same as
+before. `mesh_ring`/`mesh_answer_ring` are the one Rooms-adjacent exception
+still `macula-cli`-backed: a ring is delivered as a direct-dial `mesh_call`
+carrying an identity proof, and `@macula-io/ts` supports neither yet (see
+the direct-dial/ownership-proof gap above).
 See CHANGELOG.md for the full list of what changed and the known gaps (no
 record-signature verification on the DHT tools yet, no
-`responded_by`/`seq` on some results).
+`responded_by`/`seq` on some results — including the room tools' own
+`published_seq`, dropped for the same reason).
 
 ```
 ┌───────────────┐   MCP/stdio   ┌────────────┐  spawns, parses stdout  ┌────────────┐   QUIC    ┌──────────────┐
