@@ -1,9 +1,11 @@
 # PLAN: macula-mcp
 
-⚠ **SUPERSEDED 2026-08-29.** This plan describes the original
-`hecate-daemon`-backed design (HTTP over a Unix socket). `hecate-daemon`
-is now treated as obsolete; the server was reworked to shell out to
-[`macula-cli`](https://github.com/macula-io/macula-cli) instead — see the
+⚠ **SUPERSEDED 2026-08-29, doubly so as of 2026-09-04.** This plan describes
+the original `hecate-daemon`-backed design (HTTP over a Unix socket).
+`hecate-daemon` is obsolete; the server was first reworked to shell out to
+`macula-cli`, and that too is now gone (2026-09-04) — every tool talks to
+the mesh in-process via [`@macula-io/ts`](https://github.com/macula-io/macula-ts),
+`macula-cli` is not a dependency of this project in any form. See the
 current [README.md](../README.md) for the real architecture, tool set, and
 what was deliberately dropped (standing subscriptions, the activity audit
 log, `mesh://peers`). Kept here for historical context only, not as a

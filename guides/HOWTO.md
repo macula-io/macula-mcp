@@ -22,7 +22,7 @@ for you), `npm install -g @macula-io/mcp`, then run `macula-mcp-install`.
 That's the whole install — this package ships zero lifecycle scripts of
 its own (mesh operations run in-process via `@macula-io/ts`, an ordinary
 npm dependency), so there's nothing to fetch, version, or
-keep in sync beyond the npm package itself. (Before the 0.18.0 cutover,
+keep in sync beyond the npm package itself. (Before the 0.19.0 cutover,
 this server shelled out to a separately installed `macula-cli` binary and
 the install/uninstall/doctor flow had several steps dedicated to keeping
 it current — that entire concern is gone now, not just simplified.)
@@ -144,10 +144,9 @@ send succeeding (PUBLISH has no ack on this wire protocol).
 ```
 
 **`fact`/`args` cannot contain a JSON boolean.** Macula's wire format has no
-`bool` type (see `macula-cli`'s own
-[README](https://github.com/macula-io/macula-cli#readme) and
-[HOWTO](https://github.com/macula-io/macula-cli/blob/master/guides/HOWTO.md) —
-deliberate, not a bug). A `true`/`false` anywhere in a `mesh_publish` fact or
+`bool` type — a deliberate protocol choice (CBOR on the wire has no boolean
+representation this project's SDKs expose), not a bug. A `true`/`false`
+anywhere in a `mesh_publish` fact or
 `mesh_call` args fails the whole call, real output from a live run:
 
 ```
@@ -158,7 +157,7 @@ Use `0`/`1` instead of `false`/`true`.
 
 ### `mesh_watch`
 
-**Blocks for `duration_seconds`** (max 120) or until `count` events arrive,
+**Blocks for `duration_seconds`** (max 3600) or until `count` events arrive,
 whichever is first — there is no standing background subscription. Call it
 again to keep watching.
 
@@ -181,9 +180,10 @@ again to keep watching.
 
 **Uses a separate identity from every other tool, on purpose.** A station
 kicks a connection the moment a second one arrives under the same node
-ID — a real anti-duplicate-session guard (see `macula-cli`'s own HOWTO
-guide §1), not a bug. `mesh_watch` holds a connection open for up to 120s;
-any other tool call sharing the same identity while a watch is in flight
+ID — a real anti-duplicate-session guard, not a bug (confirmed live
+2026-09-04: the kick isn't instant, ~5s delayed, but it is real).
+`mesh_watch` holds a connection open for up to 3600s; any other tool call
+sharing the same identity while a watch is in flight
 would silently kill the watcher's connection the moment it fired. Fixed
 by giving `mesh_watch` its own identity, separate from the one every
 other tool uses — see §3 for how that identity is chosen (per server
@@ -197,15 +197,17 @@ not collide, since each process mints its own.
 to see `mesh_watch` actually catch something, don't race it against a
 `mesh_publish` issued as a second "parallel" tool call in the same turn.**
 Verified live: three separate attempts to call `mesh_watch` and a publish
-(via the `mesh_publish` tool, and separately via a backgrounded raw
-`macula-cli pubsub publish`) as two tool-use blocks in one assistant message
-all returned `event_count: 0` — the harness appears to run them one after
-the other, not concurrently, so the watch's window closes before the
-publish ever fires. A single Bash call that backgrounds both processes
-itself (`( macula-cli pubsub watch ... ) & sleep 3; macula-cli pubsub
-publish ...; wait`) sees the event immediately, confirming pubsub delivery
-itself is fine — it's specifically racing two harness-level tool calls that
-doesn't give real concurrency. In practice `mesh_watch` is for catching
+(via the `mesh_publish` tool, and separately via a backgrounded raw publish
+using `macula-cli` — an external tool this project no longer depends on or
+ships, used at the time purely as an independent second implementation to
+rule out a bug in `mesh_publish` itself) as two tool-use blocks in one
+assistant message all returned `event_count: 0` — the harness appears to
+run them one after the other, not concurrently, so the watch's window
+closes before the publish ever fires. Backgrounding both processes from a
+single Bash call instead (so they genuinely overlap, not two separate
+harness tool-use blocks) sees the event immediately, confirming pubsub
+delivery itself is fine — it's specifically racing two harness-level tool
+calls that doesn't give real concurrency. In practice `mesh_watch` is for catching
 facts published by *someone else* (another party's agent, a station-side
 process) that are already in flight when you call it, not for self-testing
 a publish you're about to issue in the same turn.

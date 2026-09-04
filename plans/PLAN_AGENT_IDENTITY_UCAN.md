@@ -1,5 +1,15 @@
 # PLAN: Per-agent UCAN delegation for macula-mcp
 
+⚠ **SUPERSEDED 2026-09-04.** The blocker this plan's own status line and
+both "Update" notes below describe — `-ucan -direct` composability gated
+on a macula-cli release — no longer applies at all: macula-mcp dropped
+macula-cli entirely and talks to the mesh in-process via `@macula-io/ts`.
+`mesh_call`'s `direct: true` now routes through `Session.callDirect`/
+`callDirectWithUcan` directly and is **live-verified working**, including
+with `MACULA_MCP_UCAN` attached (see CHANGELOG.md's 0.19.0 entry). Kept
+here for historical context on how the gap was diagnosed, not as a
+statement of current status — the feature works today.
+
 Status: **This repo's half (items 1–2 below) implemented, 2026-09-03 —
 but NOT yet functional against any macula-cli a real user can install**
 (see the second "Update" below and "What's open"'s first item). Every

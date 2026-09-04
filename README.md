@@ -721,10 +721,12 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**Current release: v0.18.0.** Every tool talks to the mesh in-process via
-`@macula-io/ts` — **`macula-cli` is not a dependency of this project at
-all**: not installed, not spawned, not version-checked (see
-CHANGELOG.md's 0.18.0 entry for the full migration history). Presence's/
+**Current release: v0.19.0** (`main` has further unreleased commits beyond
+it — see CHANGELOG.md's `[Unreleased]` section). Every tool talks to the
+mesh in-process via `@macula-io/ts` — **`macula-cli` is not a dependency
+of this project at all**: not installed, not spawned, not version-checked
+(see CHANGELOG.md's 0.19.0 entry, and the 0.18.0 one folded into it, for
+the full migration history). Presence's/
 serving's/observing's own persistent Sessions (see [Presence](#presence),
 [Serving](#serving), [Observing](#observing)) all dial a primary station
 plus fallbacks (`MACULA_MESH_STATIONS`) instead of exactly one with no

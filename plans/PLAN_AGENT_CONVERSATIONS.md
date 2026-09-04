@@ -79,9 +79,9 @@ world.
 ## 3. The envelope
 
 Every fact on a room topic, and every broadcast on central, is one envelope.
-Encoded like every other macula fact (CBOR through `macula-cli`, JSON at the tool
-boundary). Wire rules from the etiquette apply: ids in the payload never in the
-topic, integers not booleans, business verbs not CRUD.
+Encoded like every other macula fact (CBOR on the wire via `@macula-io/ts`,
+JSON at the tool boundary). Wire rules from the etiquette apply: ids in the
+payload never in the topic, integers not booleans, business verbs not CRUD.
 
 | Key | Type | Notes |
 |---|---|---|
@@ -239,20 +239,26 @@ This exists so an invite is acknowledged, verified, or explicitly unreachable.
   serves fails loudly, and the accepted ring crosses stations (callee on
   Paris, caller on Frankfurt) over ordinary advertise-gossip, which carried a
   daemon-served procedure to another station within 3 s when measured. Two
-  facts learned live: macula-cli's `serve -direct` (a direct-dial DHT record,
-  which lets a caller dial the callee's station in one hop) was broken on the
-  DAEMON path -- its put_record went over the session ServeForever was reading
-  and timed out on every registration, while the one-shot `serve -direct`
-  worked. Fixed the same day in macula-cli's daemon Register (advertise via
-  serveSession, publish via callSession; live test red before, green after),
-  so the ring endpoint is now published with a direct-dial record too,
-  renewed every 20 min inside a 1 h TTL, and macula-mcp requires macula-cli
-  0.5.1 (the release carrying that fix). And identities are scoped
-  per LOGICAL SESSION by design
-  (`macula_cli.ts` keys them on `CLAUDE_CODE_SESSION_ID`, else the parent pid),
-  so three agents started from one Claude Code shell share one node id and get
-  each other kicked off the station -- the check script pins every identity per
-  process for exactly that reason. Not a bug to fix: one session is one agent.
+  facts learned live, true at the time against the then-current macula-cli
+  transport (macula-mcp no longer shells out to macula-cli at all as of
+  2026-09-04 — see CHANGELOG.md's 0.19.0 entry — so neither is a live
+  requirement any more, kept here as the historical record of how the ring
+  endpoint's direct-dial reliability was diagnosed): macula-cli's
+  `serve -direct` (a direct-dial DHT record, which lets a caller dial the
+  callee's station in one hop) was broken on the DAEMON path -- its
+  put_record went over the session ServeForever was reading and timed out on
+  every registration, while the one-shot `serve -direct` worked. Fixed the
+  same day in macula-cli's daemon Register (advertise via serveSession,
+  publish via callSession; live test red before, green after), so the ring
+  endpoint was published with a direct-dial record too, renewed every 20 min
+  inside a 1 h TTL, and macula-mcp required macula-cli 0.5.1 at the time (the
+  release carrying that fix). Identities are still scoped per LOGICAL
+  SESSION by design (now `mesh_config.ts`'s `scopeKey`, keyed on
+  `CLAUDE_CODE_SESSION_ID` else the parent pid — same convention, moved from
+  the now-deleted `macula_cli.ts`), so three agents started from one Claude
+  Code shell share one node id and get each other kicked off the station --
+  the check script pins every identity per process for exactly that reason.
+  Not a bug to fix: one session is one agent.
 
 ### WP3. Consent policy (macula-mcp)
 

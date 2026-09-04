@@ -5,6 +5,35 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Fixed
+- Every one-shot mesh call (`mesh_call`, `mesh_publish`, `mesh_watch`, etc.) awaited its own `Session.close()`
+  before returning — including `@macula-io/ts`'s own ~250ms connection-teardown drain — paid on the hot path
+  of every single tool call for zero benefit the caller could observe (the result is already final before
+  teardown starts). `withSession`'s close/dispose now happen in the background instead. Found via an
+  adversarial review of the connect-per-call architecture; verified live before shipping that backgrounding
+  the close doesn't open a new race against an immediate next call under the same identity (it doesn't — a
+  graceful close in flight is not the same connection state as the orphaned one that trips the station's
+  per-identity dedupe, confirmed separately, live, as a real but different bug tracked for the eventual
+  session-pooling work this one is a precondition for, not a fix for).
+- `issue_membership_ucan`'s procedure string was mistraced (missing its embedded realm-name segment), and its
+  `citizen_did`/`ucan` reply fields needed one more unwrap than expected (macula-realm sends them as raw
+  binaries that are already text, so `@macula-io/ts` — unable to safely assume an untagged binary is UTF-8 —
+  represents them as `0x`-prefixed hex, doubly so for a value that's already hex/text). Both fixed; the
+  realm-membership auto-join below is live-verified end to end against `io.macula`, not just unit-tested.
+
+### Added
+- **Device-tier realm auto-join**: on connect, silently proves this identity holds its own keypair
+  (`DeviceKeyOwnershipProof`, no human involved) and mints a device-scoped realm membership UCAN — the lighter
+  of two membership tiers (the heavier one is the existing Hanko-bound `mesh_join_realm` human flow, unchanged
+  and unaffected). Opt-in only via `MACULA_MCP_AUTOJOIN_REALM` (unset = no-op); `RealmCredential`/`RealmStatus`
+  gained a `tier: "device" | "citizen"` field to tell the two apart.
+- `lane_claimed`/`lane_released` envelope kinds, so a room can show who's actively working a piece of handed-
+  off work and when they're done, without a separate presence-level status field that could drift out of sync
+  with the room's own facts (see `envelope.ts`'s `REPLY_REQUIRED_KINDS` doc for how `lane_released` closes a
+  specific `lane_claimed`).
+
 ## [0.19.0] - 2026-09-04
 
 ### Fixed
@@ -62,6 +91,10 @@ fires on a `v*` tag push, not on every commit to `main`).
   `mesh_call` round trip against the production fleet succeeds through it.
 
 ## [0.18.0] - 2026-09-04
+
+> Never tagged or published to npm as its own release — work continued the same day straight through
+> to 0.19.0, which is what actually shipped. Kept here as an accurate record of what was built and when;
+> don't look for a `v0.18.0` git tag or npm version, there isn't one.
 
 ### Changed
 - **Cut over to [`@macula-io/ts`](https://github.com/macula-io/macula-ts) for most mesh operations**,
@@ -335,6 +368,8 @@ fires on a `v*` tag push, not on every commit to `main`).
   follow-up.
 
 ## [0.17.0] - 2026-09-03
+
+> Never tagged or published to npm as its own release, same as 0.18.0 above — folded into 0.19.0.
 
 **Requires Node.js 24.18.1 or newer** (`engines.node` bumped from `>=20`):
 `node:sqlite` needs it, see below.
@@ -1223,7 +1258,9 @@ this project.
 - Tools: `mesh_call`, `mesh_put`, `mesh_get`, `mesh_publish`.
 - Resources: `mesh://identity`, `mesh://peers`, `mesh://activity`.
 
-[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/macula-io/macula-mcp/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/macula-io/macula-mcp/compare/v0.16.0...v0.19.0
+[0.16.0]: https://github.com/macula-io/macula-mcp/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/macula-io/macula-mcp/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/macula-io/macula-mcp/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/macula-io/macula-mcp/compare/v0.12.3...v0.13.0
