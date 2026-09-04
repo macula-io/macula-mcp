@@ -7,6 +7,48 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-05
+
+### Added
+- **Outbound secret/credential scanning**, hard-blocked with no override flag, wired into every tool that
+  sends content over the mesh (`mesh_publish`, `mesh_call`, `mesh_say`/`mesh_open_room`, `mesh_ring`,
+  `mesh_answer_ring`, `mesh_hello`, `mesh_put`, `mesh_remember`/`mesh_remember_directory`, and `mesh_serve`'s
+  `-exec` reply path). Pattern-matches known secret shapes (AWS keys, PEM private-key blocks, GitHub/Slack/
+  Stripe/OpenAI/Anthropic key prefixes, `Authorization: Bearer` headers, `.env`-style lines) rather than
+  entropy heuristics, since this server's own normal traffic (node ids, MCIDs, UCANs) is full of long hex/
+  base64 strings that would false-positive constantly under an entropy-based check. `mesh_remember_directory`
+  also excludes known credential-file names (`.env`, `.pem`, `.key`, `id_rsa`, `.ssh`, `.aws`, `.npmrc`,
+  `credentials.json`) before a file is even opened. Object-key names are scanned too, not just values, and a
+  real `cert_pem`/UCAN are in the test suite as required clean passes so legitimate mesh traffic doesn't trip
+  it.
+- **`claim_confirmed`/`claim_disputed` envelope kinds**, plus `claim_verification.ts`'s pure derivation logic
+  (`unconfirmed` → `corroborated` → `verified`) for checking a peer's "done" against what's actually in a
+  room's thread instead of trusting it on say-so. A token-less claim is deliberately *harder* to confirm than
+  an evidence-rich one, and a confirmer's realm-membership tier now counts categorically: only a citizen-tier
+  (Hanko-bound) confirmation can reach `verified` — any number of free device-tier confirmations never
+  substitutes for one, since device-tier identities cost nothing to mint. No tool wired to this yet (same
+  scope as `lane_claimed`/`lane_released`'s own initial shipment) — wire protocol + tested logic first.
+
+### Changed
+- **`call()`/`publish()`/`watch()` now route through `@macula-io/ts` 0.14.0's connection `Pool`** instead of
+  a fresh one-shot connection per call, holding 3 simultaneous seed-station connections (`mesh_config.ts`'s
+  `DEFAULT_STATIONS`) instead of only ever having one live connection at a time. Live-verified against the
+  real fleet: forcing a real per-identity kick on one of the pool's 3 links left `call()`/`publish()` still
+  succeeding via the other 2 immediately afterward, self-healing within the health-check window; warm-pool
+  calls averaged 53ms vs. 286ms for a cold connect. Partial by design, not wholesale: an explicit `host`
+  override, `direct`/`ucanPath` calls, `callThenDirect()`'s direct-dial fallback leg, and every DHT/content
+  function stay on the original one-shot path, since Pool has no equivalent for targeting a single station or
+  for those call shapes. `watch()` loses the one-shot path's "give up early if the connection dies" behavior
+  when pool-routed — Pool hides a dropped link behind its own reconnect instead of surfacing it, so a
+  pool-routed `watch()` now always waits out its full duration/count.
+
+### Fixed
+- A room tap (`lobbyObserver.tapRoom()`) was fire-and-forget, so `openRoom()`/`joinRoom()`/`ensureTapped()`
+  could publish a fact into a room before the tap's own connect+subscribe had actually finished. `tapRoom()`
+  now awaits its first connect attempt settling before resolving. Does not fix a separate, deeper issue found
+  in the same investigation — a room tap not observing a different party's fact after joining — reported
+  separately, not bundled in as fixed here.
+
 ## [0.20.0] - 2026-09-04
 
 ### Fixed
