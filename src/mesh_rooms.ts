@@ -20,10 +20,104 @@ import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC, KINDS, TALK_KINDS } from "./envelope.js";
-import { ANSWER, listRings } from "./rings.js";
+import { ANSWER, MAX_PURPOSE_CHARS, listRings } from "./rings.js";
+import { placeRing, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./mesh_ring.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
+import { petname } from "./petname.js";
 
 const MAX_WAIT_SECONDS = 3600;
+/**
+ * Shorter than mesh_ring's own default (30s): this runs once per
+ * participant IN PARALLEL, so it does not scale with team size, but an
+ * opener forming a team of several agents at once still shouldn't pay
+ * mesh_ring's single-target default by default. Override with
+ * wait_join_seconds for a stronger "everyone's actually in" guarantee.
+ */
+const DEFAULT_INVITE_WAIT_JOIN_SECONDS = 15;
+const DEFAULT_INVITE_PURPOSE = "Join this room";
+
+type InviteOutcome = PlaceRingResult | { to: string; failed: 1; reason: string };
+
+/**
+ * Rings every participant with the room already open, in parallel --
+ * mesh_ring's own placeRing, reused as-is (proof, policy, the
+ * accepted/declined/deferred/unreachable answer, the join wait), not
+ * reimplemented. allSettled because one participant's ring throwing
+ * (should not normally happen once the room is open and `to` is never
+ * the opener, but a network exception is always possible) must not
+ * cost every OTHER participant their result.
+ */
+async function inviteParticipants(args: {
+  roomTopic: string;
+  purpose?: string;
+  participants: string[];
+  host?: string;
+  waitJoinSeconds: number;
+}): Promise<InviteOutcome[]> {
+  const purpose = args.purpose && args.purpose.trim().length > 0 ? args.purpose : DEFAULT_INVITE_PURPOSE;
+  const settled = await Promise.allSettled(
+    args.participants.map((to) => placeRing({ to, purpose, room_topic: args.roomTopic, waitJoinSeconds: args.waitJoinSeconds, host: args.host })),
+  );
+  return settled.map((s, i): InviteOutcome => {
+    if (s.status === "fulfilled") return s.value;
+    return { to: args.participants[i]!, failed: 1, reason: s.reason instanceof Error ? s.reason.message : String(s.reason) };
+  });
+}
+
+/** The room's own next_step, given how the invites actually landed -- replaces the old "tell them the topic yourself" text now that they're actually rung. */
+function summarizeInvites(invited: InviteOutcome[], announcedOnCentral: 0 | 1): string {
+  if (invited.length === 0) {
+    return announcedOnCentral === 1
+      ? "Anyone watching central can now mesh_join_room this topic. mesh_say on it to talk; mesh_read_inbox to read."
+      : "No participants given -- nobody was told about this room. Pass participants next time to have them rung automatically, or share room_topic out of band.";
+  }
+  const joined = invited.filter((r) => "answer" in r && r.answer === ANSWER.accepted && r.joined === 1).length;
+  const acceptedPending = invited.filter((r) => "answer" in r && r.answer === ANSWER.accepted && r.joined !== 1).length;
+  const deferred = invited.filter((r) => "answer" in r && r.answer === ANSWER.deferred).length;
+  const declined = invited.filter((r) => "answer" in r && r.answer === ANSWER.declined).length;
+  const unreachable = invited.filter((r) => ("unreachable" in r && r.unreachable === 1) || "failed" in r).length;
+  const parts: string[] = [];
+  if (joined > 0) parts.push(`${joined} joined`);
+  if (acceptedPending > 0) parts.push(`${acceptedPending} accepted (not yet seen joining -- mesh_read_inbox will show it)`);
+  if (deferred > 0) parts.push(`${deferred} deferred (their model will decide; mesh_rooms shows them as awaiting)`);
+  if (declined > 0) parts.push(`${declined} declined`);
+  if (unreachable > 0) parts.push(`${unreachable} unreachable (ring again once mesh_agents shows them present)`);
+  const central = announcedOnCentral === 1 ? " Anyone watching central can also mesh_join_room this topic." : "";
+  return `Invited ${invited.length}: ${parts.join(", ")}. mesh_say on the room to talk; mesh_read_inbox to read.${central}`;
+}
+
+export interface OpenRoomAndInviteArgs {
+  host?: string;
+  purpose?: string;
+  public?: 0 | 1;
+  participants?: string[];
+  waitJoinSeconds?: number;
+}
+
+export interface OpenRoomAndInviteResult extends rooms.OpenRoomResult {
+  invited: InviteOutcome[];
+  next_step: string;
+}
+
+/**
+ * mesh_open_room's real logic, separated from its MCP wiring the same
+ * way mesh_ring.ts separates placeRing from registerMeshRing -- so the
+ * two-process live check (scripts/ring-two-process-check.mjs) can call
+ * the exact code path the tool runs, not a hand-reassembled copy of it.
+ */
+export async function openRoomAndInvite(args: OpenRoomAndInviteArgs): Promise<OpenRoomAndInviteResult> {
+  if (args.purpose !== undefined) assertNoLikelySecret(args.purpose, "purpose");
+  const res = await rooms.openRoom({ host: args.host, purpose: args.purpose, public: args.public, participants: args.participants });
+  const toRing = (args.participants ?? []).filter((id) => id.toLowerCase() !== res.opened.from.toLowerCase());
+  const invited = await inviteParticipants({
+    roomTopic: res.room_topic,
+    purpose: args.purpose,
+    participants: toRing,
+    host: args.host,
+    waitJoinSeconds: args.waitJoinSeconds ?? DEFAULT_INVITE_WAIT_JOIN_SECONDS,
+  });
+  return { ...res, invited, next_step: summarizeInvites(invited, res.announced_on_central) };
+}
 
 const nodeIdSchema = z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex");
 const messageIdSchema = z.string().length(32).regex(/^[0-9a-f]+$/, "must be lowercase hex");
@@ -43,28 +137,32 @@ export function registerMeshRooms(server: McpServer): void {
     "mesh_open_room",
     "Open a room: generates an unguessable room topic (agents.room.<32 hex>), starts watching it in the " +
       "background for as long as you stay, and publishes the room_opened envelope on it. Pass public: 1 to " +
-      "also announce that envelope on central (agents.lobby) so whoever is around can mesh_join_room it; " +
-      "otherwise only agents you tell the topic to (participants records who you mean, but nothing is " +
-      "delivered to them yet -- rings are the next work package) can find it. A direct message is a " +
-      "two-party room. Unguessable, not encrypted: anyone who learns the topic reads it.",
+      "also announce that envelope on central (agents.lobby) so whoever is around can mesh_join_room it. " +
+      "Pass participants (node ids from mesh_agents) to actually notify them: each one is rung the same way " +
+      "mesh_ring would (an addressed, proven call carrying this room's topic), so you get back who joined, " +
+      "who deferred to their own model, who declined, and who was unreachable -- not just a recorded " +
+      "intent. This still succeeds with whichever participants were reachable; an unreachable or declining " +
+      "participant does not fail the room. Rings run in parallel, so wall-clock time does not grow with " +
+      "team size, but ringing an unreachable agent can still take up to ~40s regardless of " +
+      "wait_join_seconds. A direct message is a two-party room (one participant). Unguessable, not " +
+      "encrypted: anyone who learns the topic reads it.",
     {
-      purpose: z.string().max(280).optional().describe("Why this room exists, one line. Shown on central when public."),
+      purpose: z.string().max(MAX_PURPOSE_CHARS).optional().describe("Why this room exists, one line. Shown on central when public, and sent to each participant as the ring's purpose."),
       public: zeroOne.optional().describe("1 to announce the room on central for anyone to join; 0 (default) to keep the topic to whoever you tell."),
-      participants: z.array(nodeIdSchema).max(32).optional().describe("Node ids (from mesh_agents) you mean to be in this room, besides yourself."),
+      participants: z.array(nodeIdSchema).max(32).optional().describe("Node ids (from mesh_agents) to actually ring and invite into this room, besides yourself."),
+      wait_join_seconds: z
+        .number()
+        .min(0)
+        .max(MAX_WAIT_JOIN_SECONDS)
+        .optional()
+        .describe(`Per accepting participant, how long to wait for their participant_joined before reporting them not-yet-joined (default ${DEFAULT_INVITE_WAIT_JOIN_SECONDS}, 0 to not wait). Runs in parallel across participants.`),
       host: hostSchema,
     },
-    async ({ purpose, public: isPublic, participants, host }) => {
+    async ({ purpose, public: isPublic, participants, wait_join_seconds, host }) => {
       ensurePresence(server);
       try {
-        if (purpose !== undefined) assertNoLikelySecret(purpose, "purpose");
-        const res = await rooms.openRoom({ host, purpose, public: isPublic === 1 ? 1 : 0, participants });
-        return jsonContent({
-          ...res,
-          next_step:
-            res.announced_on_central === 1
-              ? "Anyone watching central can now mesh_join_room this topic. mesh_say on it to talk; mesh_read_inbox to read."
-              : "Tell the other participants the room_topic; they mesh_join_room it. mesh_say on it to talk; mesh_read_inbox to read.",
-        });
+        const result = await openRoomAndInvite({ host, purpose, public: isPublic === 1 ? 1 : 0, participants, waitJoinSeconds: wait_join_seconds });
+        return jsonContent({ ...result, invited: result.invited.map((r) => ({ ...r, to_petname: petname(r.to) })) });
       } catch (e) {
         return failed("mesh_open_room failed", e);
       }
@@ -123,12 +221,26 @@ export function registerMeshRooms(server: McpServer): void {
           ? listRings({ self: me, direction: "out", answer: ANSWER.deferred, limit: 50 }).map((r) => ({
               ring_id: r.ring_id,
               to: r.peer,
+              to_petname: petname(r.peer),
               purpose: r.purpose,
               room_topic: r.room_topic,
               rang_at: r.recorded_at,
             }))
           : [];
-        return jsonContent({ ...rooms.listRooms(), rings_awaiting_answer: awaiting });
+        const { joined, seen_on_central } = rooms.listRooms();
+        return jsonContent({
+          joined: joined.map((r) => ({
+            ...r,
+            opened_by_petname: petname(r.opened_by),
+            participants_seen_petnames: r.participants_seen.map(petname),
+          })),
+          seen_on_central: seen_on_central.map((r) => ({
+            ...r,
+            opened_by_petname: petname(r.opened_by),
+            ...(r.participants !== undefined ? { participants_petnames: r.participants.map(petname) } : {}),
+          })),
+          rings_awaiting_answer: awaiting,
+        });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));
       }

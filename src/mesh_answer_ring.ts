@@ -13,6 +13,7 @@ import { ensurePresence } from "./presence.js";
 import * as ringService from "./ring_service.js";
 import * as rooms from "./rooms.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
+import { petname } from "./petname.js";
 
 export function registerMeshAnswerRing(server: McpServer): void {
   server.tool(
@@ -38,6 +39,7 @@ export function registerMeshAnswerRing(server: McpServer): void {
         const res = await ringService.answerPendingRing({ ring_id, answer: answer === 1 ? 1 : 2, reason, host });
         return jsonContent({
           ...res,
+          peer_petname: petname(res.peer),
           next_step:
             res.answer === 1
               ? res.caller_notified === 1

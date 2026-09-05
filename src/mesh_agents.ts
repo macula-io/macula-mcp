@@ -11,6 +11,7 @@ import { z } from "zod";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import { listAgents, pruneStale } from "./roster.js";
+import { petname } from "./petname.js";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -50,6 +51,7 @@ export function registerMeshAgents(server: McpServer): void {
           page_size,
           agents: agents.map((a) => ({
             node_id: a.node_id,
+            petname: petname(a.node_id),
             operator_name: a.operator_name ?? undefined,
             message: a.message ?? undefined,
             model: a.model ?? undefined,

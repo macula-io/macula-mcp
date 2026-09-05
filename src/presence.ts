@@ -113,6 +113,7 @@ import {
 } from "./mesh_config.js";
 import { connectWithFallback, loadOrGenerateIdentity, publish, toCliError, tsIdentity } from "./macula_ts_client.js";
 import { removeAgent, upsertAgent } from "./roster.js";
+import { petname } from "./petname.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import * as ringService from "./ring_service.js";
 import * as citizenship from "./citizenship.js";
@@ -332,6 +333,8 @@ export interface StartArgs {
 
 export interface StartResult {
   node_id: string;
+  /** Deterministic, human-readable label for node_id (see petname.ts) -- a companion, never a substitute for the real id. */
+  petname: string;
   connected_to: string;
   interval_seconds: number;
   already_active: boolean;
@@ -401,6 +404,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     });
     return {
       node_id: state.nodeId,
+      petname: petname(state.nodeId),
       connected_to: state.host,
       interval_seconds: intervalSeconds,
       already_active: true,
@@ -489,6 +493,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   });
   return {
     node_id: nodeId,
+    petname: petname(nodeId),
     connected_to: host,
     interval_seconds: intervalSeconds,
     already_active: false,

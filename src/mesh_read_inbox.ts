@@ -21,12 +21,14 @@ import * as rooms from "./rooms.js";
 import { recentFacts } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, threadEnvelopes } from "./envelope.js";
 import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./rings.js";
+import { petname } from "./petname.js";
 
 function ringView(r: RingRecord) {
   return {
     ring_id: r.ring_id,
     direction: r.direction,
     peer: r.peer,
+    peer_petname: petname(r.peer),
     purpose: r.purpose,
     room_topic: r.room_topic,
     sent_at: r.sent_at,
@@ -38,6 +40,11 @@ function ringView(r: RingRecord) {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
+
+/** Adds a companion petname alongside an envelope's real `from` node id -- never replaces it. */
+function withFromPetname<T extends { from: string }>(m: T): T & { from_petname: string } {
+  return { ...m, from_petname: petname(m.from) };
+}
 
 export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
@@ -73,19 +80,21 @@ export function registerMeshReadInbox(server: McpServer): void {
           return {
             room_topic: room.room_topic,
             opened_by: room.opened_by,
+            opened_by_petname: petname(room.opened_by),
             purpose: room.purpose,
             participants_seen: room.participants_seen,
+            participants_seen_petnames: room.participants_seen.map(petname),
             total_received: total,
             returned: messages.length,
             unparsed,
-            messages,
+            messages: messages.map(withFromPetname),
           };
         });
         const central = room_topic
           ? undefined
           : threadEnvelopes(
               recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })),
-            ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me);
+            ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me).map(withFromPetname);
         const rings = room_topic || !me
           ? undefined
           : {

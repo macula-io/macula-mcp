@@ -7,6 +7,21 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+- **Petnames: a deterministic, human-readable label alongside every node_id a human actually reads.**
+  Docker-style `adjective_adjective_noun` (e.g. `gentle_crimson_otter`), derived purely from the node
+  id itself (sha256, no per-process randomness), so the same identity gets the same petname across
+  restarts and across every agent's own roster. Never a replacement for the real node_id -- every
+  surface that adds one keeps the real id right alongside it. Wired into: `mesh_agents` (per-agent
+  `petname`), `mesh_hello`/presence's own `StartResult` (`petname` for this agent's own id),
+  `mesh_lobby_transcript` (`sender_petname`), `mesh_read_inbox` (`from_petname` on every message and
+  central broadcast, `opened_by_petname`/`participants_seen_petnames` on rooms, `peer_petname` on
+  rings), `mesh_rooms` (`opened_by_petname`/`participants_seen_petnames`/`participants_petnames`,
+  `to_petname` on rings awaiting answer and on invited participants), `mesh_ring` (`to_petname`), and
+  `mesh_answer_ring` (`peer_petname`). Live-verified against the real default station, not just unit
+  tested: a real handshake's own node id resolved to the same petname both from `presence.start()`
+  directly and independently recomputed from the roster/room-listing reads afterward.
+
 ## [0.23.0] - 2026-09-05
 
 ### Fixed

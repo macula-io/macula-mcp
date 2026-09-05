@@ -29,6 +29,7 @@ import { parseEnvelope } from "./envelope.js";
 import { verifyOwnershipProof } from "./ownership_proof.js";
 import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, ringProofProcedure, ringReplyProofProcedure, RingError } from "./rings.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
+import { petname } from "./petname.js";
 
 // The callee's own handler (ring_service.ts, HANDLER_TIMEOUT_SECONDS=30,
 // plus the local relay's own 25 s budget) can legitimately take close to
@@ -39,7 +40,7 @@ import { assertNoLikelySecret } from "./secret_scan.js";
 // release review 2026-09-03: the two budgets used to be inverted).
 const CALL_TIMEOUT_MS = 40_000;
 const DEFAULT_WAIT_JOIN_SECONDS = 30;
-const MAX_WAIT_JOIN_SECONDS = 600;
+export const MAX_WAIT_JOIN_SECONDS = 600;
 
 const nodeIdSchema = z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex");
 
@@ -210,7 +211,8 @@ export function registerMeshRing(server: McpServer): void {
     async ({ to, purpose, room_topic, wait_join_seconds, host }) => {
       presence.ensurePresence(server);
       try {
-        return jsonContent(await placeRing({ to, purpose, room_topic, waitJoinSeconds: wait_join_seconds, host }));
+        const result = await placeRing({ to, purpose, room_topic, waitJoinSeconds: wait_join_seconds, host });
+        return jsonContent({ ...result, to_petname: petname(result.to) });
       } catch (e) {
         if (e instanceof RingError || e instanceof rooms.RoomError) return errorContent(`mesh_ring failed: ${e.message}`);
         return errorContent(describeCliError("mesh_ring failed", e));

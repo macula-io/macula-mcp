@@ -40,6 +40,7 @@ import { defaultStation } from "./mesh_config.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";
+import { petname } from "./petname.js";
 
 const DEFAULT_TRANSCRIPT_LIMIT = 50;
 const MAX_TRANSCRIPT_LIMIT = 500;
@@ -106,6 +107,7 @@ export function registerMeshLobbyObserver(server: McpServer): void {
           facts: facts.map((f) => ({
             topic: f.topic,
             sender: f.sender ?? undefined,
+            sender_petname: f.sender ? petname(f.sender) : undefined,
             text: f.text ?? undefined,
             raw: f.sender === null && f.text === null ? (JSON.parse(f.raw_json) as unknown) : undefined,
             observed_at: f.observed_at,
