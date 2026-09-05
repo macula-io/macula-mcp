@@ -7,6 +7,25 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-05
+
+### Fixed
+- **`macula-mcp-doctor` and `macula-mcp-status` were both silently misreporting a correctly-configured
+  opencode install as unconfigured.** Both hardcoded a `mcpServers.macula` JSON lookup to read back a
+  client's own recorded entry; opencode's real config lives under a different top-level key (`mcp`, not
+  `mcpServers`), so that lookup always came back empty for it — `doctor` printed "not configured,
+  skipping" and `status` printed "✗ macula NOT registered" for an install that actually worked and would
+  have passed a real check. Found while adding Goose support (below): Goose's YAML config would have hit
+  the exact same bug, worse — a parse exception instead of a silent miss. Both commands now read through
+  each client's own `CONTAINER_KEY`/`CONFIG_FORMAT`/`toSpawnCommand`, the same rules `config_merge.ts`
+  already used on the write side. Reproduced against the original code before fixing it; new
+  `doctor.test.ts`/`status.test.ts` pin the fix for every registered client, not just opencode.
+- README's client-support line named Cline and Continue as directly supported and omitted Claude
+  Desktop, Windsurf, and opencode entirely -- neither matched the real installer registry
+  (`src/install/mcp_clients/index.ts`'s `ALL` array). Cline and Continue have no adapter here; they work
+  like any other MCP client, via manual config. Fixed to name the real 6 auto-registered clients (now
+  including Goose) and reframe Cline/Continue accurately.
+
 ### Added
 - Goose support: `bin/install`/`bin/uninstall`/`bin/status` now detect and configure Goose
   (`~/.config/goose/config.yaml`) alongside the existing 5 clients. Goose's config is YAML, not JSON
@@ -18,21 +37,6 @@ fires on a `v*` tag push, not on every commit to `main`).
   the other 5 adapters' shape. `config_merge.ts`'s merge/remove primitives now take an optional
   `format: "yaml"` (default `"json"`) so the same backup/idempotent-merge/conflict logic serves both
   formats instead of duplicating it.
-
-### Fixed
-- README's client-support line named Cline and Continue as directly supported and omitted Claude
-  Desktop, Windsurf, and opencode entirely -- neither matched the real installer registry
-  (`src/install/mcp_clients/index.ts`'s `ALL` array). Cline and Continue have no adapter here; they work
-  like any other MCP client, via manual config. Fixed to name the real 6 auto-registered clients (now
-  including Goose) and reframe Cline/Continue accurately.
-- `macula-mcp-doctor` and `macula-mcp-status` both hardcoded a `mcpServers.macula` JSON lookup to read
-  back a client's own recorded entry, so a correctly-configured opencode install silently read back as
-  unconfigured -- `doctor` reported "not configured, skipping" and `status` reported "✗ macula NOT
-  registered" for an install that actually worked, found while adding Goose (whose YAML file would have
-  hit the same bug, worse: a parse exception rather than a silent miss). Both now read through each
-  client's own `CONTAINER_KEY`/`CONFIG_FORMAT`/`toSpawnCommand`, the same rules `config_merge.ts` already
-  used to write the entry in the first place. Reproduced against the original code before fixing it;
-  `doctor.test.ts`/`status.test.ts` (new) pin the fix for every registered client.
 
 ## [0.22.1] - 2026-09-05
 
