@@ -7,6 +7,42 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-05
+
+### Changed
+- Dependency refresh. Real version moves: `zod` 3.25.76 → 4.5.4, `typescript` 5.9.3 → 6.0.3, `vitest`
+  3.2.7 → 5.0.0 (all major-version jumps, each verified against this repo's actual behavior, not just
+  taken on trust from a changelog — see below). `@modelcontextprotocol/sdk`, `@types/node` and
+  `typescript`'s own floor were also widened in `package.json` (`^1.0.0`→`^1.30.0`, `^24.0.0`→`^24.13.3`),
+  but the lockfile had already resolved those exact versions before this change under the old ranges, so
+  there's no real code delta there — just documenting where the range floor actually sits.
+- `z.record(z.unknown())` → `z.record(z.string(), z.unknown())` in `mesh_call`'s `args` and
+  `mesh_publish`'s `fact` — zod 4 requires an explicit key schema; the one-argument shorthand no longer
+  type-checks. Runtime behavior verified identical for every JSON-reachable input.
+- Added explicit `"types": ["node"]` to `tsconfig.json`. TypeScript 6 defaults an unset `types` array to
+  empty; this repo's Node ambient types (`process`, `Buffer`, etc.) were only reaching the program by
+  accident, via a `/// <reference types="node" />` inside `@types/qrcode`'s own `.d.ts`. Dropping or
+  swapping `qrcode` would have silently broken every `node:`-API type check.
+- **Client-visible:** the JSON Schema this server advertises for its 26 argument-taking tools changed
+  shape (not meaning) as a side effect of `@modelcontextprotocol/sdk` 1.30's zod-4-native JSON Schema
+  conversion: `additionalProperties: false` no longer appears at the schema level (the server still
+  rejects unknown keys at runtime — this is a description-only change for any client that renders the
+  raw schema), integer fields now advertise an explicit `maximum` (`Number.MAX_SAFE_INTEGER`), and
+  `mesh_call`'s `args` / `mesh_publish`'s `fact` gained an explicit `propertyNames: {type: "string"}`.
+  No description, default, enum, or required field was lost.
+- zod 4's `.int()` now rejects values outside the safe-integer range at parse time (zod 3 accepted them
+  silently); affects every `.number().int()` argument (`timeout_ms`, `page`, `interval_seconds`,
+  `near.limit`, `max_rooms`, `exec_timeout_seconds`, `count`) — a caller passing an unsafe integer now
+  gets a clean validation error instead of an unsafe value reaching the mesh.
+- `@macula-io/ts` 0.14.0 → 0.14.1, carrying real fixes this server inherits directly: a malformed
+  `realm` argument on `Pool.publish()`/`Pool.call()` was being misclassified as a dead control link,
+  live-verified taking a pool from every healthy link to zero over one caller-side validation error; plus
+  a stale-`unsubscribe()` use-after-reuse bug and an identity-dispose race. Also bumps `macula-go` to
+  v0.6.2, fixing a `Session.Close` GOODBYE send with no write deadline (a withholding peer could block it
+  forever) and, pre-auth: a malformed CBOR frame's entry count was used unbounded as a slice/map capacity
+  hint (a 9-byte frame claiming 2^64-1 entries panics the process before any signature check runs), plus
+  an O(n²) CBOR map-key-dedup decode cost.
+
 ## [0.21.0] - 2026-09-05
 
 ### Added

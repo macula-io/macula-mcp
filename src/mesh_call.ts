@@ -40,7 +40,7 @@ export function registerMeshCall(server: McpServer): void {
             "accepted too and split into procedure + realm for you.",
         ),
       args: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .optional()
         .describe("Structured arguments for the procedure (plain JSON; this server encodes the wire)."),
       timeout_ms: z

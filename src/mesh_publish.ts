@@ -25,7 +25,7 @@ export function registerMeshPublish(server: McpServer): void {
       `never CRUD. Returns the topic and duration_ms. Defaults to ${defaultStation()} if host isn't given.`,
     {
       topic: z.string().describe("Topic name (e.g. 'agents.module_generated')."),
-      fact: z.record(z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire)."),
+      fact: z.record(z.string(), z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire)."),
       host: z
         .string()
         .optional()
