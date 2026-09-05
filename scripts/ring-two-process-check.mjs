@@ -4,7 +4,12 @@
 // other rings it the way mesh_ring does (open a room, sign, call, wait
 // for participant_joined). Exercises the shipped relay handler, the
 // proof verification and the policy end to end, against the default
-// station. Run after `npm run build`:
+// station. Also covers mesh_open_room's own auto-invite (mesh_rooms.ts's
+// openRoomAndInvite): opening a room with BOTH callees as participants in
+// one call and confirming a REAL second process's participant_joined
+// lands, not a same-process simulation of one -- the one thing the unit
+// tests in mesh_rooms.test.ts explicitly cannot cover themselves. Run
+// after `npm run build`:
 //
 //   node scripts/ring-two-process-check.mjs
 //
@@ -209,6 +214,30 @@ async function orchestrate() {
     const r4 = await citizenship.callThenDirect({ procedure: ringsMod.ringProcedure(openReady.node_id), callArgs: citizenship.withIdentityProof({ ...forgedArgs }, badSigned), timeoutMs: 20_000 });
     const rep4 = ringsMod.parseRingReply(r4.payload);
     check("a proof minted for another procedure is declined as unverified", rep4?.answer === 2 && /unverified/.test(rep4.reason ?? ""), JSON.stringify(r4.payload));
+
+    // 5. mesh_open_room's own auto-invite, against both real callees AND the
+    //    ghost, ghost placed in the MIDDLE on purpose: this is exactly the
+    //    scenario the release review flagged as broken under parallel
+    //    ringing (a proof signed at t0 going stale while queued behind an
+    //    earlier call, or two Sessions colliding under one identity) --
+    //    proves the fix (one ring at a time) by showing the callee rung
+    //    AFTER the ghost still gets a fresh, valid proof and a real answer,
+    //    not a spurious stale_proof/unverified decline.
+    const { openRoomAndInvite } = await import(join(DIST, "mesh_rooms.js"));
+    const r5 = await withTimeout(
+      openRoomAndInvite({ purpose: "team formation two-process check", participants: [openReady.node_id, ghost, askReady.node_id], waitJoinSeconds: 30 }),
+      150_000,
+      "openRoomAndInvite with two real participants and one unreachable, ghost in the middle",
+    );
+    const r5open = r5.invited.find((i) => i.to === openReady.node_id);
+    const r5ghost = r5.invited.find((i) => i.to === ghost);
+    const r5ask = r5.invited.find((i) => i.to === askReady.node_id);
+    check("mesh_open_room's own invite rang the open-policy callee, who accepted and GENUINELY joined (a real second process's participant_joined, not a same-process simulation)", r5open?.answer === 1 && r5open.joined === 1, JSON.stringify(r5open));
+    check("the ghost, rung second, correctly comes back unreachable", r5ghost?.unreachable === 1, JSON.stringify(r5ghost));
+    check("the ask-policy callee, rung THIRD (after the ghost), still gets a fresh valid proof and a real deferred answer -- not a stale_proof/unverified decline from a proof signed before the ghost's call even started", r5ask?.answer === 3, JSON.stringify(r5ask));
+    check("aggregate next_step reflects all three real outcomes", /1 accepted|1 joined/.test(r5.next_step) && /1 deferred/.test(r5.next_step) && /1 unreachable/.test(r5.next_step), r5.next_step);
+    const dump5 = await withTimeout(open.ask(`dump ${r5.room_topic}`), 10_000, "open callee dump after mesh_open_room invite");
+    check("open callee is genuinely in the room mesh_open_room opened, confirmed from the callee's own side, not just claimed by the caller", dump5.joined.includes(r5.room_topic), JSON.stringify(dump5.joined));
   } finally {
     open.quit(); ask.quit();
     await new Promise((r) => setTimeout(r, 2_000));

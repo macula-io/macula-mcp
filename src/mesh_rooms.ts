@@ -21,31 +21,34 @@ import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC, KINDS, TALK_KINDS } from "./envelope.js";
 import { ANSWER, MAX_PURPOSE_CHARS, listRings } from "./rings.js";
-import { placeRing, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./mesh_ring.js";
+import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./mesh_ring.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
 
 const MAX_WAIT_SECONDS = 3600;
-/**
- * Shorter than mesh_ring's own default (30s): this runs once per
- * participant IN PARALLEL, so it does not scale with team size, but an
- * opener forming a team of several agents at once still shouldn't pay
- * mesh_ring's single-target default by default. Override with
- * wait_join_seconds for a stronger "everyone's actually in" guarantee.
- */
-const DEFAULT_INVITE_WAIT_JOIN_SECONDS = 15;
 const DEFAULT_INVITE_PURPOSE = "Join this room";
 
-type InviteOutcome = PlaceRingResult | { to: string; failed: 1; reason: string };
+type InviteOutcome = PlaceRingResult | { to: string; room_topic: string; failed: 1; reason: string };
 
 /**
- * Rings every participant with the room already open, in parallel --
+ * Rings every participant with the room already open, ONE AT A TIME --
  * mesh_ring's own placeRing, reused as-is (proof, policy, the
  * accepted/declined/deferred/unreachable answer, the join wait), not
- * reimplemented. allSettled because one participant's ring throwing
- * (should not normally happen once the room is open and `to` is never
- * the opener, but a network exception is always possible) must not
- * cost every OTHER participant their result.
+ * reimplemented. NOT Promise.allSettled/parallel: @macula-io/ts's own
+ * Session serializes every call onto one shared control stream
+ * (session.js's #enqueue -- "only one is ever in flight at a time",
+ * added after concurrent calls corrupted the stream) and, when `host`
+ * is set (or the plain leg falls through to a direct-dial retry),
+ * callThenDirect opens a FRESH Session per call under this agent's own
+ * SAME identity -- two or more of those at once make the station kick
+ * the older one, a live-documented "perpetual ping-pong" (pool.js).
+ * Concurrent placeRing calls also each sign their own proof (a fixed
+ * timestamp) BEFORE queueing, so a participant queued behind others
+ * could have its already-stale-by-then proof rejected as stale_proof --
+ * a real, non-hypothetical failure this composition must not produce.
+ * Sequential means latency is additive, not shared -- see the tool
+ * description below, which says exactly that rather than the false
+ * "runs in parallel" claim an earlier version of this code made.
  */
 async function inviteParticipants(args: {
   roomTopic: string;
@@ -55,13 +58,30 @@ async function inviteParticipants(args: {
   waitJoinSeconds: number;
 }): Promise<InviteOutcome[]> {
   const purpose = args.purpose && args.purpose.trim().length > 0 ? args.purpose : DEFAULT_INVITE_PURPOSE;
-  const settled = await Promise.allSettled(
-    args.participants.map((to) => placeRing({ to, purpose, room_topic: args.roomTopic, waitJoinSeconds: args.waitJoinSeconds, host: args.host })),
-  );
-  return settled.map((s, i): InviteOutcome => {
-    if (s.status === "fulfilled") return s.value;
-    return { to: args.participants[i]!, failed: 1, reason: s.reason instanceof Error ? s.reason.message : String(s.reason) };
+  // Case-insensitively deduped: a repeated node id would otherwise ring
+  // the same agent twice in one call, the second one landing inside
+  // ring_service.ts's own RING_RATE_LIMIT_MS and coming back a spurious
+  // "declined: rate limited" for an agent that never actually declined.
+  const seen = new Set<string>();
+  const deduped = args.participants.filter((to) => {
+    const key = to.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
+  const outcomes: InviteOutcome[] = [];
+  for (const to of deduped) {
+    try {
+      outcomes.push(await placeRing({ to, purpose, room_topic: args.roomTopic, waitJoinSeconds: args.waitJoinSeconds, host: args.host }));
+    } catch (e) {
+      // Should not normally happen once the room is open and `to` is
+      // never the opener, but a network exception is always possible;
+      // one participant's ring throwing must not cost every OTHER
+      // participant their result.
+      outcomes.push({ to, room_topic: args.roomTopic, failed: 1, reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return outcomes;
 }
 
 /** The room's own next_step, given how the invites actually landed -- replaces the old "tell them the topic yourself" text now that they're actually rung. */
@@ -114,7 +134,7 @@ export async function openRoomAndInvite(args: OpenRoomAndInviteArgs): Promise<Op
     purpose: args.purpose,
     participants: toRing,
     host: args.host,
-    waitJoinSeconds: args.waitJoinSeconds ?? DEFAULT_INVITE_WAIT_JOIN_SECONDS,
+    waitJoinSeconds: args.waitJoinSeconds ?? DEFAULT_WAIT_JOIN_SECONDS,
   });
   return { ...res, invited, next_step: summarizeInvites(invited, res.announced_on_central) };
 }
@@ -142,20 +162,22 @@ export function registerMeshRooms(server: McpServer): void {
       "mesh_ring would (an addressed, proven call carrying this room's topic), so you get back who joined, " +
       "who deferred to their own model, who declined, and who was unreachable -- not just a recorded " +
       "intent. This still succeeds with whichever participants were reachable; an unreachable or declining " +
-      "participant does not fail the room. Rings run in parallel, so wall-clock time does not grow with " +
-      "team size, but ringing an unreachable agent can still take up to ~40s regardless of " +
-      "wait_join_seconds. A direct message is a two-party room (one participant). Unguessable, not " +
-      "encrypted: anyone who learns the topic reads it.",
+      "participant does not fail the room. Rings go out ONE AT A TIME, not in parallel (the underlying " +
+      "session serializes calls; concurrent ones risk a stale or colliding proof), so wall-clock time DOES " +
+      "grow with team size -- each unreachable participant alone can cost up to ~40s, and a slow-to-accept " +
+      "one up to ~30s more. Expect a multi-participant call to take a while; it is not instant. A direct " +
+      "message is a two-party room (one participant). Unguessable, not encrypted: anyone who learns the " +
+      "topic reads it.",
     {
       purpose: z.string().max(MAX_PURPOSE_CHARS).optional().describe("Why this room exists, one line. Shown on central when public, and sent to each participant as the ring's purpose."),
       public: zeroOne.optional().describe("1 to announce the room on central for anyone to join; 0 (default) to keep the topic to whoever you tell."),
-      participants: z.array(nodeIdSchema).max(32).optional().describe("Node ids (from mesh_agents) to actually ring and invite into this room, besides yourself."),
+      participants: z.array(nodeIdSchema).max(32).optional().describe("Node ids (from mesh_agents) to actually ring and invite into this room, besides yourself. Rung one at a time, not in parallel."),
       wait_join_seconds: z
         .number()
         .min(0)
         .max(MAX_WAIT_JOIN_SECONDS)
         .optional()
-        .describe(`Per accepting participant, how long to wait for their participant_joined before reporting them not-yet-joined (default ${DEFAULT_INVITE_WAIT_JOIN_SECONDS}, 0 to not wait). Runs in parallel across participants.`),
+        .describe(`Per accepting participant, how long to wait for their participant_joined before reporting them not-yet-joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait). Adds to each participant's own turn, one at a time -- not shared across them.`),
       host: hostSchema,
     },
     async ({ purpose, public: isPublic, participants, wait_join_seconds, host }) => {

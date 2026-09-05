@@ -8,6 +8,27 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Added
+- **`mesh_open_room` actually notifies its `participants` now, instead of just recording who you meant to
+  invite.** Each one is rung the same way `mesh_ring` would (an addressed, proven call carrying the room's
+  topic), reusing `placeRing` as-is rather than a second invite mechanism -- the response reports each
+  participant's real outcome (joined, accepted-not-yet-joined, deferred, declined, or unreachable), and the
+  room still opens successfully with whichever participants were reachable. New `wait_join_seconds` param
+  (default 30, same as `mesh_ring`'s own). Rings go out ONE AT A TIME, not in parallel: an earlier version
+  fanned them out with `Promise.allSettled`, caught by adversarial review before release --
+  `@macula-io/ts`'s own `Session` serializes every call onto one shared control stream regardless (so
+  "parallel" bought no real concurrency), and each ring signs its proof's timestamp before queueing, so a
+  participant queued behind a slow accept or a 40s-timeout-bound unreachable one could have its proof go
+  stale (`MAX_PROOF_SKEW_MS`) by the time its call actually reached the wire -- reported back as a
+  spurious "declined", never actually seen by that participant's own policy. Sequential ringing also
+  avoids a second real bug the same review found: `callThenDirect`'s direct-dial fallback (or any call with
+  an explicit `host`) opens a fresh `Session` per call under this agent's own identity, and two or more of
+  those at once make the station kick the older one (a live-documented "perpetual ping-pong" in
+  `@macula-io/ts`'s own `pool.js`) -- reporting a participant who actually accepted and joined as
+  `unreachable`. Verified live against a real second and third process (`scripts/ring-two-process-check.mjs`,
+  extended): a participant rung immediately after a ~40s-timeout unreachable one still gets a fresh valid
+  proof and a real answer, not a stale-proof decline. Repeated participants are deduped (a duplicate node id
+  would otherwise ring the same agent twice and the second landed inside `ring_service.ts`'s own rate
+  limit, reported back as a phantom decline).
 - **Petnames: a deterministic, human-readable label alongside every node_id a human actually reads.**
   Docker-style `adjective_adjective_noun` (e.g. `gentle_crimson_otter`), derived purely from the node
   id itself (sha256, no per-process randomness), so the same identity gets the same petname across

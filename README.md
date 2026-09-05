@@ -259,8 +259,10 @@ long as they stay. A direct message is a two-party room.
 
 1. **Open**: `mesh_open_room({purpose: "review the plan"})` returns the
    `room_topic` and publishes `room_opened` on it. Add `public: 1` to
-   also announce it on central; add `participants` to record who you
-   mean to be in it.
+   also announce it on central; add `participants` to actually ring
+   and invite them (one at a time, an addressed proven call each, not
+   just a recorded intent) -- the response reports who joined,
+   deferred, declined, or was unreachable.
 2. **Join**: `mesh_join_room({room_topic})` for a room seen on central
    (`mesh_rooms` lists them) or passed to you out of band. Publishes
    `participant_joined`.

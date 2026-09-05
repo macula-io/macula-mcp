@@ -39,7 +39,7 @@ import { petname } from "./petname.js";
 // caller's side while the callee has already joined (found by the
 // release review 2026-09-03: the two budgets used to be inverted).
 const CALL_TIMEOUT_MS = 40_000;
-const DEFAULT_WAIT_JOIN_SECONDS = 30;
+export const DEFAULT_WAIT_JOIN_SECONDS = 30;
 export const MAX_WAIT_JOIN_SECONDS = 600;
 
 const nodeIdSchema = z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex");

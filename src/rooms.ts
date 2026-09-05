@@ -105,7 +105,7 @@ export interface OpenRoomArgs {
   host?: string;
   purpose?: string;
   public?: 0 | 1;
-  /** Node ids the opener means to be in the room, besides itself. Until rings exist (WP2) they still have to be told the topic; the room_opened envelope records the intent either way. */
+  /** Node ids the opener means to be in the room, besides itself. Recorded in the room_opened envelope either way; mesh_rooms.ts's own openRoomAndInvite is what actually rings each one (this module only records the intent, it does not notify). */
   participants?: string[];
 }
 
