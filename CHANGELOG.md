@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-09-05
+
 ### Fixed
 - `mesh_join_realm` was 404ing in production. The join-session route moved from macula.io to
   realm.macula.io (its own app/domain since the 2026-08-30 macula-realm/macula-portal split) and
