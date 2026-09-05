@@ -7,6 +7,20 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Fixed
+- `mesh_join_realm` was 404ing in production. The join-session route moved from macula.io to
+  realm.macula.io (its own app/domain since the 2026-08-30 macula-realm/macula-portal split) and
+  this client's defaults were never updated to follow: `realm.ts`'s `DEFAULT_PORTAL_URL` still pointed
+  at `https://macula.io`, and its `JOIN_PROOF_PROCEDURE` still signed proofs over
+  `"macula_portal.join_session"` rather than macula-realm's own `"macula_realm.join_session"` (verified
+  against that app's `join_session_controller.ex`/`joining.ex` directly) -- fixing only the URL would
+  still have failed signature verification. `MACULA_MCP_PORTAL_URL` is replaced by
+  `MACULA_MCP_REALM_URL` (a new variable, not a repurposed one: portal and realm are genuinely separate
+  services now, and silently changing what an existing variable affects would break anyone already
+  relying on its old meaning). `realm.test.ts`'s coverage of this was previously a false negative --
+  every test overrode the URL via env var and so never actually exercised the real default -- now
+  asserts the real target and procedure string directly, not just the URL-building logic around them.
+
 ## [0.22.0] - 2026-09-05
 
 ### Changed

@@ -1,16 +1,19 @@
 // Realm membership: binding this agent's identity to a human's account in
-// the io.macula realm, through the portal's join-session flow.
+// the io.macula realm, through macula-realm's own join-session flow.
 //
 // Citizenship (citizenship.ts) puts the agent in the mesh-wide directory
 // under its own key -- nobody vouches for it. Joining the realm is the
-// human binding on top: the portal (macula.io) issues a ten-minute join
-// session for the agent's public key, the person opens the session's URL
-// (a link, or the same URL as a QR code), signs in with Hanko, sees which
-// agent on which machine is asking, and confirms. The portal then hands
-// back the org identity (`mri:org:io.macula/<handle>`), a refresh token
-// for its own API, and a realm-CA-signed certificate for this key. That
-// is RFC 8628's device-authorization shape, already live on the portal
-// (`POST/GET /api/v1/join/sessions`); this module is its client.
+// human binding on top: macula-realm (realm.macula.io -- its own separate
+// app/domain since the 2026-08-30 macula-realm/macula-portal split; this
+// flow moved with it, and lived on the bare macula.io domain before that)
+// issues a ten-minute join session for the agent's public key, the person
+// opens the session's URL (a link, or the same URL as a QR code), signs in
+// with Hanko, sees which agent on which machine is asking, and confirms.
+// It then hands back the org identity (`mri:org:io.macula/<handle>`), a
+// refresh token for its own API, and a realm-CA-signed certificate for
+// this key. That is RFC 8628's device-authorization shape, live at
+// realm.macula.io (`POST/GET /api/v1/join/sessions`); this module is its
+// client.
 //
 // Two-step by nature: the link has to reach the person BEFORE anything
 // can be confirmed, so mesh_join_realm returns the link and QR at once
@@ -19,14 +22,18 @@
 // wait_seconds) picks it up in-conversation.
 //
 // Proof of possession: the session is created with a signature over
-// {node_id, timestamp, "macula_portal.join_session"} from the same
+// {node_id, timestamp, "macula_realm.join_session"} from the same
 // identity, built with ownership_proof.ts's proofMessage() (the exact
 // byte layout hecate-citizens'/hecate-mail's *_ownership_proof verifiers
 // require: node_id 32 raw bytes ++ timestamp 8 bytes big-endian ++
 // procedure raw UTF-8, no delimiters) and signed in-process with
 // @macula-io/ts's Identity.sign() -- no macula-cli subprocess -- so
 // nobody can create a session for a key they do not hold and talk a
-// person into confirming it.
+// person into confirming it. The procedure string is part of the signed
+// bytes, not just a label: it must match macula-realm's own
+// join_session_controller.ex/joining.ex @join_procedure exactly, or a
+// perfectly valid signature verifies against the wrong message and is
+// rejected.
 //
 // Credentials live under ~/.config/macula-mcp/realm/<node_id>.json
 // (0600), keyed by the identity they belong to: a session-scoped identity
@@ -41,12 +48,17 @@ import { loadOrGenerateIdentity } from "./macula_ts_client.js";
 import { proofMessage } from "./ownership_proof.js";
 import { serverVersion } from "./version.js";
 
-export const JOIN_PROOF_PROCEDURE = "macula_portal.join_session";
-export const DEFAULT_PORTAL_URL = "https://macula.io";
+export const JOIN_PROOF_PROCEDURE = "macula_realm.join_session";
+export const DEFAULT_REALM_URL = "https://realm.macula.io";
 export const POLL_INTERVAL_MS = 4_000;
 
-export function portalUrl(): string {
-  return (process.env.MACULA_MCP_PORTAL_URL ?? DEFAULT_PORTAL_URL).replace(/\/+$/, "");
+// A new, separate var rather than repurposing the old MACULA_MCP_PORTAL_URL:
+// portal and realm are genuinely separate services/domains now, and
+// silently changing what an existing var's value affects would break
+// anyone already relying on its old meaning without their config changing
+// at all.
+export function realmUrl(): string {
+  return (process.env.MACULA_MCP_REALM_URL ?? DEFAULT_REALM_URL).replace(/\/+$/, "");
 }
 
 export function realmDir(): string {
@@ -60,7 +72,7 @@ export function credentialPath(nodeId: string): string {
 /**
  * "device": DeviceKeyOwnershipProof-only, silent, no human involved --
  * device_membership.ts's auto-join. "citizen": Hanko-bound human, via
- * this module's own portal join-session flow below. A citizen-tier
+ * this module's own realm join-session flow below. A citizen-tier
  * credential is strictly stronger; device_membership.ts's
  * ensureAutoJoin() never overwrites one with a device-tier credential.
  */
@@ -74,9 +86,9 @@ export interface RealmCredential {
   cert_pem?: string;
   refresh_token: string;
   joined_at: string;
-  /** This device's own already-proof-of-possession-verified public key, hex -- stands in for a real citizen DID until macula-passport exists to hold one. Undefined against a portal that hasn't shipped UCAN minting yet. */
+  /** This device's own already-proof-of-possession-verified public key, hex -- stands in for a real citizen DID until macula-passport exists to hold one. Undefined against a realm that hasn't shipped UCAN minting yet. */
   citizen_did?: string;
-  /** Membership UCAN (io.macula as issuer, citizen_did as audience) -- see citizen_did's own doc for why it names a device key today. Undefined against an older/unconfigured portal. */
+  /** Membership UCAN (io.macula as issuer, citizen_did as audience) -- see citizen_did's own doc for why it names a device key today. Undefined against an older/unconfigured realm. */
   ucan?: string;
   /** Defaults to "citizen" on load when absent: every credential written before this field existed came exclusively from the full Hanko join flow below. */
   tier?: RealmTier;
@@ -114,7 +126,7 @@ export function orgHandle(nodeId: string | undefined): string | undefined {
   return nodeId ? handleOf(loadCredential(nodeId)?.org_identity) : undefined;
 }
 
-/** The agent MRI the portal shows the person; the same convention hecate-daemon used, with this server's own name. Pure. */
+/** The agent MRI the realm shows the person; the same convention hecate-daemon used, with this server's own name. Pure. */
 export function agentMri(nodeId: string): string {
   return `mri:agent:io.macula/anonymous/macula-mcp-${nodeId.slice(0, 8)}`;
 }
@@ -144,14 +156,14 @@ export interface CreatedSession {
   expires_at: string;
 }
 
-/** Shape the portal's 201 into a session, or throw with the portal's own error text. Pure. */
+/** Shape the realm's 201 into a session, or throw with the realm's own error text. Pure. */
 export function parseCreated(httpStatus: number, body: unknown): CreatedSession {
   const b = (body ?? {}) as Record<string, unknown>;
   if (httpStatus === 201 && typeof b.session_id === "string" && typeof b.join_url === "string") {
     return { session_id: b.session_id, join_url: b.join_url, expires_at: String(b.expires_at ?? "") };
   }
   const detail = typeof b.error === "string" ? b.error : JSON.stringify(body);
-  throw new Error(`portal refused to create a join session (HTTP ${httpStatus}): ${detail}`);
+  throw new Error(`realm refused to create a join session (HTTP ${httpStatus}): ${detail}`);
 }
 
 export type SessionStatus =
@@ -187,13 +199,13 @@ export function parseSessionStatus(httpStatus: number, body: unknown): SessionSt
     };
   }
   const detail = typeof b.error === "string" ? b.error : JSON.stringify(body);
-  return { status: "error", message: `portal answered HTTP ${httpStatus}: ${detail}` };
+  return { status: "error", message: `realm answered HTTP ${httpStatus}: ${detail}` };
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
 export async function createSession(body: Record<string, unknown>, fetchImpl: FetchLike = fetch): Promise<CreatedSession> {
-  const res = await fetchImpl(`${portalUrl()}/api/v1/join/sessions`, {
+  const res = await fetchImpl(`${realmUrl()}/api/v1/join/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
@@ -202,7 +214,7 @@ export async function createSession(body: Record<string, unknown>, fetchImpl: Fe
 }
 
 export async function pollSession(sessionId: string, fetchImpl: FetchLike = fetch): Promise<SessionStatus> {
-  const res = await fetchImpl(`${portalUrl()}/api/v1/join/sessions/${encodeURIComponent(sessionId)}`, {
+  const res = await fetchImpl(`${realmUrl()}/api/v1/join/sessions/${encodeURIComponent(sessionId)}`, {
     headers: { accept: "application/json" },
   });
   return parseSessionStatus(res.status, await res.json().catch(() => ({})));
@@ -280,7 +292,7 @@ export interface RealmStatus {
 }
 
 export function status(nodeId: string | undefined): RealmStatus {
-  const base: RealmStatus = { portal: portalUrl(), joined: false };
+  const base: RealmStatus = { portal: realmUrl(), joined: false };
   if (!nodeId) return base;
   const cred = loadCredential(nodeId);
   if (cred) {
@@ -320,7 +332,7 @@ async function pollOnce(fetchImpl: FetchLike): Promise<void> {
     if (outcome.status === "confirmed") {
       storeCredential({
         node_id: p.node_id,
-        portal: portalUrl(),
+        portal: realmUrl(),
         org_identity: outcome.org_identity,
         account: outcome.oauth_account,
         cert_pem: outcome.cert_pem,
@@ -363,11 +375,11 @@ export interface BeginResult extends CreatedSession {
 /**
  * Create a join session for the default identity (or hand back the one
  * still pending), start polling it in the background, and return the
- * link plus its QR renderings. Throws when the portal refuses.
+ * link plus its QR renderings. Throws when the realm refuses.
  *
  * node_id and the proof signature both come from ONE loaded Identity
  * (the default identity's seed file, loaded/minted the same way every
- * other in-process tool does it) so the id sent to the portal and the
+ * other in-process tool does it) so the id sent to the realm and the
  * key that actually signed it can never drift apart.
  */
 export async function begin(input: { connectedVia?: string; fetchImpl?: FetchLike } = {}): Promise<BeginResult> {
@@ -422,7 +434,7 @@ export async function waitForOutcome(nodeId: string, seconds: number, fetchImpl:
   return status(nodeId);
 }
 
-/** Forget the pending session (nothing to cancel on the portal side; it expires on its own). */
+/** Forget the pending session (nothing to cancel on the realm side; it expires on its own). */
 export function abandon(): void {
   clearPending();
 }

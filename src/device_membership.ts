@@ -4,7 +4,7 @@
 // membership UCAN bound to the device key alone, no citizen_did/human
 // binding on top. This is the lighter of realm.ts's two membership
 // tiers ("device"); the heavier one ("citizen": Hanko-bound human, via
-// mesh_join_realm/realm.ts's portal join-session flow) is unchanged and
+// mesh_join_realm/realm.ts's realm join-session flow) is unchanged and
 // layers on top of this when a person actually confirms one, not
 // instead of it -- see realm.ts's RealmCredential.tier.
 //

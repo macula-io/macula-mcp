@@ -344,29 +344,30 @@ itself), pass `prove_identity: true` to `mesh_call` -- see that tool above.
 ### `mesh_join_realm`
 
 Binds this identity to a person's account in the io.macula realm through
-the portal's join session. Two-step by nature, because the link has to
-reach the person before anything can be confirmed:
+macula-realm's own join session (realm.macula.io -- its own app/domain since
+the 2026-08-30 macula-realm/macula-portal split). Two-step by nature, because
+the link has to reach the person before anything can be confirmed:
 
 1. Call it with no arguments. It returns the join link as text, as a QR code
    drawn in the terminal, and as a PNG image block, plus the session id and
    its ten-minute expiry. Show the link or the QR to the person.
-2. The person opens or scans it, signs in at the portal, and confirms.
+2. The person opens or scans it, signs in at the realm, and confirms.
 3. Call it again with `wait_seconds` (up to 600) to pick up the outcome, or
    just read `mesh://identity` later -- the server polls in the background and
-   stores the credential the moment the portal confirms.
+   stores the credential the moment the realm confirms.
 
 A second call while a session is still pending reuses it rather than creating
 another; an expired session is reported and a new call gets a fresh link.
 Already joined: the tool reports the membership and does nothing else.
 
 The session is created with a proof of possession (in-process
-`Identity.sign()` over `{node_id, timestamp, "macula_portal.join_session"}`),
+`Identity.sign()` over `{node_id, timestamp, "macula_realm.join_session"}`),
 so nobody can start a session for a key they do not hold and talk a person
 into confirming it.
 
 Where it lands: `~/.config/macula-mcp/realm/<node_id>.json`, 0600, holding the
-org identity, the portal refresh token and the realm certificate. Delete the
-file to forget the membership locally; the portal keeps its side until the
+org identity, the realm's refresh token and the realm certificate. Delete the
+file to forget the membership locally; the realm keeps its side until the
 token is revoked there.
 
 ### `mesh_serve` / `mesh_unserve`

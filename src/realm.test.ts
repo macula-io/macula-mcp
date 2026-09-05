@@ -17,23 +17,43 @@ let dir = "";
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "macula-mcp-realm-test-"));
   process.env.MACULA_MCP_REALM_DIR = dir;
-  process.env.MACULA_MCP_PORTAL_URL = "https://portal.test/";
+  process.env.MACULA_MCP_REALM_URL = "https://realm.test/";
   realm.abandon();
 });
 
 afterEach(async () => {
   realm.abandon();
   delete process.env.MACULA_MCP_REALM_DIR;
-  delete process.env.MACULA_MCP_PORTAL_URL;
+  delete process.env.MACULA_MCP_REALM_URL;
   await rm(dir, { recursive: true, force: true });
 });
 
 describe("pure shapes", () => {
+  // Found live 2026-09-05: the join-session route moved from macula.io to
+  // realm.macula.io (its own app/domain since the 2026-08-30 split), and
+  // this client's DEFAULT_PORTAL_URL/JOIN_PROOF_PROCEDURE were never
+  // updated to follow -- every mesh_join_realm call 404'd in production.
+  // Every other test in this file overrides MACULA_MCP_REALM_URL in
+  // beforeEach and so never actually exercised the real default; check it
+  // directly here, not through the URL-building logic alone, or a
+  // regression back to the wrong host/procedure would pass silently again.
+  it("the real default target is realm.macula.io, and the proof procedure matches macula-realm's own join_session_controller/joining.ex", () => {
+    const previous = process.env.MACULA_MCP_REALM_URL;
+    delete process.env.MACULA_MCP_REALM_URL;
+    try {
+      expect(realm.realmUrl()).toBe("https://realm.macula.io");
+    } finally {
+      if (previous !== undefined) process.env.MACULA_MCP_REALM_URL = previous;
+    }
+    expect(realm.DEFAULT_REALM_URL).toBe("https://realm.macula.io");
+    expect(realm.JOIN_PROOF_PROCEDURE).toBe("macula_realm.join_session");
+  });
+
   it("agentMri names this server and the identity's first bytes", () => {
     expect(realm.agentMri(NODE)).toBe("mri:agent:io.macula/anonymous/macula-mcp-4f769c4e");
   });
 
-  it("joinRequest sends the key base64 (as the portal decodes it), the agent info, and the proof", () => {
+  it("joinRequest sends the key base64 (as the realm decodes it), the agent info, and the proof", () => {
     const req = realm.joinRequest({ nodeId: NODE, proof: { timestamp: 7, signature: "ab" }, connectedVia: "opencode 1.18.25" });
     expect(Buffer.from(req.public_key as string, "base64").toString("hex")).toBe(NODE);
     expect(req.agent_mri).toBe(realm.agentMri(NODE));
@@ -44,10 +64,10 @@ describe("pure shapes", () => {
     expect(String(info.version)).toMatch(/^macula-mcp \d+\.\d+\.\d+/);
   });
 
-  it("parseCreated accepts the portal's 201 and throws with the portal's error text otherwise", () => {
-    expect(realm.parseCreated(201, { session_id: "s1", join_url: "https://portal.test/join/s1", expires_at: "2026-09-02T14:00:00Z" })).toEqual({
+  it("parseCreated accepts the realm's 201 and throws with the realm's error text otherwise", () => {
+    expect(realm.parseCreated(201, { session_id: "s1", join_url: "https://realm.test/join/s1", expires_at: "2026-09-02T14:00:00Z" })).toEqual({
       session_id: "s1",
-      join_url: "https://portal.test/join/s1",
+      join_url: "https://realm.test/join/s1",
       expires_at: "2026-09-02T14:00:00Z",
     });
     expect(() => realm.parseCreated(400, { error: "invalid_public_key_size" })).toThrow(/invalid_public_key_size/);
@@ -70,7 +90,7 @@ describe("pure shapes", () => {
     expect(realm.parseSessionStatus(404, { error: "session_not_found" }).status).toBe("error");
   });
 
-  it("parseSessionStatus picks up citizen_did/ucan when the portal sends them", () => {
+  it("parseSessionStatus picks up citizen_did/ucan when the realm sends them", () => {
     const confirmed = realm.parseSessionStatus(200, {
       status: "confirmed",
       refresh_token: "mrt_1",
@@ -88,12 +108,12 @@ describe("pure shapes", () => {
   });
 
   it("renders the join URL as a terminal QR and as a PNG", async () => {
-    const ascii = await realm.qrTerminal("https://portal.test/join/s1");
+    const ascii = await realm.qrTerminal("https://realm.test/join/s1");
     expect(ascii.split("\n").length).toBeGreaterThan(8);
     // plain glyphs only: no ANSI escapes, nothing but blocks, half-blocks and spaces
     expect(ascii).not.toMatch(/\u001b\[/);
     expect(ascii.replace(/[\u2588\u2580\u2584 \n]/g, "")).toBe("");
-    const png = Buffer.from(await realm.qrPngBase64("https://portal.test/join/s1"), "base64");
+    const png = Buffer.from(await realm.qrPngBase64("https://realm.test/join/s1"), "base64");
     expect(png.subarray(0, 4).toString("hex")).toBe("89504e47");
   });
 });
@@ -102,7 +122,7 @@ describe("credential store", () => {
   it("round-trips a credential, 0600, keyed by node_id, and reports it as joined", async () => {
     const path = realm.storeCredential({
       node_id: NODE,
-      portal: "https://portal.test",
+      portal: "https://realm.test",
       org_identity: "mri:org:io.macula/rgfaber",
       account: "a@b",
       cert_pem: "PEM",
@@ -127,10 +147,10 @@ describe("credential store", () => {
     expect((s as Record<string, unknown>).ucan).toBeUndefined();
   });
 
-  it("a credential from an older/unconfigured portal (no citizen_did/ucan) still reports joined, just without them", async () => {
+  it("a credential from an older/unconfigured realm (no citizen_did/ucan) still reports joined, just without them", async () => {
     realm.storeCredential({
       node_id: NODE,
-      portal: "https://portal.test",
+      portal: "https://realm.test",
       org_identity: "mri:org:io.macula/rgfaber",
       refresh_token: "mrt_1",
       joined_at: "2026-09-02T14:00:00Z",
@@ -143,7 +163,7 @@ describe("credential store", () => {
 
   it("an absent or unreadable credential is simply not joined", () => {
     expect(realm.loadCredential(NODE)).toBeUndefined();
-    expect(realm.status(NODE)).toEqual({ portal: "https://portal.test", joined: false });
+    expect(realm.status(NODE)).toEqual({ portal: "https://realm.test", joined: false });
     expect(realm.status(undefined).joined).toBe(false);
   });
 
@@ -152,7 +172,7 @@ describe("credential store", () => {
       join(dir, `${NODE}.json`),
       JSON.stringify({
         node_id: NODE,
-        portal: "https://portal.test",
+        portal: "https://realm.test",
         org_identity: "mri:org:io.macula/rgfaber",
         refresh_token: "mrt_1",
         joined_at: "2026-09-02T14:00:00Z",
@@ -178,12 +198,12 @@ describe("credential store", () => {
   });
 });
 
-describe("join flow against a fake portal", () => {
+describe("join flow against a fake realm", () => {
   // begin() signs via loadOrGenerateIdentity(defaultIdentityPath()) --
   // point MACULA_MCP_IDENTITY at a real seed file so a real Ed25519
   // identity gets loaded and used, same as the live server. NODE for
   // this describe block is that identity's own node id, computed from
-  // the seed once so the fake-portal script/assertions below can name
+  // the seed once so the fake-realm script/assertions below can name
   // it -- not the arbitrary top-level NODE constant.
   let NODE = "";
   const SEED = new Uint8Array(32).fill(0x7a);
@@ -204,7 +224,7 @@ describe("join flow against a fake portal", () => {
     delete process.env.MACULA_MCP_IDENTITY;
   });
 
-  function fakePortal(script: Array<{ status: number; body: unknown }>) {
+  function fakeRealm(script: Array<{ status: number; body: unknown }>) {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetchImpl: realm.FetchLike = async (url, init) => {
       calls.push({ url, init });
@@ -215,14 +235,14 @@ describe("join flow against a fake portal", () => {
   }
 
   it("begin creates the session with a proof bound to the join procedure -- a real Identity.sign() signature over proofMessage()'s exact byte layout -- and returns link + QR", async () => {
-    const portal = fakePortal([{ status: 201, body: { session_id: "s1", join_url: "https://portal.test/join/s1", expires_at: "2999-01-01T00:00:00Z" } }]);
-    const began = await realm.begin({ connectedVia: "opencode 1.18.25", fetchImpl: portal.fetchImpl });
+    const server = fakeRealm([{ status: 201, body: { session_id: "s1", join_url: "https://realm.test/join/s1", expires_at: "2999-01-01T00:00:00Z" } }]);
+    const began = await realm.begin({ connectedVia: "opencode 1.18.25", fetchImpl: server.fetchImpl });
     expect(began.reused).toBe(false);
     expect(began.node_id).toBe(NODE);
-    expect(began.join_url).toBe("https://portal.test/join/s1");
+    expect(began.join_url).toBe("https://realm.test/join/s1");
     expect(began.qr_terminal.length).toBeGreaterThan(0);
-    expect(portal.calls[0].url).toBe("https://portal.test/api/v1/join/sessions");
-    const sent = JSON.parse(String(portal.calls[0].init?.body));
+    expect(server.calls[0].url).toBe("https://realm.test/api/v1/join/sessions");
+    const sent = JSON.parse(String(server.calls[0].init?.body));
     expect(typeof sent.proof.timestamp).toBe("number");
     expect(Math.abs(Date.now() - sent.proof.timestamp)).toBeLessThan(5_000);
     // This is exactly hecate-citizens'/hecate-mail's *_ownership_proof
@@ -234,16 +254,16 @@ describe("join flow against a fake portal", () => {
     // bound to the join procedure specifically -- a proof for any other procedure must not verify
     expect(verifyOwnershipProof({ node_id: NODE, proof: sent.proof, procedure: "some.other.procedure" })).toEqual({ ok: 0, reason: "bad_signature" });
     expect(realm.status(NODE).pending?.session_id).toBe("s1");
-    // a second begin while pending reuses the same session rather than spamming the portal
-    const again = await realm.begin({ fetchImpl: portal.fetchImpl });
+    // a second begin while pending reuses the same session rather than spamming the realm
+    const again = await realm.begin({ fetchImpl: server.fetchImpl });
     expect(again.reused).toBe(true);
     expect(again.session_id).toBe("s1");
-    expect(portal.calls.length).toBe(1);
+    expect(server.calls.length).toBe(1);
   });
 
   it("waitForOutcome stores the credential once the person confirms, including the membership UCAN", async () => {
-    const portal = fakePortal([
-      { status: 201, body: { session_id: "s2", join_url: "https://portal.test/join/s2", expires_at: "2999-01-01T00:00:00Z" } },
+    const server = fakeRealm([
+      { status: 201, body: { session_id: "s2", join_url: "https://realm.test/join/s2", expires_at: "2999-01-01T00:00:00Z" } },
       { status: 200, body: { status: "pending", expires_at: "2999-01-01T00:00:00Z" } },
       {
         status: 200,
@@ -259,8 +279,8 @@ describe("join flow against a fake portal", () => {
         },
       },
     ]);
-    await realm.begin({ fetchImpl: portal.fetchImpl });
-    const after = await realm.waitForOutcome(NODE, 30, portal.fetchImpl);
+    await realm.begin({ fetchImpl: server.fetchImpl });
+    const after = await realm.waitForOutcome(NODE, 30, server.fetchImpl);
     expect(after.joined).toBe(true);
     expect(after.org_identity).toBe("mri:org:io.macula/rgfaber");
     expect(after.citizen_did).toBe(NODE);
@@ -271,25 +291,25 @@ describe("join flow against a fake portal", () => {
     expect(realm.status(NODE).pending).toBeUndefined();
   });
 
-  it("waitForOutcome against an older portal (no citizen_did/ucan in the confirm body) still joins cleanly", async () => {
-    const portal = fakePortal([
-      { status: 201, body: { session_id: "s2b", join_url: "https://portal.test/join/s2b", expires_at: "2999-01-01T00:00:00Z" } },
+  it("waitForOutcome against an older realm (no citizen_did/ucan in the confirm body) still joins cleanly", async () => {
+    const server = fakeRealm([
+      { status: 201, body: { session_id: "s2b", join_url: "https://realm.test/join/s2b", expires_at: "2999-01-01T00:00:00Z" } },
       { status: 200, body: { status: "confirmed", refresh_token: "mrt_2b", org_identity: "mri:org:io.macula/rgfaber" } },
     ]);
-    await realm.begin({ fetchImpl: portal.fetchImpl });
-    const after = await realm.waitForOutcome(NODE, 30, portal.fetchImpl);
+    await realm.begin({ fetchImpl: server.fetchImpl });
+    const after = await realm.waitForOutcome(NODE, 30, server.fetchImpl);
     expect(after.joined).toBe(true);
     expect(after.has_ucan).toBe(false);
     expect(realm.loadCredential(NODE)?.ucan).toBeUndefined();
   });
 
   it("an expired session is reported, not silently retried forever", async () => {
-    const portal = fakePortal([
-      { status: 201, body: { session_id: "s3", join_url: "https://portal.test/join/s3", expires_at: "2999-01-01T00:00:00Z" } },
+    const server = fakeRealm([
+      { status: 201, body: { session_id: "s3", join_url: "https://realm.test/join/s3", expires_at: "2999-01-01T00:00:00Z" } },
       { status: 410, body: { error: "session_expired" } },
     ]);
-    await realm.begin({ fetchImpl: portal.fetchImpl });
-    const after = await realm.waitForOutcome(NODE, 5, portal.fetchImpl);
+    await realm.begin({ fetchImpl: server.fetchImpl });
+    const after = await realm.waitForOutcome(NODE, 5, server.fetchImpl);
     expect(after.joined).toBe(false);
     expect(after.pending).toBeUndefined();
     expect(after.error).toMatch(/expired/);
