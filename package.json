@@ -49,6 +49,7 @@
     "@macula-io/ts": "^0.14.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "qrcode": "^1.5.4",
+    "yaml": "^2.9.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {

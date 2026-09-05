@@ -7,6 +7,33 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+- Goose support: `bin/install`/`bin/uninstall`/`bin/status` now detect and configure Goose
+  (`~/.config/goose/config.yaml`) alongside the existing 5 clients. Goose's config is YAML, not JSON
+  like every other client here, and its entry shape is a `type`-tagged union (`extensions.<id>: {enabled,
+  type: stdio, name, cmd, args}`), not the `mcpServers`/`{command, args}` shape the others share --
+  verified directly against a real `~/.config/goose/config.yaml` (Goose 1.48.0) and against
+  `block/goose`'s own source (`ExtensionEntry`/`ExtensionConfig::Stdio` in
+  `crates/goose/src/config/extensions.rs` and `crates/goose/src/agents/extension.rs`), not assumed from
+  the other 5 adapters' shape. `config_merge.ts`'s merge/remove primitives now take an optional
+  `format: "yaml"` (default `"json"`) so the same backup/idempotent-merge/conflict logic serves both
+  formats instead of duplicating it.
+
+### Fixed
+- README's client-support line named Cline and Continue as directly supported and omitted Claude
+  Desktop, Windsurf, and opencode entirely -- neither matched the real installer registry
+  (`src/install/mcp_clients/index.ts`'s `ALL` array). Cline and Continue have no adapter here; they work
+  like any other MCP client, via manual config. Fixed to name the real 6 auto-registered clients (now
+  including Goose) and reframe Cline/Continue accurately.
+- `macula-mcp-doctor` and `macula-mcp-status` both hardcoded a `mcpServers.macula` JSON lookup to read
+  back a client's own recorded entry, so a correctly-configured opencode install silently read back as
+  unconfigured -- `doctor` reported "not configured, skipping" and `status` reported "✗ macula NOT
+  registered" for an install that actually worked, found while adding Goose (whose YAML file would have
+  hit the same bug, worse: a parse exception rather than a silent miss). Both now read through each
+  client's own `CONTAINER_KEY`/`CONFIG_FORMAT`/`toSpawnCommand`, the same rules `config_merge.ts` already
+  used to write the entry in the first place. Reproduced against the original code before fixing it;
+  `doctor.test.ts`/`status.test.ts` (new) pin the fix for every registered client.
+
 ## [0.22.1] - 2026-09-05
 
 ### Fixed

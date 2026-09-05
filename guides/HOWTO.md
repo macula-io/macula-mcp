@@ -100,6 +100,20 @@ cannot parse, so if yours is JSONC add the entry by hand:
 }
 ```
 
+**Goose.** Detected and configured by `macula-mcp-install` (`~/.config/goose/config.yaml`, under
+`extensions`). This is Goose's real config format — YAML, with a `type`-tagged entry, not the
+`mcpServers`/`{command, args}` shape every other client here uses. If you need to add it by hand:
+
+```yaml
+extensions:
+  macula:
+    enabled: true
+    type: stdio
+    name: macula
+    cmd: npx
+    args: ["-y", "-p", "@macula-io/mcp", "macula-mcp"]
+```
+
 ---
 
 ## 2. Tools

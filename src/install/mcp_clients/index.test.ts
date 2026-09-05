@@ -33,7 +33,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ALL } from "./index.js";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { ALL, type ClientAdapter } from "./index.js";
+
+// Read/write a client's config file in its own real format -- YAML for
+// Goose, JSON for everyone else. Using the wrong parser here would
+// either throw immediately (JSON.parse on YAML) or silently succeed on
+// nonsense, neither of which is what "matches index.test.ts's existing
+// coverage shape" means for a client whose file format actually differs.
+function readConfigFile(client: ClientAdapter, raw: string): Record<string, unknown> {
+  return client.CONFIG_FORMAT === "yaml"
+    ? (parseYaml(raw) as Record<string, unknown>)
+    : (JSON.parse(raw) as Record<string, unknown>);
+}
+
+function stringifyConfigFile(client: ClientAdapter, data: Record<string, unknown>): string {
+  return client.CONFIG_FORMAT === "yaml" ? stringifyYaml(data) : JSON.stringify(data);
+}
 
 let fakeHome = "";
 // Hoisted above the imports above by vitest's transform, so every
@@ -68,9 +84,10 @@ describe("MCP client adapters", () => {
         expect(result.outcome).toBe("added");
         expect(result.configPath).toBe(client.configPath());
 
-        const parsed = JSON.parse(await readFile(client.configPath(), "utf8"));
+        const raw = await readFile(client.configPath(), "utf8");
+        const parsed = readConfigFile(client, raw);
         const container = client.CONTAINER_KEY ?? "mcpServers";
-        expect(parsed[container].macula).toEqual(
+        expect((parsed[container] as Record<string, unknown>).macula).toEqual(
           client.EXPECTED_ENTRY ?? {
             command: "npx",
             args: ["-y", "-p", "@macula-io/mcp", "macula-mcp"],
@@ -89,14 +106,20 @@ describe("MCP client adapters", () => {
         // Something else's entry must survive uninstall -- proves this
         // isn't just truncating the file.
         const container = client.CONTAINER_KEY ?? "mcpServers";
-        const before = JSON.parse(await readFile(client.configPath(), "utf8"));
+        const before = readConfigFile(client, await readFile(client.configPath(), "utf8")) as Record<
+          string,
+          Record<string, unknown>
+        >;
         before[container]["someone-elses-server"] = { command: "whatever" };
-        await writeFile(client.configPath(), JSON.stringify(before));
+        await writeFile(client.configPath(), stringifyConfigFile(client, before));
 
         const result = await client.uninstall();
         expect(result.outcome).toBe("replaced");
 
-        const after = JSON.parse(await readFile(client.configPath(), "utf8"));
+        const after = readConfigFile(client, await readFile(client.configPath(), "utf8")) as Record<
+          string,
+          Record<string, unknown>
+        >;
         expect(after[container].macula).toBeUndefined();
         expect(after[container]["someone-elses-server"]).toEqual({ command: "whatever" });
       });

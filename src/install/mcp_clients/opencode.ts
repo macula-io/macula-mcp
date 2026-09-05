@@ -51,3 +51,13 @@ export async function install(): Promise<MergeResult> {
 export async function uninstall(): Promise<MergeResult> {
   return removeEntry(configPath(), CONTAINER_KEY, "macula");
 }
+
+// opencode's entry packs the whole launch command into one array
+// (`command: ["npx", "-y", ...]`) rather than a separate command/args
+// pair -- doctor.ts needs this to know how to actually spawn it.
+export function toSpawnCommand(entry: Record<string, unknown>): { command: string; args: string[] } | undefined {
+  const cmd = entry.command;
+  if (!Array.isArray(cmd) || cmd.length === 0 || typeof cmd[0] !== "string") return undefined;
+  const [command, ...args] = cmd as string[];
+  return { command, args };
+}

@@ -18,9 +18,11 @@
 
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { ALL } from "../install/mcp_clients/index.js";
+import { ALL, type ClientAdapter } from "../install/mcp_clients/index.js";
 import { serverVersion } from "../version.js";
 
 const VERSION = serverVersion();
@@ -64,14 +66,36 @@ interface EntryInfo {
   args: string[];
 }
 
-async function readMaculaEntry(configPath: string): Promise<EntryInfo | undefined> {
+// Reads the raw `macula` entry from a client's REAL config file and
+// normalizes it into {command, args} -- the two things needed to spawn
+// it. Every client's config lives under a different top-level key, in
+// either JSON or YAML (Goose), with an entry shape that's either the
+// standard {command, args} or something else entirely (opencode packs
+// the whole thing into one `command` array; Goose uses `cmd`/`args`) --
+// this must go through the SAME container-key/format/shape rules
+// index.ts's ClientAdapter declares, or it silently mis-normalizes (or
+// outright fails to parse) any client whose shape differs from the
+// original {mcpServers: {macula: {command, args}}} assumption. Verified
+// this was a real bug, not hypothetical: before this fix, a correctly
+// configured opencode entry read back as `undefined` here every time,
+// so doctor reported "not configured, skipping" for an install that
+// actually worked.
+export async function readMaculaEntry(client: ClientAdapter): Promise<EntryInfo | undefined> {
+  const configPath = client.configPath();
   if (!existsSync(configPath)) return undefined;
   try {
     const raw = await readFile(configPath, "utf8");
     if (raw.trim().length === 0) return undefined;
-    const parsed = JSON.parse(raw) as { mcpServers?: Record<string, EntryInfo> };
-    const entry = parsed.mcpServers?.macula;
-    return entry ? { command: entry.command, args: entry.args ?? [] } : undefined;
+    const parsed = (
+      client.CONFIG_FORMAT === "yaml" ? parseYaml(raw) : JSON.parse(raw)
+    ) as Record<string, unknown>;
+    const container = parsed[client.CONTAINER_KEY ?? "mcpServers"] as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    const entry = container?.macula;
+    if (!entry) return undefined;
+    if (client.toSpawnCommand) return client.toSpawnCommand(entry);
+    return { command: entry.command as string, args: (entry.args as string[] | undefined) ?? [] };
   } catch {
     return undefined;
   }
@@ -123,7 +147,7 @@ async function main(): Promise<void> {
   console.log("[macula-mcp doctor] spawning each configured client's real command -- this can take a moment.\n");
 
   for (const client of targets) {
-    const entry = await readMaculaEntry(client.configPath());
+    const entry = await readMaculaEntry(client);
     if (!entry) {
       console.log(`  ${pad(client.CLIENT_LABEL)} not configured, skipping`);
       continue;
@@ -154,7 +178,11 @@ function pad(s: string): string {
   return (s + " ".repeat(18)).slice(0, 18);
 }
 
-main().catch((e) => {
-  console.error(`[macula-mcp doctor] fatal: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
-});
+// Guarded so this file can be imported (doctor.test.ts imports
+// readMaculaEntry) without running the CLI as a side effect of import.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error(`[macula-mcp doctor] fatal: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  });
+}

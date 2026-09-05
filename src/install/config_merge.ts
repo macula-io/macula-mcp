@@ -17,6 +17,7 @@
 import { readFile, writeFile, mkdir, stat, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 export interface McpServerEntry {
   command: string;
@@ -24,8 +25,11 @@ export interface McpServerEntry {
   env?: Record<string, string>;
 }
 
-/** The top-level key a client keeps its MCP servers under: `mcpServers` for Claude Code/Cursor/Windsurf/Claude Desktop, `mcp` for opencode. */
+/** The top-level key a client keeps its MCP servers under: `mcpServers` for Claude Code/Cursor/Windsurf/Claude Desktop, `mcp` for opencode, `extensions` for Goose. */
 export const DEFAULT_CONTAINER_KEY = "mcpServers";
+
+/** Serialization format of the config file. `json` for every client but Goose, which is YAML. */
+export type ConfigFormat = "json" | "yaml";
 
 export type MergeOutcome = "added" | "replaced" | "unchanged" | "skipped_conflict";
 
@@ -37,24 +41,31 @@ export interface MergeResult {
 }
 
 /**
- * Read the JSON config at `path`. If absent, returns an empty object.
- * If present but malformed, throws — never returns a partially-parsed
- * value (callers can decide whether to abort or copy-aside and
- * re-create).
+ * Read the config at `path`, in the given format. If absent, returns
+ * an empty object. If present but malformed, throws — never returns a
+ * partially-parsed value (callers can decide whether to abort or
+ * copy-aside and re-create).
  */
-async function readConfig(path: string): Promise<Record<string, unknown>> {
+async function readConfig(path: string, format: ConfigFormat): Promise<Record<string, unknown>> {
   if (!existsSync(path)) return {};
   const raw = await readFile(path, "utf8");
   if (raw.trim().length === 0) return {};
   try {
+    if (format === "yaml") {
+      return (parseYaml(raw) ?? {}) as Record<string, unknown>;
+    }
     return JSON.parse(raw) as Record<string, unknown>;
   } catch (e) {
     throw new Error(
-      `existing config at ${path} is not valid JSON. ` +
+      `existing config at ${path} is not valid ${format.toUpperCase()}. ` +
         `Refusing to overwrite. Fix it manually or remove the file and re-run. ` +
         `(parser said: ${e instanceof Error ? e.message : String(e)})`,
     );
   }
+}
+
+function serialize(format: ConfigFormat, data: Record<string, unknown>): string {
+  return format === "yaml" ? stringifyYaml(data) : JSON.stringify(data, null, 2) + "\n";
 }
 
 /**
@@ -86,16 +97,19 @@ export async function mergeMcpServer(
 /**
  * Same as mergeMcpServer, for a client whose servers live under another
  * top-level key and/or with another entry shape (opencode: `mcp`, with
- * `{type, command: string[], enabled}`).
+ * `{type, command: string[], enabled}`; Goose: `extensions`, YAML not
+ * JSON, with `{enabled, type, cmd, args: string[]}` -- pass
+ * `opts.format: "yaml"` for those).
  */
 export async function mergeEntry(
   path: string,
   containerKey: string,
   name: string,
   entry: McpServerEntry | Record<string, unknown>,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; format?: ConfigFormat } = {},
 ): Promise<MergeResult> {
-  const existing = await readConfig(path);
+  const format = opts.format ?? "json";
+  const existing = await readConfig(path, format);
   const servers = (existing[containerKey] as Record<string, Record<string, unknown>>) ?? {};
   const current = servers[name];
 
@@ -124,7 +138,7 @@ export async function mergeEntry(
 
   const bak = await backup(path);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(next, null, 2) + "\n", "utf8");
+  await writeFile(path, serialize(format, next), "utf8");
 
   return {
     outcome: current ? "replaced" : "added",
@@ -149,7 +163,9 @@ export async function removeEntry(
   path: string,
   containerKey: string,
   name: string,
+  opts: { format?: ConfigFormat } = {},
 ): Promise<MergeResult> {
+  const format = opts.format ?? "json";
   if (!existsSync(path)) {
     return {
       outcome: "unchanged",
@@ -157,7 +173,7 @@ export async function removeEntry(
       message: "config does not exist; nothing to remove",
     };
   }
-  const existing = await readConfig(path);
+  const existing = await readConfig(path, format);
   const servers = (existing[containerKey] as Record<string, Record<string, unknown>>) ?? {};
   if (!(name in servers)) {
     return {
@@ -169,7 +185,7 @@ export async function removeEntry(
   const { [name]: _removed, ...rest } = servers;
   const next = { ...existing, [containerKey]: rest };
   const bak = await backup(path);
-  await writeFile(path, JSON.stringify(next, null, 2) + "\n", "utf8");
+  await writeFile(path, serialize(format, next), "utf8");
   return {
     outcome: "replaced",
     configPath: path,

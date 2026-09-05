@@ -3,8 +3,8 @@
 // config in one shot.
 //
 // Scope:
-//   * Detects installed MCP clients (Claude Code, Claude Desktop,
-//     Cursor, Windsurf) by their canonical paths.
+//   * Detects installed MCP clients (see mcp_clients/index.ts's ALL for
+//     the current list) by their canonical paths.
 //   * Safe-merges a `macula` mcpServers entry into each — idempotent
 //     re-runs are no-ops; conflicting entries skip with a remediation
 //     hint unless --force is passed.
@@ -60,7 +60,7 @@ Detects installed MCP clients and registers the 'macula' MCP server.
 Idempotent; safe-merges into existing configs and backs up first.
 
 Supported MCP clients:
-  claude-code, claude-desktop, cursor, windsurf
+  ${ALL.map((c) => c.CLIENT_ID).join(", ")}
 
 Flags:
   --force                Replace an existing 'macula' entry that

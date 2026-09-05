@@ -13,8 +13,11 @@
 </p>
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that
-exposes the Macula mesh to any agent harness: Claude Code, Cursor, Cline,
-Continue, and anything else that speaks MCP.
+exposes the Macula mesh to any agent harness that speaks MCP. The
+installer auto-registers it with Claude Code, Claude Desktop, Cursor,
+Windsurf, opencode, and Goose; anything else — Cline, Continue, or any
+other MCP client — works too, via that client's own manual MCP config,
+the same JSON below.
 
 ```jsonc
 // .mcp.json (or your harness's MCP config)
@@ -671,8 +674,8 @@ Both check Node.js, `npm install -g @macula-io/mcp` (this package ships
 **zero lifecycle scripts of its own**, so no `--allow-scripts` flag is
 needed either), then run `macula-mcp-install` to register the `macula` MCP
 server with every detected client (Claude Code, Claude Desktop, Cursor,
-Windsurf, opencode) — safe-merges into existing configs and backs them up
-first. Idempotent; re-running is a no-op if everything's already current.
+Windsurf, opencode, Goose) — safe-merges into existing configs and backs
+them up first. Idempotent; re-running is a no-op if everything's already current.
 If more than one client is detected in a real terminal, it asks which to
 register with (Enter for all).
 
