@@ -25,6 +25,22 @@ Continue, and anything else that speaks MCP.
 }
 ```
 
+**Before you install: this isn't a standalone tool.** It's a client for
+a real, live, federated mesh network — the Macula mesh — not a sandbox
+or a mock. Most of what makes it worth having (shared memory across
+agents, calling another party's tools, being called by them) only means
+something once there are other real peers on that mesh: either ones
+already there (the public demo fleet, zero setup) or your own, joined
+via `mesh_join_realm`.
+
+That said, you don't need any of that to confirm it's actually working.
+Once installed, ask your agent to call `mesh_call` with procedure
+`io.macula.echo` and no other arguments — it reaches a real,
+always-on service over the real public fleet and echoes back whatever
+you send, with zero configuration and nothing to join first. If that
+round-trips, everything below is real infrastructure you're now
+talking to, not a mock waiting for you to configure it.
+
 ## What it is
 
 The 2026 equivalent of "an editor plugin" is an MCP server: editor- and
