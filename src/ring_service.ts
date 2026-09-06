@@ -62,6 +62,7 @@ import { fileURLToPath } from "node:url";
 import { defaultStation, onShutdown } from "./mesh_config.js";
 import { callThenDirect, signIdentity, withIdentityProof } from "./citizenship.js";
 import * as serve from "./serve.js";
+import type { ServeArgs } from "./serve.js";
 import * as rooms from "./rooms.js";
 import { verifyOwnershipProof } from "./ownership_proof.js";
 import { isAllowlisted, loadContactPolicy, POLICY, policyLabel, type ContactPolicy, type Policy } from "./policy.js";
@@ -90,6 +91,13 @@ export { POLICY, type Policy } from "./policy.js";
 
 /** Generous: the relay round trip is local, but the room tap and publish inside it hit the mesh. */
 const HANDLER_TIMEOUT_SECONDS = 30;
+/** Renewal retry backoff after a failed attempt -- same doubling shape as presence.ts's own leg
+ * reconnect, capped at the steady-state renewal interval itself (no reason to retry faster than
+ * that once backed off that far). Resets to the base on the next SUCCESSFUL renewal. Without this,
+ * a single failed renewal used to wait the full DIRECT_DIAL_RENEW_SECONDS (20 min) before trying
+ * again -- now serve.ts's own serve-then-swap fix means a failed renewal no longer tears down the
+ * still-working previous registration, but retrying sooner still recovers direct-dial reach faster. */
+export const RENEW_RETRY_BASE_MS = 1_000;
 /**
  * The ring endpoint is also published as a direct-dial DHT record, so a
  * caller on another station can resolve this agent's station and dial
@@ -159,6 +167,8 @@ export interface RingServiceStatus {
 }
 
 let lastError: string | undefined;
+/** Consecutive renewal FAILURES since the last success -- drives scheduleRenew()'s backoff, reset to 0 on any successful renewal (including the very first, in start()). */
+let renewAttempt = 0;
 
 export function status(): RingServiceStatus {
   const policy = loadContactPolicy();
@@ -182,6 +192,39 @@ export function status(): RingServiceStatus {
 
 export function isActive(): boolean {
   return state !== undefined;
+}
+
+/**
+ * (Re)schedules the direct-dial renewal after `delayMs`: on success, resets
+ * the backoff and schedules the NEXT renewal after the full steady-state
+ * interval; on failure, records `lastError` (same shape as before) and
+ * retries sooner, doubling each consecutive failure up to
+ * DIRECT_DIAL_RENEW_SECONDS itself. Never throws -- a scheduled renewal
+ * failing just reschedules, the same "never let one bad tick stop the
+ * next" shape presence.ts's own beat()/scheduleReconnect() already use.
+ * No-ops (via the `state` check) if stop()/stopSync() ran while this
+ * timer was in flight, so a reconnect attempt started just before
+ * shutdown doesn't resurrect a timer after teardown.
+ */
+function scheduleRenew(registration: ServeArgs, delayMs: number): NodeJS.Timeout {
+  const timer = setTimeout(() => {
+    void serve.serve(registration).then(
+      () => {
+        lastError = undefined;
+        renewAttempt = 0;
+        if (state) state.renewTimer = scheduleRenew(registration, DIRECT_DIAL_RENEW_SECONDS * 1000);
+      },
+      (e) => {
+        lastError = `direct-dial renewal failed: ${e instanceof Error ? e.message : String(e)}`;
+        console.error(`ring service: ${lastError}`);
+        renewAttempt += 1;
+        const retryMs = Math.min(DIRECT_DIAL_RENEW_SECONDS * 1000, RENEW_RETRY_BASE_MS * 2 ** (renewAttempt - 1));
+        if (state) state.renewTimer = scheduleRenew(registration, retryMs);
+      },
+    );
+  }, delayMs);
+  timer.unref();
+  return timer;
 }
 
 /** The shell command serve.ts's runExec runs per inbound ring: this same node binary, the shipped relay, the socket to reach us on. Each argument is single-quoted for POSIX sh (runExec spawns with `shell: true`, Node's own equivalent of `sh -c <this string>`) so a `$`, backtick or space anywhere in process.execPath, this package's install path, or MACULA_MCP_RING_SOCKET_DIR cannot be interpreted by the shell. */
@@ -242,13 +285,8 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
     throw e;
   }
   lastError = undefined;
-  const renewTimer = setInterval(() => {
-    void serve.serve(registration).catch((e) => {
-      lastError = `direct-dial renewal failed: ${e instanceof Error ? e.message : String(e)}`;
-      console.error(`ring service: ${lastError}`);
-    });
-  }, DIRECT_DIAL_RENEW_SECONDS * 1000);
-  renewTimer.unref();
+  renewAttempt = 0;
+  const renewTimer = scheduleRenew(registration, DIRECT_DIAL_RENEW_SECONDS * 1000);
   state = { nodeId: args.nodeId, host, procedure, socketPath, server, renewTimer };
   onShutdown(stopSync);
   return status();
@@ -482,7 +520,7 @@ export async function stop(): Promise<void> {
 
 function stopSync(): void {
   if (!state) return;
-  clearInterval(state.renewTimer);
+  clearTimeout(state.renewTimer);
   state.server.close();
   rmSync(state.socketPath, { force: true });
   state = undefined;

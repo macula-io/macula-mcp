@@ -157,6 +157,80 @@ describe("serve: one Session per registered procedure (regression)", () => {
   });
 });
 
+describe("serve: a failed re-registration never tears down a still-working previous one (regression)", () => {
+  // Found live 2026-09-06: the old teardown-then-serve order closed the
+  // existing registration UNCONDITIONALLY before attempting the
+  // replacement, so a renewal (ring_service.ts calls serve() again with
+  // otherwise-identical args purely to refresh its direct-dial TTL) whose
+  // connect/serve() failed left the procedure completely unregistered --
+  // not degraded, GONE -- until the next renewal happened to succeed.
+  // loadOrGenerateIdentity returns a FRESH Identity object on every call even
+  // for the same seed path (real behavior, see macula_ts_client.ts) -- these
+  // tests mock it that way deliberately, not as a shared object, so a
+  // dispose-ordering bug (disposing the identity the NEW registration still
+  // needs) would actually be caught rather than masked by object aliasing.
+  it("a re-registration whose connectWithFallback() throws leaves the previous session serving, not closed", async () => {
+    const oldIdentity = fakeIdentity();
+    const goodSession = fakeSession(new Uint8Array(32).fill(1));
+    mocks.loadOrGenerateIdentity.mockImplementationOnce(() => oldIdentity).mockImplementationOnce(() => fakeIdentity());
+    let calls = 0;
+    mocks.connectWithFallback.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) return goodSession;
+      throw new Error("connection: write frame: Application error 0x0 (remote): closed");
+    });
+    const { serve } = await import("./serve.js");
+
+    const first = await serve({ procedure: "agent.x.ring", exec: "true" });
+    expect(first.registered).toBe(true);
+    expect(goodSession.serve).toHaveBeenCalledTimes(1);
+
+    await expect(serve({ procedure: "agent.x.ring", exec: "true" })).rejects.toThrow(/Application error 0x0/);
+
+    // The actual regression: the old, still-good session/identity must
+    // survive a failed replacement attempt, not be torn down first.
+    expect(goodSession.close).not.toHaveBeenCalled();
+    expect(oldIdentity.dispose).not.toHaveBeenCalled();
+  });
+
+  it("a re-registration whose connect succeeds but session.serve() itself throws also leaves the previous session serving", async () => {
+    const goodSession = fakeSession(new Uint8Array(32).fill(1));
+    const badSession = { ...fakeSession(new Uint8Array(32).fill(2)), serve: vi.fn().mockRejectedValue(new Error("Session is already serving")) };
+    mocks.loadOrGenerateIdentity.mockImplementation(() => fakeIdentity());
+    let calls = 0;
+    mocks.connectWithFallback.mockImplementation(async () => (calls++ === 0 ? goodSession : badSession));
+    const { serve } = await import("./serve.js");
+
+    await serve({ procedure: "agent.x.ring", exec: "true" });
+    await expect(serve({ procedure: "agent.x.ring", exec: "true" })).rejects.toThrow(/already serving/);
+
+    expect(goodSession.close).not.toHaveBeenCalled();
+    // The failed replacement's own half-open session/identity must still be cleaned up -- it never
+    // reached the registry, so nothing else will ever close it otherwise.
+    expect(badSession.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("succeeds and closes the OLD session+identity only once a genuinely NEW one is confirmed serving (the happy-path renewal)", async () => {
+    const oldIdentity = fakeIdentity();
+    const newIdentity = fakeIdentity();
+    const oldSession = fakeSession(new Uint8Array(32).fill(1));
+    const newSession = fakeSession(new Uint8Array(32).fill(2));
+    mocks.loadOrGenerateIdentity.mockImplementationOnce(() => oldIdentity).mockImplementationOnce(() => newIdentity);
+    let calls = 0;
+    mocks.connectWithFallback.mockImplementation(async () => (calls++ === 0 ? oldSession : newSession));
+    const { serve } = await import("./serve.js");
+
+    await serve({ procedure: "agent.x.ring", exec: "true" });
+    const res = await serve({ procedure: "agent.x.ring", exec: "true" });
+
+    expect(res.registered).toBe(true);
+    expect(newSession.serve).toHaveBeenCalledTimes(1);
+    expect(oldSession.close).toHaveBeenCalledTimes(1); // old one retired, but only after the new one was live
+    expect(oldIdentity.dispose).toHaveBeenCalledTimes(1); // the OLD identity is retired...
+    expect(newIdentity.dispose).not.toHaveBeenCalled(); // ...never the one the new registration now owns
+  });
+});
+
 describe("serve with direct: true", () => {
   it("puts the DHT advertisement on a SEPARATE Session/identity from the one serve() itself runs on -- never the same one (regression: @macula-io/ts's own #requireHandleNotServing guard rejects putProcedureAdvertisement on a Session that is actively serve()-ing, which broke every direct-dial registration, ring_service.ts's ring endpoint included, until this split existed)", async () => {
     const { advertiseSession, servingSessionFor } = wireSessions();

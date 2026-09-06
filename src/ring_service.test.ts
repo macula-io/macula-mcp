@@ -483,4 +483,58 @@ describe("start / status / stop", () => {
     expect(await svc.start({ nodeId: ME })).toMatchObject({ serving: 0, disabled: 1 });
     expect(serveModule.serve).not.toHaveBeenCalled();
   });
+
+  // Found live 2026-09-06: a failed direct-dial renewal used to wait the
+  // full DIRECT_DIAL_RENEW_SECONDS (20 min) before trying again, on top of
+  // serve.ts's own teardown-then-serve bug (fixed separately, serve.test.ts)
+  // -- together they could leave an agent unringable for the whole gap.
+  // This covers the retry-sooner half: backoff on failure, reset on success.
+  it("retries a failed renewal sooner than the steady-state interval, backing off on repeated failures and resetting on success", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.MACULA_MCP_RING_SOCKET_DIR = process.env.TMPDIR ?? "/tmp";
+      const serveModule = await import("./serve.js");
+      const svc = await import("./ring_service.js");
+      vi.mocked(serveModule.serve)
+        .mockResolvedValueOnce({ procedure: ringProcedure(ME), registered: true, serving: [ringProcedure(ME)] }) // start()'s own initial registration
+        .mockRejectedValueOnce(new Error("connection: write frame: Application error 0x0 (remote): closed")) // 1st renewal: fails
+        .mockRejectedValueOnce(new Error("still down")) // 2nd renewal (after backoff #1): fails again
+        .mockResolvedValueOnce({ procedure: ringProcedure(ME), registered: true, serving: [ringProcedure(ME)] }); // 3rd renewal (after backoff #2): succeeds
+
+      await svc.start({ nodeId: ME, host: "station:4433" });
+      expect(svc.status().error).toBeUndefined();
+      expect(serveModule.serve).toHaveBeenCalledTimes(1);
+
+      // Before the first renewal fires at all, nothing has changed.
+      await vi.advanceTimersByTimeAsync(svc.DIRECT_DIAL_RENEW_SECONDS * 1000 - 1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(1);
+
+      // First renewal fires (fails) -- retries at the BASE backoff, not another full interval.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(2);
+      expect(svc.status().error).toContain("Application error 0x0");
+      await vi.advanceTimersByTimeAsync(svc.RENEW_RETRY_BASE_MS - 1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(2); // not yet -- confirms it's not still waiting on the full interval either
+
+      // Second attempt fires (fails again) -- next retry backs off further (doubled).
+      await vi.advanceTimersByTimeAsync(1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(svc.RENEW_RETRY_BASE_MS * 2 - 1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(3); // the doubled delay, not just the base again
+
+      // Third attempt fires and SUCCEEDS -- error clears, backoff resets.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(4);
+      expect(svc.status().error).toBeUndefined();
+
+      // Next renewal after a success waits the FULL steady-state interval again, not the backoff base.
+      await vi.advanceTimersByTimeAsync(svc.RENEW_RETRY_BASE_MS * 2);
+      expect(serveModule.serve).toHaveBeenCalledTimes(4);
+
+      await svc.stop();
+      delete process.env.MACULA_MCP_RING_SOCKET_DIR;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

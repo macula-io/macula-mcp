@@ -241,18 +241,29 @@ const DEFAULT_EXEC_TIMEOUT_SECONDS = 10;
 
 /** Registers `args.procedure` on its OWN persistent Session+identity (see
  * this module's own top comment for why each registration needs its own,
- * not a shared one). Re-registering the same procedure tears down its
- * previous Session first. */
+ * not a shared one). Re-registering the same procedure (including
+ * ring_service.ts's own periodic direct-dial renewal, which calls this
+ * with otherwise-identical args just to refresh the DHT TTL) connects and
+ * serve()s the REPLACEMENT first and only retires the previous Session
+ * once that succeeds -- serve-then-swap, not teardown-then-serve.
+ *
+ * Found live 2026-09-06: the old teardown-then-serve order closed the
+ * existing registration UNCONDITIONALLY before attempting the new one, so
+ * a renewal whose connect/serve() failed (a real, observed QUIC-level
+ * "connection: write frame: Application error 0x0 (remote): closed") left
+ * the procedure completely unregistered -- not degraded, GONE -- until
+ * the next renewal happened to succeed. For ring_service.ts specifically
+ * that meant every incoming ring silently failed as unreachable for the
+ * whole gap, with nothing surfacing it beyond a `lastError` string nobody
+ * was polling. Connecting the identity dedupe on the station's own side
+ * (macula_station_listener.erl's per-identity peer dedupe, the same one
+ * presence.ts's own doc extensively documents) already retires the OLD
+ * session the moment the NEW one under the same identity connects
+ * successfully -- this function's own explicit teardown of `existing`
+ * below is then just cleaning up a session the station most likely
+ * already closed, not doing the actual swap itself. */
 export async function serve(args: ServeArgs): Promise<ServeResult> {
   try {
-    const existing = registrations.get(args.procedure);
-    if (existing) {
-      await existing.stop().catch(() => {});
-      await existing.session.close(existing.identity).catch(() => {});
-      existing.identity.dispose();
-      registrations.delete(args.procedure);
-    }
-
     const execTimeoutMs = (args.execTimeoutSeconds ?? DEFAULT_EXEC_TIMEOUT_SECONDS) * 1000;
     const identity = loadOrGenerateIdentity(serveProcedureIdentityPath(args.procedure));
     let session: Session;
@@ -270,6 +281,11 @@ export async function serve(args: ServeArgs): Promise<ServeResult> {
       identity.dispose();
       throw e;
     }
+
+    // The replacement is live -- now it's safe to retire the previous
+    // registration, if any. A failure anywhere above never reaches here,
+    // so `existing` (still fully serving) is untouched by a failed retry.
+    const existing = registrations.get(args.procedure);
     registrations.set(args.procedure, {
       procedure: args.procedure,
       exec: args.exec,
@@ -278,6 +294,11 @@ export async function serve(args: ServeArgs): Promise<ServeResult> {
       session,
       stop,
     });
+    if (existing) {
+      await existing.stop().catch(() => {});
+      await existing.session.close(existing.identity).catch(() => {});
+      existing.identity.dispose();
+    }
 
     if (args.direct) {
       // Advertise the SERVING session's own resolved station (the one

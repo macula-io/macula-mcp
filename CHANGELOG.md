@@ -5,6 +5,39 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.24.2] - 2026-09-06
+
+### Fixed
+- **A failed direct-dial renewal could leave an agent completely unringable,
+  not just direct-dial-degraded, for up to `DIRECT_DIAL_RENEW_SECONDS` (20
+  min) at a time.** `ring_service.ts`'s renewal timer calls `serve.serve()`
+  again every 20 minutes purely to refresh its direct-dial DHT TTL; that
+  function unconditionally tore down the EXISTING registration before
+  attempting the replacement, so a renewal whose connect/`session.serve()`
+  failed (a real, observed QUIC-level `connection: write frame: Application
+  error 0x0 (remote): closed`) left the procedure completely unregistered --
+  not degraded, gone -- until the next renewal happened to succeed. Found
+  live 2026-09-06 via a real cross-session reproduction: an agent's own
+  `mesh_hello` kept reporting `serving: 1` with a stale, never-clearing
+  `error` field for over an hour while three separate incoming rings from
+  another agent never arrived at all, not even transiently.
+  - `serve.ts`: `serve()` now connects and `serve()`s the REPLACEMENT
+    session first and only retires the previous one once that succeeds
+    (serve-then-swap, not teardown-then-serve) -- a failed re-registration
+    (renewal or otherwise) now leaves the still-working previous session
+    exactly as it was.
+  - `ring_service.ts`: a failed renewal now retries with backoff
+    (`RENEW_RETRY_BASE_MS`, doubling, capped at the steady-state interval)
+    instead of waiting the full fixed interval again: recovers direct-dial
+    reach far faster after a transient failure, and resets to the base on
+    the next successful renewal.
+  - Does **not** fully explain a separate, still-open mystery (a distinct
+    ring that was confirmed recorded as pending/deferred, then later
+    vanished from both `pending` and `recent`) -- that shape requires
+    something deleting or hiding an already-written local row, which
+    neither of these fixes touches. Left open, not force-unified with this
+    one.
+
 ## [0.24.1] - 2026-09-06
 
 ### Fixed
