@@ -52,6 +52,17 @@
 //      per-`from` rate limit -- a caller (even one this agent's policy
 //      would otherwise accept) cannot make this agent spawn unbounded
 //      watcher processes or fill its disk.
+//
+// (2026-09-06, macula-mcp#2) A failed direct-dial RENEWAL already retried
+// with backoff (scheduleRenew), but the very FIRST serve() call on
+// start() did not -- it just threw once. presence.ts calls start() only
+// when its own state is undefined, i.e. exactly once per process, so a
+// transient failure on that one attempt (the same QUIC-level error class
+// renewal already retries) left an agent heartbeating fine but
+// permanently unringable for its whole lifetime, with nothing anywhere
+// retrying. start() now schedules its own retry (same backoff shape) on
+// an initial failure; stop()/stopSync() cancel it if the agent goes
+// offline before it succeeds.
 
 import { createServer, type Server, type Socket } from "node:net";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
@@ -169,6 +180,22 @@ export interface RingServiceStatus {
 let lastError: string | undefined;
 /** Consecutive renewal FAILURES since the last success -- drives scheduleRenew()'s backoff, reset to 0 on any successful renewal (including the very first, in start()). */
 let renewAttempt = 0;
+/**
+ * Consecutive INITIAL registration failures since the last success -- drives
+ * scheduleStartRetry()'s backoff. Separate from renewAttempt: reaching a
+ * first-ever registration is not a "renewal" and has no already-working
+ * registration to protect while it retries.
+ */
+let startAttempt = 0;
+/**
+ * Handle for a pending initial-registration retry. `state` stays undefined
+ * for the whole time a retry is pending (start() only sets it on success),
+ * so stop()/stopSync() need this separately to cancel a retry that hasn't
+ * produced a `state` yet -- otherwise a stop() during that window would
+ * leave the retry to fire later and re-register after the agent meant to
+ * go fully offline.
+ */
+let startRetryTimer: NodeJS.Timeout | undefined;
 
 export function status(): RingServiceStatus {
   const policy = loadContactPolicy();
@@ -248,6 +275,8 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
   if (disabled()) return status();
   if (state && state.nodeId === args.nodeId) return status();
   if (state) await stop();
+  clearTimeout(startRetryTimer);
+  startRetryTimer = undefined;
   const host = args.host ?? defaultStation();
   const dir = process.env.MACULA_MCP_RING_SOCKET_DIR ?? join(homedir(), ".macula-mcp");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -282,9 +311,15 @@ export async function start(args: { host?: string; nodeId: string }): Promise<Ri
     server.close();
     rmSync(socketPath, { force: true });
     lastError = e instanceof Error ? e.message : String(e);
+    console.error(`ring service: initial registration failed, retrying: ${lastError}`);
+    startAttempt += 1;
+    const retryMs = Math.min(DIRECT_DIAL_RENEW_SECONDS * 1000, RENEW_RETRY_BASE_MS * 2 ** (startAttempt - 1));
+    startRetryTimer = setTimeout(() => void start(args).catch(() => {}), retryMs);
+    startRetryTimer.unref();
     throw e;
   }
   lastError = undefined;
+  startAttempt = 0;
   renewAttempt = 0;
   const renewTimer = scheduleRenew(registration, DIRECT_DIAL_RENEW_SECONDS * 1000);
   state = { nodeId: args.nodeId, host, procedure, socketPath, server, renewTimer };
@@ -506,19 +541,22 @@ export async function answerPendingRing(
   }
 }
 
-/** Unregisters the procedure (best effort) and closes the socket. */
+/** Unregisters the procedure (best effort), closes the socket, and cancels any pending initial-registration retry. */
 export async function stop(): Promise<void> {
-  if (!state) return;
-  const { procedure } = state;
-  try {
-    await serve.unserve(procedure);
-  } catch {
-    // best effort -- the daemon may already be gone; stopSync closes our side either way
+  if (state) {
+    const { procedure } = state;
+    try {
+      await serve.unserve(procedure);
+    } catch {
+      // best effort -- the daemon may already be gone; stopSync closes our side either way
+    }
   }
   stopSync();
 }
 
 function stopSync(): void {
+  clearTimeout(startRetryTimer);
+  startRetryTimer = undefined;
   if (!state) return;
   clearTimeout(state.renewTimer);
   state.server.close();

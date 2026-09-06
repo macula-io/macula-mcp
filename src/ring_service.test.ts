@@ -537,4 +537,73 @@ describe("start / status / stop", () => {
       vi.useRealTimers();
     }
   });
+
+  // Confirmed live 2026-09-06 (macula-mcp#2): a lazymesh instance was fully
+  // present on the mesh (heartbeat healthy) but permanently unringable --
+  // the VERY FIRST serve() call, not a renewal, hit a transient failure,
+  // and unlike a failed renewal (which retries with backoff, see the test
+  // above), a failed INITIAL registration used to throw once and never try
+  // again: presence.ts's own doStart() calls ring_service.start() only
+  // when its own `state` is undefined, i.e. exactly once per process -- a
+  // later mesh_hello takes the `if (state)` early-return branch and never
+  // touches ring_service again. This agent looked reachable forever after
+  // (heartbeat kept going) while being unringable for the rest of its life.
+  it("retries a failed INITIAL registration with backoff instead of giving up forever", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.MACULA_MCP_RING_SOCKET_DIR = process.env.TMPDIR ?? "/tmp";
+      const serveModule = await import("./serve.js");
+      const svc = await import("./ring_service.js");
+      vi.mocked(serveModule.serve)
+        .mockRejectedValueOnce(new Error("connection: write frame: Application error 0x0 (remote): closed")) // the very first attempt
+        .mockRejectedValueOnce(new Error("still down")) // 1st retry (after backoff #1): fails again
+        .mockResolvedValueOnce({ procedure: ringProcedure(ME), registered: true, serving: [ringProcedure(ME)] }); // 2nd retry (after backoff #2): succeeds
+
+      await expect(svc.start({ nodeId: ME, host: "station:4433" })).rejects.toThrow("Application error 0x0");
+      expect(svc.status()).toMatchObject({ serving: 0 });
+      expect(svc.status().error).toContain("Application error 0x0");
+      expect(serveModule.serve).toHaveBeenCalledTimes(1);
+
+      // Retries at the BASE backoff, not the full steady-state interval a renewal would wait.
+      await vi.advanceTimersByTimeAsync(svc.RENEW_RETRY_BASE_MS - 1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(2); // 2nd attempt fires, fails again
+
+      // Backs off further (doubled) before the next attempt.
+      await vi.advanceTimersByTimeAsync(svc.RENEW_RETRY_BASE_MS * 2 - 1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(serveModule.serve).toHaveBeenCalledTimes(3); // 3rd attempt fires and succeeds
+
+      expect(svc.status()).toMatchObject({ serving: 1, procedure: ringProcedure(ME) });
+      expect(svc.status().error).toBeUndefined();
+
+      await svc.stop();
+      delete process.env.MACULA_MCP_RING_SOCKET_DIR;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stop() cancels a pending initial-registration retry instead of leaving it to fire later", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.MACULA_MCP_RING_SOCKET_DIR = process.env.TMPDIR ?? "/tmp";
+      const serveModule = await import("./serve.js");
+      const svc = await import("./ring_service.js");
+      vi.mocked(serveModule.serve).mockRejectedValueOnce(new Error("down"));
+
+      await expect(svc.start({ nodeId: ME, host: "station:4433" })).rejects.toThrow("down");
+      expect(serveModule.serve).toHaveBeenCalledTimes(1);
+
+      await svc.stop();
+      await vi.advanceTimersByTimeAsync(svc.DIRECT_DIAL_RENEW_SECONDS * 1000);
+      expect(serveModule.serve).toHaveBeenCalledTimes(1); // no zombie retry fired after stop()
+
+      delete process.env.MACULA_MCP_RING_SOCKET_DIR;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
