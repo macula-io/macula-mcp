@@ -145,6 +145,11 @@ export function listAgents(page: number, pageSize: number): RosterPage {
   return { total, agents };
 }
 
+/** Every currently-known node_id, unpaginated -- for resolve_node_id.ts's petname reverse-lookup, where every candidate must be checked, not just one page. This is one operator's own contacts list, not a public directory, so a full-table scan here is never a real cost. */
+export function listAllNodeIds(): string[] {
+  return (open().prepare("SELECT node_id FROM agents").all() as { node_id: string }[]).map((r) => r.node_id);
+}
+
 /** Drops agents not seen in maxAgeSeconds -- lazy cleanup, not a background timer. Returns rows removed. */
 export function pruneStale(maxAgeSeconds: number): number {
   const cutoff = new Date(Date.now() - maxAgeSeconds * 1000).toISOString();

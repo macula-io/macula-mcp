@@ -21,10 +21,11 @@ import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC, KINDS, TALK_KINDS } from "./envelope.js";
-import { ANSWER, MAX_PURPOSE_CHARS, listRings } from "./rings.js";
+import { ANSWER, MAX_PURPOSE_CHARS, listRings, RingError } from "./rings.js";
 import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./mesh_ring.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
+import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
 
 const MAX_WAIT_SECONDS = 3600;
 const DEFAULT_INVITE_PURPOSE = "Join this room";
@@ -128,8 +129,18 @@ export interface OpenRoomAndInviteResult extends rooms.OpenRoomResult {
  */
 export async function openRoomAndInvite(args: OpenRoomAndInviteArgs): Promise<OpenRoomAndInviteResult> {
   if (args.purpose !== undefined) assertNoLikelySecret(args.purpose, "purpose");
-  const res = await rooms.openRoom({ host: args.host, purpose: args.purpose, public: args.public, participants: args.participants });
-  const toRing = (args.participants ?? []).filter((id) => id.toLowerCase() !== res.opened.from.toLowerCase());
+  // Resolved ONCE, up front, before rooms.openRoom() -- it bakes participants
+  // verbatim into the room_opened envelope it publishes to the real mesh, so
+  // an unresolved petname must never reach that far. Also means a petname and
+  // its own equivalent raw node_id in the same list correctly dedupe below,
+  // since inviteParticipants()'s own dedup runs on these post-resolution.
+  const participants = (args.participants ?? []).map((p) => {
+    const resolved = resolveNodeId(p);
+    if (!resolved.ok) throw new RingError(resolved.error);
+    return resolved.node_id;
+  });
+  const res = await rooms.openRoom({ host: args.host, purpose: args.purpose, public: args.public, participants });
+  const toRing = participants.filter((id) => id.toLowerCase() !== res.opened.from.toLowerCase());
   const invited = await inviteParticipants({
     roomTopic: res.room_topic,
     purpose: args.purpose,
@@ -139,8 +150,6 @@ export async function openRoomAndInvite(args: OpenRoomAndInviteArgs): Promise<Op
   });
   return { ...res, invited, next_step: summarizeInvites(invited, res.announced_on_central) };
 }
-
-const nodeIdSchema = z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex");
 const messageIdSchema = z.string().length(32).regex(/^[0-9a-f]+$/, "must be lowercase hex");
 const zeroOne = z.number().int().min(0).max(1);
 const hostSchema = z
@@ -172,7 +181,7 @@ export function registerMeshRooms(server: McpServer): void {
     {
       purpose: z.string().max(MAX_PURPOSE_CHARS).optional().describe("Why this room exists, one line. Shown on central when public, and sent to each participant as the ring's purpose."),
       public: zeroOne.optional().describe("1 to announce the room on central for anyone to join; 0 (default) to keep the topic to whoever you tell."),
-      participants: z.array(nodeIdSchema).max(32).optional().describe("Node ids (from mesh_agents) to actually ring and invite into this room, besides yourself. Rung one at a time, not in parallel."),
+      participants: z.array(nodeIdOrPetnameSchema).max(32).optional().describe("Node ids or petnames (from mesh_agents) to actually ring and invite into this room, besides yourself. Rung one at a time, not in parallel."),
       wait_join_seconds: z
         .number()
         .min(0)

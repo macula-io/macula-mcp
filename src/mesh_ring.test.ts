@@ -4,6 +4,8 @@ import { proofMessage } from "./ownership_proof.js";
 import { ANSWER, closeRings, getRing, ringReplyProofProcedure } from "./rings.js";
 import { newRoomTopic } from "./envelope.js";
 import { closeTranscript } from "./lobby_transcript.js";
+import { closeRoster, upsertAgent } from "./roster.js";
+import { petname } from "./petname.js";
 
 const ME = "c".repeat(64);
 
@@ -40,14 +42,17 @@ vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePres
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";
   process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB = ":memory:";
+  process.env.MACULA_MCP_ROSTER_DB = ":memory:";
   mocks.currentNodeId.mockReturnValue(ME);
   mocks.isJoined.mockReturnValue(true); // a pre-supplied room_topic is always treated as already joined
 });
 afterEach(() => {
   closeRings();
   closeTranscript();
+  closeRoster();
   delete process.env.MACULA_MCP_RINGS_DB;
   delete process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB;
+  delete process.env.MACULA_MCP_ROSTER_DB;
   vi.resetAllMocks();
 });
 
@@ -133,5 +138,38 @@ describe("placeRing", () => {
     const { placeRing } = await import("./mesh_ring.js");
     await expect(placeRing({ to: ME, purpose: "p", room_topic: newRoomTopic() })).rejects.toThrow(/own node id/);
     expect(mocks.callThenDirect).not.toHaveBeenCalled();
+  });
+
+  describe("accepts a petname for `to`, resolved against the roster (resolve_node_id.ts)", () => {
+    it("rings the RESOLVED node_id, not the petname string itself", async () => {
+      const callee = keypair();
+      upsertAgent({ node_id: callee.node_id, at: new Date().toISOString() });
+      mocks.signIdentity.mockReturnValue({ node_id: ME, timestamp: 1, signature: "sig" });
+      mocks.callThenDirect.mockRejectedValue(new Error("temporary_relay_failure"));
+      const { placeRing } = await import("./mesh_ring.js");
+
+      const res = await placeRing({ to: petname(callee.node_id), purpose: "pair", room_topic: newRoomTopic() });
+
+      expect(res.to).toBe(callee.node_id); // resolved, not the petname
+      expect(mocks.callThenDirect).toHaveBeenCalledWith(expect.objectContaining({ procedure: `agent.${callee.node_id}.ring` }));
+    });
+
+    it("refuses, never calling out to the mesh at all, when the petname doesn't resolve", async () => {
+      const { placeRing } = await import("./mesh_ring.js");
+      await expect(placeRing({ to: "nobody_seen_with_this_petname", purpose: "p", room_topic: newRoomTopic() })).rejects.toThrow(/no roster entry with petname/);
+      expect(mocks.callThenDirect).not.toHaveBeenCalled();
+    });
+
+    it("refuses on a genuine collision rather than silently picking one candidate to ring", async () => {
+      // Same real sha256 collision as resolve_node_id.test.ts's own coverage.
+      const COLLIDER_1 = "0".repeat(62) + "e5";
+      const COLLIDER_2 = "0".repeat(60) + "0122";
+      upsertAgent({ node_id: COLLIDER_1, at: new Date().toISOString() });
+      upsertAgent({ node_id: COLLIDER_2, at: new Date().toISOString() });
+      const { placeRing } = await import("./mesh_ring.js");
+
+      await expect(placeRing({ to: petname(COLLIDER_1), purpose: "p", room_topic: newRoomTopic() })).rejects.toThrow(/matches 2 different agents/);
+      expect(mocks.callThenDirect).not.toHaveBeenCalled();
+    });
   });
 });

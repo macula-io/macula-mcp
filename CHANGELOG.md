@@ -5,6 +5,51 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.25.0] - 2026-09-06
+
+### Added
+- **`mesh_ring`'s `to`, `mesh_open_room`'s `participants`, and
+  `mesh_trust_agent`/`mesh_untrust_agent`'s `node_id` now accept a petname
+  ("upbeat_savage_weasel") instead of the raw 64-hex node_id.** Feature
+  request from Raf. New `resolve_node_id.ts` is the one shared seam: a
+  64-hex input passes through as-is; anything else is tried as a petname
+  against this process's own roster (the same persistent store
+  `mesh_agents` reads). This is inherently one-way -- `petname()` is a
+  sha256 hash with no inverse, so a petname can only resolve for an agent
+  you've actually seen (a phone contacts list, not a public directory).
+  Zero matches or more than one (petnames collide at ~1-in-64,000 by
+  design) both refuse with a clear, actionable error naming the real
+  candidate node_ids -- never a silent guess.
+  - `mesh_ring`'s `placeRing()` resolves `to` once at its own top, which
+    also covers `mesh_open_room`'s ring-inviting path for free (it calls
+    `placeRing` per participant).
+  - `mesh_open_room`'s whole `participants` array is resolved BEFORE
+    `rooms.openRoom()` is ever called, since that function bakes
+    `participants` verbatim into the `room_opened` envelope it publishes
+    to the real mesh -- an unresolved petname must never reach the wire.
+    As a side effect, a petname and its own equivalent raw node_id in the
+    same list now correctly dedupe to one ring, since both resolve to the
+    identical value before the existing dedup logic runs.
+  - `mesh_trust_agent`/`mesh_untrust_agent` resolve explicitly (they never
+    go through `placeRing`) -- this does **not** weaken this repo's
+    existing "keyed by node_id only, never operator_name or petname" trust
+    boundary: resolution happens entirely locally before the allowlist is
+    ever touched, and what actually gets stored/compared is always the
+    resolved real node_id, never the petname string. Petname resolution
+    for `mesh_untrust_agent` specifically needs the peer to still be in
+    your CURRENT roster (15-minute staleness window, matching
+    `mesh_agents`'s own) -- untrusting someone who has been offline longer
+    than that needs their raw node_id from the allowlist file itself.
+  - New `roster.ts` export `listAllNodeIds()` for the reverse-lookup scan
+    (a full-table read -- this is one operator's own contacts list, not a
+    public directory, so that's never a real cost).
+  - 16 new tests across `resolve_node_id.test.ts` (the resolver itself,
+    including a REAL brute-forced sha256 collision, not a simulated one),
+    `mesh_ring.test.ts`, `mesh_rooms.test.ts`, and a new
+    `mesh_trust_agent.test.ts` (this tool had no test file before).
+    Confirmed RED against the pre-feature code, GREEN with it. Full suite:
+    32 files, 449 tests, typecheck+build clean.
+
 ## [0.24.2] - 2026-09-06
 
 ### Fixed

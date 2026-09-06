@@ -29,6 +29,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { proofMessage } from "./ownership_proof.js";
 import { ANSWER, closeRings, ringReplyProofProcedure } from "./rings.js";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
+import { closeRoster, upsertAgent } from "./roster.js";
+import { petname } from "./petname.js";
 
 const ME = "d".repeat(64);
 
@@ -78,6 +80,7 @@ vi.mock("./rooms.js", async (importOriginal) => {
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";
   process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB = ":memory:";
+  process.env.MACULA_MCP_ROSTER_DB = ":memory:";
   process.env.MACULA_MCP_IDENTITY = "test-default-identity";
   mocks.currentNodeId.mockReturnValue(ME);
   mocks.tsIdentity.mockReturnValue({ node_id: ME, path: "test-default-identity", generated: false });
@@ -100,8 +103,10 @@ afterEach(async () => {
   resetRoomsForTests();
   closeRings();
   closeTranscript();
+  closeRoster();
   delete process.env.MACULA_MCP_RINGS_DB;
   delete process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB;
+  delete process.env.MACULA_MCP_ROSTER_DB;
   delete process.env.MACULA_MCP_IDENTITY;
   vi.resetAllMocks();
 });
@@ -262,5 +267,38 @@ describe("openRoomAndInvite", () => {
 
     await openRoomAndInvite({ purpose: "a real reason", participants: [other.node_id] });
     expect(seenPurposes).toEqual(["Join this room", "a real reason"]);
+  });
+
+  describe("accepts petnames in participants, resolved against the roster (resolve_node_id.ts)", () => {
+    it("resolves a petname to its real node_id BEFORE opening the room -- the room_opened envelope must never carry an unresolved petname", async () => {
+      const other = keypair();
+      upsertAgent({ node_id: other.node_id, at: new Date().toISOString() });
+      mocks.callThenDirect.mockRejectedValue(new Error("temporary_relay_failure"));
+      const { openRoomAndInvite } = await import("./mesh_rooms.js");
+
+      const res = await openRoomAndInvite({ purpose: "pair", participants: [petname(other.node_id)] });
+
+      expect(res.opened.participants).toContain(other.node_id); // real node_id in the published envelope
+      expect(res.opened.participants).not.toContain(petname(other.node_id));
+      expect(res.invited).toEqual([expect.objectContaining({ to: other.node_id, unreachable: 1 })]);
+    });
+
+    it("fails the whole call, before opening any room, when a participant's petname doesn't resolve", async () => {
+      const { openRoomAndInvite } = await import("./mesh_rooms.js");
+      await expect(openRoomAndInvite({ purpose: "pair", participants: ["nobody_seen_with_this_petname"] })).rejects.toThrow(/no roster entry with petname/);
+      expect(mocks.publish).not.toHaveBeenCalled(); // no room_opened published for a call that never should have started
+    });
+
+    it("dedupes a petname against its own equivalent raw node_id in the same list", async () => {
+      const other = keypair();
+      upsertAgent({ node_id: other.node_id, at: new Date().toISOString() });
+      mocks.callThenDirect.mockRejectedValue(new Error("temporary_relay_failure"));
+      const { openRoomAndInvite } = await import("./mesh_rooms.js");
+
+      const res = await openRoomAndInvite({ purpose: "pair", participants: [petname(other.node_id), other.node_id] });
+
+      expect(res.invited).toHaveLength(1); // both resolve to the same node_id -- rung once, not twice
+      expect(mocks.callThenDirect).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -18,14 +18,20 @@
 // (both self-asserted or collidable) -- this tool only ever echoes
 // petname(node_id) back as a human-legible label, the same way
 // mesh_ring/mesh_answer_ring already do, never as the lookup key.
+//
+// A petname IS accepted as INPUT here (resolve_node_id.ts, 2026-09-06) --
+// that does not weaken the paragraph above. Resolution happens entirely
+// LOCALLY, against this operator's own roster, before either allowlist
+// function is ever called; what actually gets stored/compared as the
+// trust key is always the resolved real node_id, never the petname
+// string itself. This is operator convenience for WHICH node_id to
+// trust, not a new trust boundary.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
-import { jsonContent } from "./reply.js";
+import { errorContent, jsonContent } from "./reply.js";
 import { addToAllowlist, removeFromAllowlist, policyFilePath, type AllowlistMutationResult } from "./policy.js";
 import { petname } from "./petname.js";
-
-const nodeIdSchema = z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex");
+import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
 
 /** What the caller should understand about a mutation beyond the raw fields -- the file changed, but is that change actually in effect right now? */
 function explain(res: AllowlistMutationResult, verb: "added" | "removed"): string {
@@ -61,10 +67,12 @@ export function registerMeshTrustAgent(server: McpServer): void {
       "can collide, neither is safe as a trust boundary. The policy file re-reads on every ring, so this takes " +
       "effect immediately, no restart needed.",
     {
-      node_id: nodeIdSchema.describe("The peer to trust, from mesh_agents, mesh_ring's `to`, mesh_answer_ring's `peer`, or mesh_read_inbox's rings.pending."),
+      node_id: nodeIdOrPetnameSchema.describe("The peer to trust: a node_id or petname from mesh_agents, mesh_ring's `to`, mesh_answer_ring's `peer`, or mesh_read_inbox's rings.pending."),
     },
     async ({ node_id }) => {
-      const res = addToAllowlist(node_id);
+      const resolved = resolveNodeId(node_id);
+      if (!resolved.ok) return errorContent(resolved.error);
+      const res = addToAllowlist(resolved.node_id);
       return jsonContent({ ...res, ...(res.node_id ? { petname: petname(res.node_id) } : {}), note: explain(res, "added") });
     },
   );
@@ -78,10 +86,16 @@ export function registerMeshTrustAgent(server: McpServer): void {
       `that was never listed is a no-op, not an error. The file lives at ${policyFilePath()} unless ` +
       "MACULA_MCP_CONTACT_POLICY_FILE overrides the path.",
     {
-      node_id: nodeIdSchema.describe("The peer to remove, from mesh_agents or the allowlist itself."),
+      node_id: nodeIdOrPetnameSchema.describe(
+        "The peer to remove: a node_id from mesh_agents or the allowlist itself, or a petname -- petname resolution needs " +
+          "the peer in your CURRENT roster (mesh_agents), so it may not resolve someone trusted long ago who has since gone " +
+          "stale/offline; use their raw node_id from the allowlist file in that case.",
+      ),
     },
     async ({ node_id }) => {
-      const res = removeFromAllowlist(node_id);
+      const resolved = resolveNodeId(node_id);
+      if (!resolved.ok) return errorContent(resolved.error);
+      const res = removeFromAllowlist(resolved.node_id);
       return jsonContent({ ...res, ...(res.node_id ? { petname: petname(res.node_id) } : {}), note: explain(res, "removed") });
     },
   );

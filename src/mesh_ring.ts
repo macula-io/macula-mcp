@@ -30,6 +30,7 @@ import { verifyOwnershipProof } from "./ownership_proof.js";
 import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, ringProofProcedure, ringReplyProofProcedure, RingError } from "./rings.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
+import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
 
 // The callee's own handler (ring_service.ts, HANDLER_TIMEOUT_SECONDS=30,
 // plus the local relay's own 25 s budget) can legitimately take close to
@@ -41,8 +42,6 @@ import { petname } from "./petname.js";
 const CALL_TIMEOUT_MS = 40_000;
 export const DEFAULT_WAIT_JOIN_SECONDS = 30;
 export const MAX_WAIT_JOIN_SECONDS = 600;
-
-const nodeIdSchema = z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex");
 
 async function waitForJoin(args: { room_topic: string; who: string; afterId: number; seconds: number }): Promise<0 | 1> {
   const deadline = Date.now() + args.seconds * 1000;
@@ -80,17 +79,20 @@ export type PlaceRingResult =
  */
 export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   assertNoLikelySecret(args.purpose, "purpose");
+  const resolved = resolveNodeId(args.to);
+  if (!resolved.ok) throw new RingError(resolved.error);
+  const to = resolved.node_id;
   const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
-  if (args.to === me) throw new RingError("that is this agent's own node id");
+  if (to === me) throw new RingError("that is this agent's own node id");
   let roomTopic = args.room_topic;
   if (roomTopic === undefined) {
-    roomTopic = (await rooms.openRoom({ host: args.host, purpose: args.purpose, participants: [args.to] })).room_topic;
+    roomTopic = (await rooms.openRoom({ host: args.host, purpose: args.purpose, participants: [to] })).room_topic;
   } else if (!rooms.isJoined(roomTopic)) {
     throw new rooms.RoomError(`not in room ${roomTopic} -- open or join it first, or omit room_topic`);
   }
-  const ring = buildRingArgs({ from: me, to: args.to, purpose: args.purpose, room_topic: roomTopic });
-  const procedure = ringProcedure(args.to);
-  recordRing({ ...ring, self: me, direction: "out", peer: args.to });
+  const ring = buildRingArgs({ from: me, to, purpose: args.purpose, room_topic: roomTopic });
+  const procedure = ringProcedure(to);
+  recordRing({ ...ring, self: me, direction: "out", peer: to });
   const cursor = lastFactId(roomTopic);
 
   let payload: unknown;
@@ -102,7 +104,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
     // a different one. Conflating the two (found live by the release
     // review, 2026-09-03: this call signed the bare name, ring_service.ts
     // verified against the bound one) made every ring bad_signature.
-    const signed = signIdentity(ringProofProcedure(args.to, ring.ring_id));
+    const signed = signIdentity(ringProofProcedure(to, ring.ring_id));
     const res = await callThenDirect({ host: args.host, procedure, callArgs: withIdentityProof({ ...ring }, signed), timeoutMs: CALL_TIMEOUT_MS });
     payload = res.payload;
   } catch (e) {
@@ -110,7 +112,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
     answerRing(ring.ring_id, null, reason);
     return {
       ring_id: ring.ring_id,
-      to: args.to,
+      to,
       room_topic: roomTopic,
       unreachable: 1,
       reason,
@@ -137,14 +139,14 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   if (reply.ring_id !== undefined && (reply.answer === ANSWER.accepted || reply.answer === ANSWER.declined)) {
     const proven =
       reply.proven !== undefined &&
-      reply.proven.citizen_did.toLowerCase() === args.to.toLowerCase() &&
-      verifyOwnershipProof({ node_id: args.to, proof: reply.proven.proof, procedure: ringReplyProofProcedure(args.to, reply.ring_id, reply.answer) }).ok === 1;
+      reply.proven.citizen_did.toLowerCase() === to.toLowerCase() &&
+      verifyOwnershipProof({ node_id: to, proof: reply.proven.proof, procedure: ringReplyProofProcedure(to, reply.ring_id, reply.answer) }).ok === 1;
     if (!proven) {
-      const reason = `unreachable: an answer arrived for ${procedure} but was not verifiably signed by ${args.to}'s own key -- treating as unreachable rather than trusting it`;
+      const reason = `unreachable: an answer arrived for ${procedure} but was not verifiably signed by ${to}'s own key -- treating as unreachable rather than trusting it`;
       answerRing(ring.ring_id, null, reason);
       return {
         ring_id: ring.ring_id,
-        to: args.to,
+        to,
         room_topic: roomTopic,
         unreachable: 1,
         reason,
@@ -157,7 +159,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   let joined: 0 | 1 | undefined;
   if (reply.answer === ANSWER.accepted) {
     const seconds = args.waitJoinSeconds ?? DEFAULT_WAIT_JOIN_SECONDS;
-    joined = seconds > 0 ? await waitForJoin({ room_topic: roomTopic, who: args.to, afterId: cursor, seconds }) : 0;
+    joined = seconds > 0 ? await waitForJoin({ room_topic: roomTopic, who: to, afterId: cursor, seconds }) : 0;
   }
   const nextStep =
     reply.answer === ANSWER.accepted
@@ -169,7 +171,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
         : "Declined. Leave the room if you opened it for this.";
   return {
     ring_id: ring.ring_id,
-    to: args.to,
+    to,
     room_topic: roomTopic,
     answer: reply.answer,
     answer_label: answerLabel(reply.answer),
@@ -194,7 +196,7 @@ export function registerMeshRing(server: McpServer): void {
       "is mandatory and short: a deferred ring is judged from it. This is the ONLY way to reach an agent " +
       "that has not invited you; never write into a room they have not joined.",
     {
-      to: nodeIdSchema.describe("The agent to ring: a node_id from mesh_agents."),
+      to: nodeIdOrPetnameSchema.describe("The agent to ring: a node_id or petname from mesh_agents."),
       purpose: z.string().min(1).max(MAX_PURPOSE_CHARS).describe(`Why you are ringing, one line (max ${MAX_PURPOSE_CHARS} chars).`),
       room_topic: z.string().optional().describe("A room you are already in to invite them into. Omit to open a fresh two-party room."),
       wait_join_seconds: z

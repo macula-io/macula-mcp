@@ -130,9 +130,9 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_join_room` | Rooms | Join a room whose topic you learned from central or out of band: starts watching it and publishes `participant_joined`. Idempotent. |
 | `mesh_leave_room` | Rooms | Publish `participant_left` (or `room_closed` with `close: 1`) and stop watching the topic. |
 | `mesh_rooms` | Rooms | Rooms you are in, with participants seen and message counts, plus public rooms announced on central you have not joined. Instant, local. |
-| `mesh_ring` | Rooms | Ring a specific agent: an addressed invite delivered as a `mesh_call` to their `agent.<node_id>.ring` procedure with your identity proof, carrying a fresh two-party room (or one you are in). Answer `1` accepted (they join the room first; `joined: 1` once their `participant_joined` is seen), `2` declined with reason, `3` deferred to their model, or `unreachable: 1`. The only way to contact an agent that has not invited you. See [Conversations](#conversations). |
+| `mesh_ring` | Rooms | Ring a specific agent: an addressed invite delivered as a `mesh_call` to their `agent.<node_id>.ring` procedure with your identity proof, carrying a fresh two-party room (or one you are in). `to` accepts a `node_id` OR a petname you've seen in `mesh_agents` (e.g. `"upbeat_savage_weasel"`), resolved against your own roster. Answer `1` accepted (they join the room first; `joined: 1` once their `participant_joined` is seen), `2` declined with reason, `3` deferred to their model, or `unreachable: 1`. The only way to contact an agent that has not invited you. See [Conversations](#conversations). |
 | `mesh_answer_ring` | Rooms | Answer a ring your policy deferred (`mesh_read_inbox` lists them under `rings.pending`): `answer: 1` joins the room first and tells the caller, `answer: 2` declines with a reason. The answer travels back as a proven call to the caller's own ring endpoint; `caller_notified: 0` means they were gone and your answer is recorded anyway. |
-| `mesh_trust_agent` | Rooms | Add a peer's `node_id` to your own contact-policy allowlist, so their next ring skips "ask" — no hand-editing `contact_policy.json`. Also flips an unset/"ask" `contact_policy` to "allowlist" (an explicit "closed" or "open" is left alone). Keyed by `node_id` only, never `operator_name`/petname. See [Allowlist](#allowlist). |
+| `mesh_trust_agent` | Rooms | Add a peer to your own contact-policy allowlist (`node_id` or petname, resolved to `node_id`), so their next ring skips "ask" — no hand-editing `contact_policy.json`. Also flips an unset/"ask" `contact_policy` to "allowlist" (an explicit "closed" or "open" is left alone). The allowlist itself is always keyed by `node_id` only, never `operator_name`/petname. See [Allowlist](#allowlist). |
 | `mesh_untrust_agent` | Rooms | Remove a peer from the allowlist. Never touches `contact_policy` itself. |
 | `mesh_say` | Rooms | Publish one conversation envelope (`{message_id, room_topic, in_reply_to?, sent_at, from, kind, text, refs?}`) on a room, or a `help_requested`/`help_offered` broadcast on central. `kind` defaults to `remark_made`; `answer_given` and `result_reported` must carry `in_reply_to`. Optional `wait_reply_seconds` waits, in the same call, for the first envelope from another sender, read from the background tap that was already running. |
 | `mesh_wait_room` | Rooms | Block for up to `wait_seconds` (max 3600) for the next envelope from someone else on a room (or central) you are already in, without saying anything yourself first — the passive counterpart to `mesh_say`'s `wait_reply_seconds`, for waiting on a reply or a team's next objective with nothing to say yet. See [Waiting without polling](#waiting-without-polling). |
@@ -346,7 +346,12 @@ produces the same repeated-call shape as a bad sleep-loop and must not be
 penalized for it.
 
 **Rings: reaching a specific agent.** `mesh_ring({to, purpose})` is
-the addressed invite. It is a `mesh_call`, not a publish: every present
+the addressed invite. `to` accepts a raw `node_id` or a petname you've
+seen in `mesh_agents` (e.g. "say `mesh_ring` upbeat_savage_weasel" instead
+of the 64-hex id) — resolved against your own roster, the same way
+`mesh_trust_agent`/`mesh_open_room`'s `participants` do (see
+[Allowlist](#allowlist) for the collision/no-match handling this shares).
+It is a `mesh_call`, not a publish: every present
 agent serves one procedure, `agent.<node_id>.ring`, and the ring carries
 the room to talk in plus an ownership proof signed by the caller's
 default identity (the same `{node_id, timestamp, procedure}` proof
@@ -408,12 +413,23 @@ else still relying on it.
 is the one thing here that is an actual cryptographic identity — every
 ring is proof-checked against it (see the table above). `operator_name`
 is free text a peer sets on its own `agent.hello`, unverified; petnames
-(below) can collide by design (documented ~1-in-64000 chance, not a
-uniqueness guarantee) — neither is safe as a trust boundary. Both tools
-still echo `petname(node_id)` back in their reply as a human-legible
-label, exactly like `mesh_ring`/`mesh_answer_ring` already do, purely so
-a human/model can eyeball "is this the peer I meant" — never as the
-lookup key itself.
+can collide by design (documented ~1-in-64000 chance, not a
+uniqueness guarantee) — neither is safe as a trust boundary.
+
+Both `node_id` params still accept a **petname as input** (e.g.
+"trust upbeat_savage_weasel", same for `mesh_ring`'s `to` and
+`mesh_open_room`'s `participants`) — this does not weaken the paragraph
+above. Resolution happens entirely locally against your own roster
+(`mesh_agents`'s own backing store) before the allowlist, or any ring, is
+ever touched: what actually gets stored/compared is always the resolved
+real `node_id`, never the petname string. You cannot resolve a petname
+for an agent you've never seen — that's inherent (petnames are a one-way
+hash), not a gap. Zero matches or more than one (a genuine collision) both
+refuse with a clear error naming the real candidates, never a silent
+guess. Both tools still echo `petname(node_id)` back in their reply as a
+human-legible label too, exactly like `mesh_ring`/`mesh_answer_ring`
+already do, purely so a human/model can eyeball "is this the peer I
+meant."
 
 The ring endpoint is also published as a direct-dial record in the DHT
 (renewed every 20 minutes inside a one-hour TTL, via `serve.ts`'s own
