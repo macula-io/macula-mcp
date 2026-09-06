@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resetWaitingHintsForTests, waitingHint } from "./mesh_read_inbox.js";
 
 const ME = "a".repeat(64);
@@ -64,5 +65,91 @@ describe("waitingHint", () => {
     expect(hint).toContain("mesh_wait_room");
     expect(hint).toContain("scheduler");
     expect(hint).toContain("mesh://etiquette");
+  });
+});
+
+// Regression coverage for the cold-start race found live 2026-09-06 by 94
+// while testing lazymesh: ensurePresence(server) is fire-and-forget (see
+// presence.ts's own doc), so on a FRESH identity's very first tool call,
+// presence.currentNodeId() reads as undefined because doStart()'s several
+// awaits haven't landed yet -- and `room_topic || !me ? undefined : {...}`
+// then omits the whole `rings` key, not an empty object. A caller that
+// treats a missing key as "zero pending" (reasonable, matches empty-object
+// semantics) fails silently instead of erroring -- exactly what happened
+// to lazymesh's own popup feature, which never saw an incoming ring during
+// its first several checks after a fresh identity spawn.
+const toolMocks = vi.hoisted(() => ({
+  ensurePresence: vi.fn(),
+  currentNodeId: vi.fn(),
+  tsIdentity: vi.fn(),
+  listRooms: vi.fn(),
+  recentFacts: vi.fn(),
+  pendingIncoming: vi.fn(),
+  listRings: vi.fn(),
+}));
+vi.mock("./presence.js", () => ({ ensurePresence: toolMocks.ensurePresence, currentNodeId: toolMocks.currentNodeId }));
+vi.mock("./macula_ts_client.js", () => ({ tsIdentity: toolMocks.tsIdentity }));
+vi.mock("./rooms.js", () => ({ listRooms: toolMocks.listRooms }));
+vi.mock("./lobby_transcript.js", () => ({ recentFacts: toolMocks.recentFacts }));
+vi.mock("./rings.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./rings.js")>();
+  return { ...actual, pendingIncoming: toolMocks.pendingIncoming, listRings: toolMocks.listRings };
+});
+
+type Handler = (args: Record<string, unknown>) => Promise<{ content: { text: string }[] }>;
+
+/** Captures server.tool()'s registered handler instead of a real McpServer -- mesh_stations.test.ts's own pattern. */
+function fakeServer(): { server: McpServer; getHandler: () => Handler } {
+  let handler: Handler = async () => {
+    throw new Error("mesh_read_inbox was never registered");
+  };
+  const server = {
+    tool: (_name: string, _desc: string, _schema: unknown, fn: Handler) => {
+      handler = fn;
+    },
+  } as unknown as McpServer;
+  return { server, getHandler: () => handler };
+}
+
+describe("mesh_read_inbox tool: the `me` cold-start race", () => {
+  beforeEach(() => {
+    toolMocks.currentNodeId.mockReturnValue(undefined); // presence not active yet -- the race's exact starting condition
+    toolMocks.tsIdentity.mockReturnValue({ node_id: ME, path: "test-default-identity", generated: false });
+    toolMocks.listRooms.mockReturnValue({ joined: [], seen_on_central: [] });
+    toolMocks.recentFacts.mockReturnValue({ total: 0, facts: [] });
+    toolMocks.pendingIncoming.mockReturnValue([]);
+    toolMocks.listRings.mockReturnValue([]);
+  });
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("still includes the `rings` key on a fresh identity's very first call, falling back to the local identity file", async () => {
+    const { registerMeshReadInbox } = await import("./mesh_read_inbox.js");
+    const { server, getHandler } = fakeServer();
+    registerMeshReadInbox(server);
+
+    const res = await getHandler()({});
+    const body = JSON.parse(res.content[0]!.text);
+
+    expect(toolMocks.ensurePresence).toHaveBeenCalledWith(server);
+    expect(body.rings).toBeDefined(); // the actual bug: this key was absent entirely
+    expect(body.rings).toEqual({ pending: [], recent: [] });
+    // Proves the fallback node id actually reached the local reads, not just that the key exists.
+    expect(toolMocks.pendingIncoming).toHaveBeenCalledWith(ME);
+    expect(toolMocks.listRings).toHaveBeenCalledWith(expect.objectContaining({ self: ME }));
+  });
+
+  it("still includes `rings` for a specific room_topic read too", async () => {
+    toolMocks.listRooms.mockReturnValue({ joined: [{ room_topic: ROOM, opened_by: THEM, participants_seen: [] }], seen_on_central: [] });
+    const { registerMeshReadInbox } = await import("./mesh_read_inbox.js");
+    const { server, getHandler } = fakeServer();
+    registerMeshReadInbox(server);
+
+    const res = await getHandler()({ room_topic: ROOM });
+    const body = JSON.parse(res.content[0]!.text);
+
+    expect(body.rings).toBeUndefined(); // by design: a single-room read omits rings (see the tool's own `room_topic ||` check)
+    expect(body.rooms).toHaveLength(1);
   });
 });

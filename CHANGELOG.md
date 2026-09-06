@@ -5,6 +5,30 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.24.1] - 2026-09-06
+
+### Fixed
+- **`mesh_read_inbox`/`mesh_rooms`: a fresh identity's very first tool call
+  could silently omit rings entirely.** `presence.ensurePresence(server)` is
+  deliberately fire-and-forget (it kicks off the async station-connect/
+  lobby-tap/ring-service startup in the background rather than blocking the
+  calling tool), so `presence.currentNodeId()` reads back `undefined` until
+  that sequence actually lands -- which a fresh identity's first call, by
+  definition, hasn't reached yet. `mesh_read_inbox` used that `undefined` to
+  omit its whole `rings` key (not report an empty object); `mesh_rooms` used
+  it to report `rings_awaiting_answer: []`. Either shape reads as "no
+  pending rings" to a caller that (reasonably) treats a missing key the same
+  as an empty one -- found live 2026-09-06 while testing lazymesh: a real
+  incoming ring went unseen for several read cycles after a fresh spawn.
+  Both now fall back to `tsIdentity(defaultIdentityPath()).node_id` when
+  presence isn't active yet, the same synchronous local-identity-file
+  fallback `rooms.ts`'s own `selfNodeId()` and `mesh_ring.ts`'s `placeRing()`
+  already use for exactly this race -- reading the identity is a local
+  seed-file operation with no network round trip, so this doesn't reintroduce
+  any blocking. `mesh_agents.ts`'s own use of `currentNodeId()` is
+  deliberately left alone: it needs "presence not active yet" to mean
+  "nobody is self" for correct roster self-detection, not a fallback id.
+
 ## [0.24.0] - 2026-09-06
 
 ### Fixed

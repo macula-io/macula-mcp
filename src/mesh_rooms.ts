@@ -14,7 +14,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./mesh_config.js";
+import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
+import { tsIdentity } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
@@ -248,7 +249,14 @@ export function registerMeshRooms(server: McpServer): void {
       // to expect.
       ensurePresence(server);
       try {
-        const me = presence.currentNodeId();
+        // Same race as mesh_read_inbox.ts's `rings` key: currentNodeId() is
+        // undefined until the full async presence start() lands, which a
+        // fresh identity's very first call hasn't reached yet. The node id
+        // is knowable synchronously that whole time (tsIdentity() only
+        // reads/mints a local seed file -- see rooms.ts's own selfNodeId()),
+        // so fall back to it instead of silently reporting zero awaiting
+        // rings on that first call.
+        const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
         const awaiting = me
           ? listRings({ self: me, direction: "out", answer: ANSWER.deferred, limit: 50 }).map((r) => ({
               ring_id: r.ring_id,

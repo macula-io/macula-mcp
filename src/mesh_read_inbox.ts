@@ -15,6 +15,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { defaultIdentityPath } from "./mesh_config.js";
+import { tsIdentity } from "./macula_ts_client.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
@@ -131,7 +133,19 @@ export function registerMeshReadInbox(server: McpServer): void {
     async ({ room_topic, limit }) => {
       presence.ensurePresence(server);
       try {
-        const me = presence.currentNodeId();
+        // presence.currentNodeId() is undefined until the full async start()
+        // sequence (station connects, lobby tap, ring service, ...) lands --
+        // on a fresh identity's very first tool call, that hasn't happened
+        // yet, so this would otherwise be undefined here. The node id itself
+        // is known synchronously from the very first line of that sequence
+        // (tsIdentity() only reads/mints a local seed file, no connection --
+        // same reasoning as rooms.ts's own selfNodeId()/mesh_ring.ts's
+        // placeRing()), so falling back to it avoids the race instead of
+        // waiting for it. Found live 2026-09-06: a fresh identity's first
+        // mesh_read_inbox call omitted the whole `rings` key (not an empty
+        // object) because `me` was undefined, which a caller treating a
+        // missing key as "no pending rings" reads as silently, wrongly safe.
+        const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
         const { joined } = rooms.listRooms();
         const selected = room_topic ? joined.filter((r) => r.room_topic === room_topic) : joined;
         if (room_topic && selected.length === 0) {
