@@ -5,6 +5,41 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.25.1] - 2026-09-06
+
+### Fixed
+- **A failed INITIAL ring registration left an agent permanently unringable
+  for the rest of its process life, not just degraded for a while.**
+  `ring_service.ts`'s direct-dial renewal already retried a failed
+  `serve.serve()` call with backoff (v0.24.2), but the very first
+  registration attempt on `start()` did not -- it threw once and gave up.
+  `presence.ts`'s `doStart()` only calls `ring_service.start()` when
+  presence's own state is undefined, which happens exactly once per
+  process; a later `mesh_hello` takes the `if (state)` early-return branch
+  and never touches `ring_service` again. So a single transient failure on
+  that one attempt (the same QUIC-level `connection: write frame:
+  Application error 0x0 (remote): closed` class the 0.24.2 fix already
+  retries for renewal) left an agent heartbeating normally -- fully
+  present and reachable by `mesh_agents` -- while being invisible to
+  every `mesh_ring` attempt, with nothing anywhere retrying and nothing
+  surfacing it beyond a `console.error` to stderr. Confirmed live
+  2026-09-06: a lazymesh instance failed this way within its first ~10
+  minutes, before any renewal window had even opened; filed as
+  macula-io/macula-mcp#2.
+  - `start()` now schedules its own retry on an initial failure, the same
+    backoff shape as renewal (`RENEW_RETRY_BASE_MS`, doubling, capped at
+    `DIRECT_DIAL_RENEW_SECONDS`).
+  - `stop()`/`stopSync()` now cancel a pending initial-registration retry
+    too -- `state` stays undefined for the whole time a retry is pending
+    (only a successful attempt sets it), so the old `stopSync()`'s
+    `if (!state) return` would have left a zombie retry timer running if
+    the agent went offline mid-backoff.
+  - Two new tests in `ring_service.test.ts`: the retry-with-backoff itself
+    (written RED first against the unmodified code -- confirmed no retry
+    fires even after advancing fake timers past the full 20-minute
+    steady-state interval), and `stop()` cancelling a pending retry. Full
+    suite: 33 tests in this file, 451 across the project, typecheck clean.
+
 ## [0.25.0] - 2026-09-06
 
 ### Added
