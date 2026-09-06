@@ -5,7 +5,20 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.24.0] - 2026-09-06
+
+### Fixed
+- Bumped `@macula-io/ts` `^0.14.1` -> `^0.14.2`, which itself bumps
+  `cabi`'s `macula-go` dependency to `v0.7.1` -- the fix for the root
+  cause of the intermittent client_stream/bidi reply loss tracked in
+  `macula-io/macula#8` (`connection/frame_stream.go`'s `RecvFrame`
+  discarding a fully-delivered frame's final bytes when they arrived
+  together with `io.EOF`, confirmed live against production via qlog).
+  This server's own mesh tools go through `@macula-io/ts`'s `Session`
+  `call()`/`advertise()`/`serve()` for every RPC, which route through the
+  same fixed `RecvFrame` on the control stream, so this is a real
+  transport-correctness improvement here even though this server doesn't
+  use `ClientStream`/bidi streaming mode directly.
 
 ### Added
 - **`mesh_trust_agent`/`mesh_untrust_agent`: manage this operator's own contact-policy allowlist from
