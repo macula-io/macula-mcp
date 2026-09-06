@@ -124,7 +124,11 @@ const TOPICS: HelpTopic[] = [
       "means the room is two-sided), 2 declined with a reason, or 3 deferred to their model (pending in their " +
       "mesh_read_inbox until they mesh_answer_ring, which joins the room and carries the answer back to the " +
       "caller's own ring endpoint); an agent that is not serving is unreachable, not silent. Ringing is the only way " +
-      "to contact an agent that has not invited you. Mention that a room topic is unguessable, not encrypted.",
+      "to contact an agent that has not invited you. Mention that a room topic is unguessable, not encrypted. " +
+      "Mention mesh_trust_agent({node_id}): once this agent decides a peer is trustworthy (e.g. right after " +
+      "mesh_answer_ring accepted their ring), it adds them to this operator's own allowlist -- their next ring " +
+      "then skips \"ask\" -- without hand-editing contact_policy.json; mesh_untrust_agent removes an entry. " +
+      "Keyed by node_id only, never operator_name or petname, since only node_id is a verified, signed identity here.",
   },
   {
     name: "help_serve",

@@ -46,6 +46,69 @@ function withFromPetname<T extends { from: string }>(m: T): T & { from_petname: 
   return { ...m, from_petname: petname(m.from) };
 }
 
+// ---- "are you polling instead of waiting?" hint (Part B, mesh-mcp dogfooding 2026-09) ----
+//
+// Deliberately NOT frequency-based (two calls within N seconds/minutes):
+// a harness-scheduler check-in (mesh://etiquette's "Waiting for
+// something, without polling", option 3 -- wake up in N minutes, make one
+// cheap read, reschedule if nothing changed) produces the EXACT SAME
+// call pattern as a bad manual sleep-loop from this server's side --
+// repeated reads of the same room, similar cadence, often nothing new.
+// Penalizing that shape by timing alone would nag the very pattern this
+// project now recommends as the genuinely non-blocking alternative to
+// mesh_wait_room/wait_reply_seconds. (Tried this first, on paper: no
+// threshold distinguishes them, so it was dropped before being built --
+// this is the "what I tried that didn't work" this project asks to be
+// named, not left unsaid.)
+//
+// What IS knowable, content-wise, with no ambiguity: whether THIS agent
+// is the last speaker in a room. If `me` sent the most recent message and
+// a LATER read of the same room still shows the same most recent message
+// (nobody has answered), this agent is genuinely waiting -- surfacing
+// "did you mean to block for this instead" once is useful regardless of
+// whether the read came from a sleep loop or a scheduler wakeup. Firing
+// it "once per waiting episode" (not every call) is what keeps a
+// correctly-used scheduler check-in quiet after the first ping: the hint
+// stops the moment either someone replies (a new episode could start
+// later) or it has already been shown once for this exact standing state.
+const waitEpisodes = new Map<string, { lastMessageId: string; hinted: boolean }>();
+
+/**
+ * Pure and exported for testing without a room/server: given the most
+ * recent message this read returned for `roomTopic` (or undefined if the
+ * room has no messages at all), returns hint text exactly once per
+ * "still waiting on the same standing message" episode, or undefined the
+ * rest of the time. See this module's own comment block just above for
+ * why this is content-based, not frequency-based.
+ */
+export function waitingHint(roomTopic: string, lastMessage: { message_id: string; from: string } | undefined, me: string | undefined): string | undefined {
+  if (!me || !lastMessage || lastMessage.from !== me) {
+    waitEpisodes.delete(roomTopic); // someone else spoke last (or there's nothing to wait on) -- any prior episode is over
+    return undefined;
+  }
+  const tracked = waitEpisodes.get(roomTopic);
+  if (!tracked || tracked.lastMessageId !== lastMessage.message_id) {
+    // Either the first time this room is seen in this state, or `me` sent
+    // a fresh message since the last read -- a new episode starts quietly.
+    waitEpisodes.set(roomTopic, { lastMessageId: lastMessage.message_id, hinted: false });
+    return undefined;
+  }
+  if (tracked.hinted) return undefined; // already nudged once for this exact standing message
+  tracked.hinted = true;
+  return (
+    "You are still the last speaker here and nothing new has arrived since your own last check of this room. " +
+    "If you are waiting on a reply, mesh_wait_room (or mesh_say's wait_reply_seconds) blocks for it server-side " +
+    "in one call, up to 3600s -- no need to check again yourself. If you would rather free this turn instead of " +
+    "blocking, use your own harness's scheduler to check back in a few minutes rather than sleeping and " +
+    "re-calling this. See mesh://etiquette's \"Waiting for something, without polling\" for the full picture."
+  );
+}
+
+/** Test hook: forget every tracked waiting episode. */
+export function resetWaitingHintsForTests(): void {
+  waitEpisodes.clear();
+}
+
 export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
     "mesh_read_inbox",
@@ -77,6 +140,8 @@ export function registerMeshReadInbox(server: McpServer): void {
         const roomsOut = selected.map((room) => {
           const { total, facts } = recentFacts({ topic: room.room_topic, limit });
           const { messages, unparsed } = threadEnvelopes(facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })));
+          const last = messages[messages.length - 1];
+          const hint = waitingHint(room.room_topic, last, me);
           return {
             room_topic: room.room_topic,
             opened_by: room.opened_by,
@@ -88,6 +153,7 @@ export function registerMeshReadInbox(server: McpServer): void {
             returned: messages.length,
             unparsed,
             messages: messages.map(withFromPetname),
+            ...(hint ? { poll_hint: hint } : {}),
           };
         });
         const central = room_topic

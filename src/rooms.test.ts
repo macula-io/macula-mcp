@@ -185,3 +185,57 @@ describe("say", () => {
     expect(res.timed_out).toBe(1);
   });
 });
+
+describe("waitRoom", () => {
+  it("waits passively (no publish at all) and returns the first attested envelope from someone else", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
+    const { openRoom, waitRoom, REPLY_POLL_MS } = await import("./rooms.js");
+    const { room_topic } = await openRoom({});
+    const callsBeforeWait = mocks.publish.mock.calls.length;
+    const pending = waitRoom({ room_topic, waitSeconds: 5 });
+    await vi.advanceTimersByTimeAsync(0); // let the cursor (lastFactId) be taken before the fact below arrives
+    recordFact({ topic: room_topic, payload: { message_id: "e".repeat(32), room_topic, sent_at: Date.now(), from: THEM, kind: "remark_made", text: "objective: ship it" }, at: new Date().toISOString(), publisher: THEM });
+    await vi.advanceTimersByTimeAsync(REPLY_POLL_MS);
+    const res = await pending;
+    expect(mocks.publish).toHaveBeenCalledTimes(callsBeforeWait); // never published anything of its own
+    expect(res.timed_out).toBe(0);
+    expect(res.reply).toMatchObject({ from: THEM, text: "objective: ship it" });
+  });
+
+  it("joins a room it is not in yet before waiting on it", async () => {
+    const { waitRoom, listRooms } = await import("./rooms.js");
+    const topic = `agents.room.${"6".repeat(32)}`;
+    const res = await waitRoom({ room_topic: topic, waitSeconds: 0 });
+    expect(res).toEqual({ reply: null, timed_out: 1 });
+    expect(listRooms().joined).toEqual([expect.objectContaining({ room_topic: topic })]);
+  });
+
+  it("reports timed_out: 1 when nothing arrives before the deadline, without touching the transcript itself", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
+    const { openRoom, waitRoom, REPLY_POLL_MS } = await import("./rooms.js");
+    const { room_topic } = await openRoom({});
+    const pending = waitRoom({ room_topic, waitSeconds: 1 });
+    await vi.advanceTimersByTimeAsync(REPLY_POLL_MS * 6);
+    expect(await pending).toEqual({ reply: null, timed_out: 1 });
+  });
+
+  it("refuses a topic that is neither a room nor central", async () => {
+    const { waitRoom, RoomError } = await import("./rooms.js");
+    await expect(waitRoom({ room_topic: "agent.hello", waitSeconds: 1 })).rejects.toThrow(RoomError);
+  });
+
+  it("waits on central too, without joining anything", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
+    const { waitRoom, listRooms, REPLY_POLL_MS } = await import("./rooms.js");
+    const pending = waitRoom({ room_topic: "agents.lobby", waitSeconds: 5 });
+    await vi.advanceTimersByTimeAsync(0);
+    recordFact({ topic: "agents.lobby", payload: { message_id: "f".repeat(32), room_topic: "agents.lobby", sent_at: Date.now(), from: THEM, kind: "help_requested", text: "erlang?" }, at: new Date().toISOString(), publisher: THEM });
+    await vi.advanceTimersByTimeAsync(REPLY_POLL_MS);
+    const res = await pending;
+    expect(res).toMatchObject({ timed_out: 0, reply: { from: THEM } });
+    expect(listRooms().joined).toEqual([]);
+  });
+});

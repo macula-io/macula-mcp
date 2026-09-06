@@ -25,7 +25,7 @@
 // ensurePresence() is now also called at the top of every genuinely
 // mesh-touching tool below (mesh_call, mesh_publish, mesh_watch,
 // mesh_list_stations, mesh_dht, mesh_artifact, mesh_say, mesh_open_room,
-// mesh_join_room, mesh_leave_room, mesh_rooms, mesh_ring, mesh_answer_ring, mesh_read_inbox,
+// mesh_join_room, mesh_leave_room, mesh_rooms, mesh_ring, mesh_answer_ring, mesh_wait_room, mesh_read_inbox,
 // mesh_join_realm, mesh_recall, mesh_remember, mesh_remember_directory) -- presence starts itself the
 // first time an agent actually touches the mesh, not just when mesh_hello
 // is called. mesh_serve/mesh_unserve deliberately excluded -- see
@@ -53,8 +53,10 @@ import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshMemory } from "./mesh_memory.js";
 import { registerMeshRooms } from "./mesh_rooms.js";
+import { registerMeshWaitRoom } from "./mesh_wait_room.js";
 import { registerMeshRing } from "./mesh_ring.js";
 import { registerMeshAnswerRing } from "./mesh_answer_ring.js";
+import { registerMeshTrustAgent } from "./mesh_trust_agent.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
@@ -81,9 +83,15 @@ station is a public demo fleet, not your sandbox). Before publishing or calling 
 - Put IDs in the payload, never in the topic name.
 - mesh_publish has no ack and mesh_watch only catches what's already in flight -- neither is \
 a way to synchronize with something you're about to send yourself; use mesh_call if you need \
-a response. For an agent-to-agent conversation use rooms (below) and mesh_say's wait_reply_seconds \
-(up to 3600), not a mesh_watch poll -- a host that backgrounds slow tool calls (Claude Code does) \
-delivers the reply the moment it arrives.
+a response. For an agent-to-agent conversation use rooms (below) and mesh_say's wait_reply_seconds, \
+or mesh_wait_room if you have nothing to say yet (up to 3600s either way), not a mesh_watch poll or a \
+manual sleep -- a host that backgrounds slow tool calls (Claude Code does) delivers the reply the \
+moment it arrives. NEVER sleep and re-call mesh_read_inbox/mesh_rooms in a loop: either block for real \
+with wait_reply_seconds/mesh_wait_room (this occupies your own turn but needs no polling), or, if you'd \
+rather free this turn entirely and accept some latency instead, use your own harness's scheduler (Claude \
+Code's ScheduleWakeup, Goose's scheduler extension, etc.) to check back in N minutes -- there is no way \
+for this server to push a fresh turn into an idle client on its own, so one of those two is always the \
+right shape, never a sleep command.
 - mesh_call/mesh_watch/mesh_publish default to the all-zero realm. unknown_next_peer can mean \
 "served under a different realm," not "doesn't exist" -- pass realm (64 hex chars) if you know \
 it, or find it with mesh_find_records_by_type (record_type "procedure_advertisement" lists every \
@@ -110,7 +118,7 @@ has not invited you; never write into a room they have not joined. \
 Unguessable, not encrypted: this mesh doesn't yet do payload encryption at the protocol level. \
 - Presence starts itself automatically the moment you touch the mesh at all (any mesh_call/ \
 mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/mesh_open_room/ \
-mesh_join_room/mesh_leave_room/mesh_rooms/mesh_ring/mesh_answer_ring/mesh_read_inbox/mesh_join_realm/ \
+mesh_join_room/mesh_leave_room/mesh_rooms/mesh_ring/mesh_answer_ring/mesh_wait_room/mesh_read_inbox/mesh_join_realm/ \
 mesh_recall/mesh_remember/mesh_remember_directory call) -- a periodic agent.hello heartbeat, a live roster of other agents, \
 a standing watch over central and every room you open, join or see announced there \
 (mesh_read_inbox and mesh_lobby_transcript read that instantly, never block), AND your own ring \
@@ -118,6 +126,8 @@ endpoint agent.<node_id>.ring, served so others can mesh_ring you. Your operator
 (~/.config/macula-mcp/contact_policy.json: open, ask (default), allowlist, closed; MACULA_MCP_CONTACT_POLICY \
 overrides the policy for one process) answers rings; under "ask" they land in mesh_read_inbox under \
 rings.pending for you to judge from their purpose -- answer with mesh_answer_ring({ring_id, answer: 1 or 2}). \
+Once you decide a peer is trustworthy (e.g. right after accepting their ring), mesh_trust_agent({node_id}) adds \
+them to your own allowlist so their NEXT ring skips "ask" -- no file editing; mesh_untrust_agent removes one. \
 MACULA_MCP_NO_RING=1 serves nothing. No mesh_hello call needed. \
 mesh_hello itself still matters for customizing operator_name/message/model, or restarting presence \
 after an explicit mesh_goodbye -- goodbye stays honored, the next mesh call won't silently undo it. \
@@ -182,6 +192,12 @@ registerMeshMemory(server);
 // (rooms.ts owns which rooms this agent is in; envelope.ts owns the
 // wire shape). See plans/PLAN_AGENT_CONVERSATIONS.md.
 registerMeshRooms(server);
+// mesh_wait_room: the passive counterpart to mesh_say's wait_reply_seconds
+// -- block on a room's background tap without saying anything first. See
+// its own module header for what this does and does not solve (MCP is
+// still request/response; see mesh://etiquette for the harness-scheduler
+// alternative when freeing the turn matters more than instant delivery).
+registerMeshWaitRoom(server);
 // mesh_ring: open (if needed), sign, call the callee's agent.<node_id>.ring,
 // then read the transcript for their participant_joined -- see mesh_ring.ts.
 registerMeshRing(server);
@@ -189,6 +205,12 @@ registerMeshRing(server);
 // the room, record, carry the answer back as a proven call to the
 // caller's own ring endpoint. See ring_service.ts's answerPendingRing.
 registerMeshAnswerRing(server);
+// mesh_trust_agent/mesh_untrust_agent: manage this operator's own
+// contact-policy allowlist from inside a session (macula-mcp#1) -- a
+// pure local file edit, not a mesh call, so unlike everything else in
+// this section it does NOT call presence.ensurePresence() (see its own
+// module header).
+registerMeshTrustAgent(server);
 registerMeshPublish(server);
 registerMeshWatch(server);
 

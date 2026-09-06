@@ -300,6 +300,67 @@ export function joinedRoomCount(): number {
   return rooms.size;
 }
 
+/**
+ * Shared by say()'s waitReplySeconds and waitRoom() below: polls the
+ * local transcript (already fed by the background tap, not a fresh mesh
+ * round trip -- see REPLY_POLL_MS's own doc) for the first ATTESTED
+ * envelope from someone other than `me`, from `afterId` forward, until
+ * `deadline`. Returns null on timeout, never throws on one.
+ */
+async function waitForReply(args: { topic: string; me: string; afterId: number; deadline: number }): Promise<ObservedEnvelope | null> {
+  let after = args.afterId;
+  while (Date.now() < args.deadline) {
+    const fresh = factsAfter({ topic: args.topic, afterId: after });
+    if (fresh.length > 0) {
+      after = fresh[fresh.length - 1]!.id;
+      const { messages } = threadEnvelopes(fresh.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher })));
+      const reply = messages.find((m) => m.from !== args.me && m.attested === 1);
+      if (reply) return reply;
+    }
+    await new Promise((resolve) => setTimeout(resolve, REPLY_POLL_MS));
+  }
+  return null;
+}
+
+export interface WaitRoomArgs {
+  host?: string;
+  room_topic: string;
+  waitSeconds: number;
+}
+
+export interface WaitRoomResult {
+  reply: ObservedEnvelope | null;
+  timed_out: 0 | 1;
+}
+
+/**
+ * Blocks up to waitSeconds for the first ATTESTED envelope from someone
+ * else to arrive on a room (or central) already being tapped in the
+ * background -- the same wait say()'s waitReplySeconds does, minus the
+ * publish. For an agent that has already said its piece (or is just
+ * sitting in a room waiting on a team's next objective) and wants to
+ * block on the next turn without inventing a remark just to attach a
+ * wait_reply_seconds to: mesh_say requires text, so "wait passively,
+ * say nothing" had no home before this. Joins the room first if this
+ * agent is not in it yet (same as say()), since waiting on a room you
+ * are not watching would silently wait on nothing.
+ */
+export async function waitRoom(args: WaitRoomArgs): Promise<WaitRoomResult> {
+  const topic = args.room_topic;
+  if (topic === CENTRAL_TOPIC) {
+    await lobbyObserver.start({ host: args.host });
+  } else if (!isRoomTopic(topic)) {
+    throw new RoomError(`not a room topic or central: ${topic}`);
+  } else if (!rooms.has(topic)) {
+    await joinRoom({ host: args.host, room_topic: topic });
+  } else {
+    await ensureTapped({ host: args.host, room_topic: topic });
+  }
+  const me = selfNodeId();
+  const reply = await waitForReply({ topic, me, afterId: lastFactId(topic), deadline: Date.now() + args.waitSeconds * 1000 });
+  return reply ? { reply, timed_out: 0 } : { reply: null, timed_out: 1 };
+}
+
 export interface SayArgs {
   host?: string;
   room_topic: string;
@@ -350,19 +411,8 @@ export async function say(args: SayArgs): Promise<SayResult> {
   await publish({ host: args.host, topic, fact: { ...sent }, identityPath: defaultIdentityPath() });
   if (!args.waitReplySeconds) return { sent, reply: null };
 
-  const deadline = Date.now() + args.waitReplySeconds * 1000;
-  let after = cursor;
-  while (Date.now() < deadline) {
-    const fresh = factsAfter({ topic, afterId: after });
-    if (fresh.length > 0) {
-      after = fresh[fresh.length - 1]!.id;
-      const { messages } = threadEnvelopes(fresh.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher })));
-      const reply = messages.find((m) => m.from !== me && m.attested === 1);
-      if (reply) return { sent, reply, timed_out: 0 };
-    }
-    await new Promise((resolve) => setTimeout(resolve, REPLY_POLL_MS));
-  }
-  return { sent, reply: null, timed_out: 1 };
+  const reply = await waitForReply({ topic, me, afterId: cursor, deadline: Date.now() + args.waitReplySeconds * 1000 });
+  return reply ? { sent, reply, timed_out: 0 } : { sent, reply: null, timed_out: 1 };
 }
 
 /** Test hook: forget every room without publishing anything. */

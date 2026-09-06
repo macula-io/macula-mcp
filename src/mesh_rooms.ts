@@ -237,6 +237,16 @@ export function registerMeshRooms(server: McpServer): void {
       "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks.",
     {},
     async () => {
+      // Real bug, found while auditing this file for Part B: every sibling
+      // tool here (mesh_open_room/mesh_join_room/mesh_leave_room/mesh_say)
+      // already calls ensurePresence(), and index.ts's own top comment plus
+      // the server's own `instructions` string both already document
+      // mesh_rooms as one of the tools that starts presence automatically --
+      // this handler alone never actually called it, so a session whose
+      // FIRST mesh tool call is mesh_rooms silently saw an empty roster
+      // and no presence, contradicting what this server tells every agent
+      // to expect.
+      ensurePresence(server);
       try {
         const me = presence.currentNodeId();
         const awaiting = me

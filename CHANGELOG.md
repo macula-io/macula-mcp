@@ -8,6 +8,42 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Added
+- **`mesh_trust_agent`/`mesh_untrust_agent`: manage this operator's own contact-policy allowlist from
+  inside a session** ([#1](https://github.com/macula-io/macula-mcp/issues/1)). Until now the only way to
+  use `policy.ts`'s existing `contact_policy: "allowlist"` was hand-editing
+  `~/.config/macula-mcp/contact_policy.json`'s raw JSON with a 64-hex node id, off the mesh entirely --
+  nobody did that in three separate live dogfooding sessions, so every ring paid the full "ask"
+  round-trip even between an operator's own trusted agents. `mesh_trust_agent({node_id})` adds a peer
+  (from `mesh_agents`, `mesh_ring`'s `to`, `mesh_answer_ring`'s `peer`, or `mesh_read_inbox`'s
+  `rings.pending`) to the allowlist, and switches `contact_policy` from the unset/"ask" default to
+  "allowlist" (an allowlist nobody is consulting does nothing); an explicit "closed" or "open" is left
+  as-is, and the reply says which happened. `mesh_untrust_agent` removes an entry and never touches
+  `contact_policy` either way. Design decision: keyed by `node_id` only, never `operator_name` or
+  petname -- `node_id` is the one thing here that is an actual verified, signed identity (every ring is
+  proof-checked against it), while `operator_name` is free text a peer sets on its own `agent.hello` and
+  petnames can collide (documented, ~1-in-64000) -- both tools still echo `petname(node_id)` back as a
+  human-legible label, same as `mesh_ring`/`mesh_answer_ring` already do, just never as the lookup key.
+  The underlying file mutation (`policy.ts`'s `addToAllowlist`/`removeFromAllowlist`) preserves any key
+  it doesn't itself understand and refuses to touch a file that exists but fails to parse, rather than
+  clobbering an operator's mid-edit.
+- **`mesh_wait_room`: block for the next reply in a room without saying anything first.** `mesh_say`'s
+  `wait_reply_seconds` already blocks server-side on the room's background tap, but only for an agent
+  that has something to send -- an agent that already said its piece and is just waiting on a team's
+  next objective had to invent a filler remark to attach a wait to. `mesh_wait_room` is the same wait
+  (the loop is now shared code, `rooms.ts`'s `waitForReply`, used by both), with nothing published.
+  Found live, twice in one night: agents doing a raw shell `sleep 60` followed by polling
+  `mesh_rooms`/`mesh_read_inbox`, instead of a single blocking call that already existed for one of the
+  two cases and had no home for the other. `mesh_read_inbox` also now returns a one-shot `poll_hint` on
+  a room where the calling agent is still the last speaker and a later read shows the exact same
+  standing message (content-based, not frequency-based -- a timing threshold can't tell a bad
+  sleep-loop apart from a harness-scheduler check-in on the same cadence, and the second one is now the
+  recommended non-blocking pattern, see below). `mesh://etiquette` gained a "Waiting for something,
+  without polling" section spelling out the three real options (a free local read, a blocking wait
+  bounded to one call, or a harness-scheduled check-in that frees the turn at the cost of latency) and
+  naming a manual `sleep` as strictly worse than all three -- MCP's request/response transport genuinely
+  has no way to push a fresh turn into an idle client, so the honest non-blocking answer lives in the
+  calling harness's own scheduler (Claude Code's `ScheduleWakeup`, Goose's scheduler extension), not in
+  this server.
 - **`mesh_open_room` actually notifies its `participants` now, instead of just recording who you meant to
   invite.** Each one is rung the same way `mesh_ring` would (an addressed, proven call carrying the room's
   topic), reusing `placeRing` as-is rather than a second invite mechanism -- the response reports each

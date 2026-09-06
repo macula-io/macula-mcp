@@ -17,9 +17,9 @@
 // thrown: a typo in a config file must never make an agent unringable
 // without saying so.
 
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** No booleans: the policy is one of these integers, advertised as contact_policy. */
 export const POLICY = { open: 1, ask: 2, allowlist: 3, closed: 4 } as const;
@@ -136,4 +136,137 @@ export function loadContactPolicy(): ContactPolicy {
 /** Whether `nodeId` (or a citizen id, the same string today) is on the allowlist. Case-insensitive. */
 export function isAllowlisted(policy: ContactPolicy, nodeId: string): boolean {
   return policy.allowlist.includes(nodeId.toLowerCase());
+}
+
+// ---- managing the allowlist from inside a session (macula-mcp#1) ----
+//
+// Design decision, recorded here rather than left open: keyed by node_id,
+// never by operator_name. operator_name is free text a peer sets on its
+// OWN agent.hello (presence.ts) -- nothing verifies it, and roster.ts
+// stores whatever the last hello claimed. Trusting a self-asserted label
+// would let any stranger type "Raf's fleet" into operator_name and be
+// auto-accepted. node_id is the one thing here that is actually a
+// cryptographic identity (every ring is signed over it, verified by
+// ownership_proof.ts) -- it is the only fit for a security boundary.
+// petname.ts is used the other way around: mesh_trust_agent.ts echoes
+// petname(node_id) back so a human/model can eyeball "is this the peer I
+// meant" the same way mesh_ring/mesh_answer_ring already do, but it is
+// never accepted as a lookup key -- petname.ts's own doc is explicit that
+// two different node ids can share one (1-in-64000, not a uniqueness
+// proof), which would make an allowlist keyed on it ambiguous exactly
+// where an allowlist cannot afford to be.
+
+export interface AllowlistMutationResult {
+  ok: 1 | 0;
+  node_id?: string;
+  allowlist_size?: number;
+  contact_policy?: Policy;
+  policy_label?: string;
+  /** 1 when this call also switched contact_policy in the file (see addToAllowlist's own doc for when that happens). */
+  policy_changed?: 0 | 1;
+  path: string;
+  error?: string;
+}
+
+/**
+ * Reads the file's raw parsed JSON (or {} if it does not exist yet),
+ * naming exactly why it cannot when it can't -- a missing file is fine
+ * (there is nothing to preserve), but a file that exists and is broken
+ * is NOT silently replaced: overwriting an operator's mid-edit or
+ * genuinely malformed file out from under them would destroy whatever
+ * they were doing, the opposite of "never delete features/work."
+ */
+function readRawPolicyFile(path: string): { raw: Record<string, unknown> } | { error: string } {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { raw: {} };
+    return { error: `cannot read ${path}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return { error: `${path} is not valid JSON: ${e instanceof Error ? e.message : String(e)} -- fix it by hand first, this cannot safely edit a file it cannot parse` };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { error: `${path}: top level must be an object -- fix it by hand first, this cannot safely edit a file it cannot parse` };
+  }
+  return { raw: parsed as Record<string, unknown> };
+}
+
+/** Writes `raw` back, 0600 in a 0700 directory -- same discipline as roster.sqlite3/ring_service.ts's socket dir/realm.ts's credential file. Preserves every key this module does not itself understand (only `allowlist` and, sometimes, `contact_policy` are ever touched by the callers below), so a field an operator added by hand survives a tool-driven edit. */
+function writeRawPolicyFile(path: string, raw: Record<string, unknown>): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, JSON.stringify(raw, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // best effort, same as roster.ts/ring_service.ts
+  }
+}
+
+/**
+ * Adds `nodeId` to this operator's own allowlist, so the next ring from
+ * that peer skips the "ask" round-trip -- the ergonomic path
+ * macula-mcp#1 asked for, in place of hand-editing the JSON file.
+ *
+ * Also flips contact_policy to "allowlist" in the file, but ONLY when it
+ * is currently unset or the "ask" default: an allowlist nobody is
+ * consulting does nothing (the exact friction the issue reported --
+ * POLICY.allowlist already existed and nothing used it), so trusting the
+ * first peer is also the moment "ask" stops making sense as this
+ * operator's standing answer. "closed" is left alone -- a deliberate
+ * opt-out from everyone stays authoritative, ring_service.ts's own
+ * switch never even consults the allowlist under closed, so the entry is
+ * recorded for later but has no effect until the operator changes
+ * contact_policy themselves. "open" is left alone too -- already accepts
+ * everyone, so there is nothing to flip.
+ */
+export function addToAllowlist(nodeId: string): AllowlistMutationResult {
+  const path = policyFilePath();
+  const id = nodeId.toLowerCase();
+  if (!HEX64.test(id)) return { ok: 0, path, error: `not a 64-hex node id: ${JSON.stringify(nodeId)}` };
+  const read = readRawPolicyFile(path);
+  if ("error" in read) return { ok: 0, path, error: read.error };
+  const raw = read.raw;
+  const existing = Array.isArray(raw.allowlist) ? (raw.allowlist as unknown[]).filter((e): e is string => typeof e === "string").map((e) => e.toLowerCase()) : [];
+  const nextAllowlist = existing.includes(id) ? existing : [...existing, id];
+  const currentPolicy = parsePolicy(raw.contact_policy);
+  const policyChanged = currentPolicy === undefined || currentPolicy === POLICY.ask;
+  const nextPolicy: Policy = policyChanged ? POLICY.allowlist : currentPolicy;
+  raw.allowlist = nextAllowlist;
+  raw.contact_policy = policyLabel(nextPolicy);
+  try {
+    writeRawPolicyFile(path, raw);
+  } catch (e) {
+    return { ok: 0, path, error: `cannot write ${path}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return { ok: 1, node_id: id, allowlist_size: nextAllowlist.length, contact_policy: nextPolicy, policy_label: policyLabel(nextPolicy), policy_changed: policyChanged ? 1 : 0, path };
+}
+
+/**
+ * Removes `nodeId` from the allowlist, if present. Never touches
+ * contact_policy either way -- untrusting one peer is not a signal about
+ * what the operator wants for everyone else, so this never guesses at
+ * reverting "allowlist" back to "ask" (there may be other trusted peers
+ * still relying on it).
+ */
+export function removeFromAllowlist(nodeId: string): AllowlistMutationResult {
+  const path = policyFilePath();
+  const id = nodeId.toLowerCase();
+  const read = readRawPolicyFile(path);
+  if ("error" in read) return { ok: 0, path, error: read.error };
+  const raw = read.raw;
+  const existing = Array.isArray(raw.allowlist) ? (raw.allowlist as unknown[]).filter((e): e is string => typeof e === "string").map((e) => e.toLowerCase()) : [];
+  const nextAllowlist = existing.filter((e) => e !== id);
+  raw.allowlist = nextAllowlist;
+  const currentPolicy = parsePolicy(raw.contact_policy) ?? POLICY.ask;
+  try {
+    writeRawPolicyFile(path, raw);
+  } catch (e) {
+    return { ok: 0, path, error: `cannot write ${path}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return { ok: 1, node_id: id, allowlist_size: nextAllowlist.length, contact_policy: currentPolicy, policy_label: policyLabel(currentPolicy), policy_changed: 0, path };
 }
