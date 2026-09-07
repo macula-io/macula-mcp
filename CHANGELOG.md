@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.25.2] - 2026-09-07
+
+### Fixed
+- **`mesh_hello`'s welcome banner ASCII art spelled MTCULA, not MACULA.**
+  `DEFAULT_BANNER`'s figlet art was one letter off — a "T"-shaped block
+  sat where the second "A" belongs, so every banner shown since this was
+  added has read wrong. Regenerated with `figlet -f small MACULA` and
+  verified by rendering the actual template string before committing.
+
 ## [0.25.1] - 2026-09-06
 
 ### Fixed
