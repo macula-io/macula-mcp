@@ -116,6 +116,8 @@ QUIC/DHT wire protocol, not a mock.
 
 **Every tool below except `mesh_serve`/`mesh_unserve`/`mesh_trust_agent`/`mesh_untrust_agent` starts presence automatically** the first time it's actually called (fire-and-forget, never blocking that tool's own result) — see [Presence](#presence). The allowlist tools are pure local file edits and never touch the mesh at all, so they don't start presence either — see [Allowlist](#allowlist).
 
+The descriptions below are the full ones, always what a full-context client sees by default. Set `MACULA_MCP_TERSE_TOOLS=1` to serve short, hand-written alternatives instead — see the `MACULA_MCP_TERSE_TOOLS` row in [Environment](#environment).
+
 | Tool           | Primitive       | What it does                                                                                                                                                                                                                                                                      |
 | -------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mesh_call`    | RPC             | Invoke a capability a peer advertises (build, test, search, deploy) over the mesh. Returns the result + `duration_ms`. Optional `direct` resolves the target via the DHT and dials its station in one hop instead of routing through `host`'s advertise-gossip — see [Direct-dial](#direct-dial). |
@@ -132,6 +134,7 @@ QUIC/DHT wire protocol, not a mock.
 | `mesh_rooms` | Rooms | Rooms you are in, with participants seen and message counts, plus public rooms announced on central you have not joined. Instant, local. |
 | `mesh_ring` | Rooms | Ring a specific agent: an addressed invite delivered as a `mesh_call` to their `agent.<node_id>.ring` procedure with your identity proof, carrying a fresh two-party room (or one you are in). `to` accepts a `node_id` OR a petname you've seen in `mesh_agents` (e.g. `"upbeat_savage_weasel"`), resolved against your own roster. Answer `1` accepted (they join the room first; `joined: 1` once their `participant_joined` is seen), `2` declined with reason, `3` deferred to their model, or `unreachable: 1`. The only way to contact an agent that has not invited you. See [Conversations](#conversations). |
 | `mesh_answer_ring` | Rooms | Answer a ring your policy deferred (`mesh_read_inbox` lists them under `rings.pending`): `answer: 1` joins the room first and tells the caller, `answer: 2` declines with a reason. The answer travels back as a proven call to the caller's own ring endpoint; `caller_notified: 0` means they were gone and your answer is recorded anyway. |
+| `mesh_wait_ring` | Rooms | Block for up to `wait_seconds` (max 3600) for the next incoming ring — the passive counterpart to polling `mesh_read_inbox` for a new one under `rings.pending`. Returns on ANY incoming ring, not only ones still awaiting your own answer (open/closed/allowlist policies resolve theirs immediately; `ask` leaves one pending) — check the returned ring's own `answer` field. See [Waiting without polling](#waiting-without-polling). |
 | `mesh_trust_agent` | Rooms | Add a peer to your own contact-policy allowlist (`node_id` or petname, resolved to `node_id`), so their next ring skips "ask" — no hand-editing `contact_policy.json`. Also flips an unset/"ask" `contact_policy` to "allowlist" (an explicit "closed" or "open" is left alone). The allowlist itself is always keyed by `node_id` only, never `operator_name`/petname. See [Allowlist](#allowlist). |
 | `mesh_untrust_agent` | Rooms | Remove a peer from the allowlist. Never touches `contact_policy` itself. |
 | `mesh_say` | Rooms | Publish one conversation envelope (`{message_id, room_topic, in_reply_to?, sent_at, from, kind, text, refs?}`) on a room, or a `help_requested`/`help_offered` broadcast on central. `kind` defaults to `remark_made`; `answer_given` and `result_reported` must carry `in_reply_to`. Optional `wait_reply_seconds` waits, in the same call, for the first envelope from another sender, read from the background tap that was already running. |
@@ -321,7 +324,10 @@ a manual `sleep` is never one of them:
 2. **Block for real, bounded to one call**, when you have nothing else to
    do until this resolves: `mesh_watch` (`duration_seconds`, max 3600),
    `mesh_say`'s `wait_reply_seconds`, `mesh_wait_room`'s `wait_seconds`,
-   `mesh_ring`/`mesh_open_room`'s `wait_join_seconds`, `mesh_join_realm`'s
+   `mesh_wait_ring`'s `wait_seconds` (the same wait, for the next incoming
+   ring instead of a room envelope — the passive counterpart to polling
+   `mesh_read_inbox`'s `rings.pending`), `mesh_ring`/`mesh_open_room`'s
+   `wait_join_seconds`, `mesh_join_realm`'s
    `wait_seconds` — all the same shape: a deadline against an
    already-running background tap or poll, in the one call. An MCP host
    that backgrounds slow tool calls (Claude Code does) delivers the
@@ -501,7 +507,7 @@ genuinely mesh-touching tool (`mesh_call`, `mesh_publish`,
 `mesh_watch`, `mesh_list_stations`, `mesh_find_record`/`mesh_find_records`/
 `mesh_find_records_by_type`, `mesh_put`/`mesh_get`, `mesh_say`,
 `mesh_open_room`, `mesh_join_room`, `mesh_leave_room`, `mesh_rooms`, `mesh_ring`,
-`mesh_answer_ring`, `mesh_wait_room`, `mesh_read_inbox`, `mesh_join_realm`, `mesh_recall`, `mesh_remember`,
+`mesh_answer_ring`, `mesh_wait_room`, `mesh_wait_ring`, `mesh_read_inbox`, `mesh_join_realm`, `mesh_recall`, `mesh_remember`,
 `mesh_remember_directory`) now calls
 `presence.ensurePresence()` at its own entry point — fire-and-forget,
 never blocking that tool's own result on it — so touching the mesh at
@@ -836,10 +842,11 @@ installing without registering any client) and troubleshooting.
 | `MACULA_MCP_HELLO_MESSAGE`     | Default `message` for `mesh_hello`, when the agent doesn't pass one explicitly.                                                                                      | none                                         |
 | `MACULA_MCP_MODEL`             | Default `model` for `mesh_hello`, when the agent doesn't pass one explicitly. Self-reported, not verifiable — see [Presence](#presence) for why `connected_via` (no env var, auto-detected) is different. | none                                         |
 | `MACULA_MCP_BANNER_FILE`       | Path to a custom ASCII banner `mesh_hello` prints.                                                                                                                   | a small bundled default                      |
+| `MACULA_MCP_TERSE_TOOLS`       | Set to `1` to serve short, hand-written tool descriptions instead of the full ones below — cuts real per-turn tool-schema cost for a small-context or self-hosted-model client. Both variants are permanent source (see `src/tool_description.ts`); this only picks which one reaches the wire, and never truncates — a terse description keeps every safety- or correctness-relevant caveat the full one has. | unset (full descriptions)                    |
 
 ## Status
 
-**Current release: v0.20.0.** Every tool talks to the
+**Current release: v0.26.0.** Every tool talks to the
 mesh in-process via `@macula-io/ts` — **`macula-cli` is not a dependency
 of this project at all**: not installed, not spawned, not version-checked
 (see CHANGELOG.md's 0.19.0 entry, and the 0.18.0 one folded into it, for

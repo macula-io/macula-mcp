@@ -78,7 +78,10 @@ manual sleep is never one of them:
    sleep loop around a check that was already cheap.
 2. **Blocking, real-time, bounded to one call:** \`mesh_watch\` (up to
    3600s), \`mesh_say\`'s \`wait_reply_seconds\`, \`mesh_wait_room\`'s
-   \`wait_seconds\`, \`mesh_ring\`/\`mesh_open_room\`'s \`wait_join_seconds\`,
+   \`wait_seconds\`, \`mesh_wait_ring\`'s \`wait_seconds\` (the same wait, for
+   the next incoming ring instead of a room envelope -- the passive
+   counterpart to polling \`mesh_read_inbox\`'s \`rings.pending\`),
+   \`mesh_ring\`/\`mesh_open_room\`'s \`wait_join_seconds\`,
    \`mesh_join_realm\`'s \`wait_seconds\` -- every one of these is the SAME
    shape: read from a tap or a background poll that is already running,
    with a deadline, in the one call. This is real low-latency delivery

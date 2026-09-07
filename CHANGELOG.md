@@ -5,6 +5,60 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.26.0] - 2026-09-07
+
+### Added
+- **`mesh_wait_ring`: block for the next incoming ring, without polling
+  `mesh_read_inbox`.** The passive counterpart to `mesh_wait_room`, reusing
+  the identical mechanism: `ring_service.ts`'s `handleRing()` already calls
+  `rings.ts`'s `recordRing()` on every real inbound ring (all four
+  policies -- open/closed/allowlist answer theirs immediately, `ask` leaves
+  one pending), the moment ring serving is active, independent of whether
+  anything is waiting on it. That existing write is this tool's whole
+  background tap. `rings.ts`'s new `waitRing()` mirrors `rooms.ts`'s
+  `waitForReply`/`waitRoom` polling shape, but simpler: every ring row is
+  already scoped to `direction='in'` for `self`, so the first new row past
+  the cursor is unconditionally the answer, no per-row filtering needed.
+  Returns on ANY incoming ring, not only still-pending ones, matching
+  `mesh_wait_room`'s own "any new envelope from someone else" semantic.
+  Adds a ring-service-not-active guard `mesh_wait_room` doesn't have --
+  fails fast with the real reason (disabled vs. failed-to-start) instead
+  of silently timing out for a ring that structurally cannot arrive. 10
+  new tests, RED-then-GREEN verified for both the `direction='in'` filter
+  and the not-active guard. Additive only, existing ring RPC/inbox
+  behavior untouched. See macula-io/macula-mcp#2 (motivating context: the
+  bug that made lazymesh's own agents look present but unringable).
+- **`MACULA_MCP_TERSE_TOOLS=1`: opt-in short tool descriptions, every
+  consumer benefits, not just lazymesh.** lazymesh had built its own
+  client-side override table translating this server's verbose tool
+  descriptions down to short ones -- useful only to lazymesh, and every
+  OTHER consumer (Goose, Claude Desktop, anything else) still paid the
+  full original token cost on every tool schema. This moves the same idea
+  into the server itself: every one of the ~30 tools across 22
+  `mesh_*.ts` files now has its own hand-written `DESCRIPTION_TERSE`
+  alongside the existing (unchanged) `DESCRIPTION_FULL`, picked by
+  `tool_description.ts`'s `toolDescription()` based on the env var.
+  Full descriptions are the default and stay exactly as verbose as ever
+  for a full-context client or a human reading this codebase as
+  reference material -- terse is opt-in, and never a truncation of full:
+  several tools (`mesh_serve`'s standing-inbound-surface warning,
+  `mesh_remember`'s shared/unencrypted caveat, `mesh_ring`'s answer-code
+  meanings, `mesh_say`'s reply-kind pairing rules, `mesh_trust_agent`'s
+  node_id-only trust boundary) have safety- or correctness-relevant
+  caveats a character-limit cut could silently drop, so every terse
+  variant was authored separately with those kept in. MCP's own `title`
+  field was considered and ruled out (checked against both the installed
+  SDK and the live spec): it's display-only, not a semantic summary, and
+  can't substitute for a real description. New `all_tool_descriptions.test.ts`
+  discovers every registered tool by parsing `index.ts`'s own import list
+  (not a hand-maintained duplicate that could drift) and mechanically
+  asserts every one has a non-empty, genuinely shorter terse variant --
+  RED-then-GREEN verified by temporarily un-wiring one tool's toggle and
+  confirming the test caught it. Verified against the real running
+  server too, not just the test's fake one: 33 tools in both modes, same
+  set, none unchanged, full `tools/list` payload 44371 bytes vs. terse
+  31825 -- a 28% real reduction on the wire.
+
 ## [0.25.2] - 2026-09-07
 
 ### Fixed
