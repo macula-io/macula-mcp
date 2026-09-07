@@ -22,15 +22,22 @@ import { signIdentity, withIdentityProof } from "./citizenship.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
+import { toolDescription } from "./tool_description.js";
+
+const DESCRIPTION_FULL =
+  "Invoke a procedure advertised on the mesh (build, test, search, deploy on commons hardware). " +
+  "Macula RPC is procedure-addressed: the target station routes to a peer that advertises it. " +
+  `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given. ` +
+  "If this server's own MACULA_MCP_UCAN is set, its token is attached to every call automatically " +
+  "(harmless against a procedure that isn't UCAN-gated).";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh (procedure-addressed RPC). Returns the peer's result. Defaults to ${defaultStation()} if host isn't given.`;
 
 export function registerMeshCall(server: McpServer): void {
   server.tool(
     "mesh_call",
-    "Invoke a procedure advertised on the mesh (build, test, search, deploy on commons hardware). " +
-      "Macula RPC is procedure-addressed: the target station routes to a peer that advertises it. " +
-      `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given. ` +
-      "If this server's own MACULA_MCP_UCAN is set, its token is attached to every call automatically " +
-      "(harmless against a procedure that isn't UCAN-gated).",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       procedure: z
         .string()

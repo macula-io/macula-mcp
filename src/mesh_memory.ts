@@ -64,6 +64,7 @@ import { call, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret, findLikelySecret, isExcludedPath } from "./secret_scan.js";
+import { toolDescription } from "./tool_description.js";
 
 const SEARCH_PROCEDURE = "hecate-rag.answer_query";
 const ADD_KNOWLEDGE_PROCEDURE = "hecate-rag.add_knowledge";
@@ -122,16 +123,56 @@ function isDirectoryError(e: unknown): boolean {
   return e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "EISDIR";
 }
 
+const RECALL_DESCRIPTION_FULL =
+  "Query the mesh's shared memory (hecate-rag, a realm-bound RAG service) for anything relevant to " +
+  "query_text -- semantic retrieval, not keyword match. Auto-discovers which realm hecate-rag is " +
+  "currently advertised under, then calls its answer_query capability. Returns whatever chunks other " +
+  "agents (or you, earlier) deposited via mesh_remember that are semantically close to the query, " +
+  "each with a similarity score, source_path, and chunk metadata. Empty results mean nothing relevant " +
+  "has been deposited yet, not an error. Not automatic -- call this deliberately when you actually " +
+  "want to check shared memory, e.g. early in a session working on a repo others may have touched.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "empty is not an error" and "not automatic". */
+const RECALL_DESCRIPTION_TERSE =
+  "Query the mesh's shared memory (hecate-rag) for anything relevant to query_text -- semantic, not " +
+  "keyword match. Returns chunks anyone deposited via mesh_remember, scored. Empty means nothing " +
+  "relevant yet, not an error. Not automatic -- call deliberately, e.g. early in a session on a shared repo.";
+
+const REMEMBER_DESCRIPTION_FULL =
+  "Deposit something worth remembering into the mesh's shared memory (hecate-rag) -- one mesh RPC " +
+  "(add_knowledge), so it becomes searchable via mesh_recall for any agent, not just you, in future " +
+  "sessions. Short deposits (a sentence or two) are fine -- unlike raw document ingestion, this is " +
+  "designed for conversational snippets and won't silently produce zero chunks. Be deliberate about " +
+  "what you write here: this is shared, not private to you, and this mesh doesn't encrypt payloads -- " +
+  "the same caveat mesh_say and mesh_open_room already carry. Don't deposit anything " +
+  "you wouldn't want another agent or operator reading.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The shared/unencrypted privacy warning is safety-relevant, kept at full force. */
+const REMEMBER_DESCRIPTION_TERSE =
+  "Deposit something worth remembering into shared mesh memory (hecate-rag), searchable via mesh_recall " +
+  "by any agent, not just you. Short snippets are fine. SHARED, NOT PRIVATE, and unencrypted -- same " +
+  "caveat as mesh_say. Don't deposit anything you wouldn't want another agent or operator reading.";
+
+const REMEMBER_DIRECTORY_DESCRIPTION_FULL =
+  "Recursively ingest every matching file under a LOCAL directory into the mesh's shared memory " +
+  "(hecate-rag), one hecate-rag.upload_knowledge call per file -- for real documents (a corpus, a " +
+  "set of notes), not conversational snippets (use mesh_remember for those). Each file's content " +
+  "travels in its own mesh call, so this works regardless of where hecate-rag is physically running " +
+  "-- it does NOT ask hecate-rag to read from its own filesystem (hecate-rag's seed_corpus does that, " +
+  "and isn't reachable over the mesh at all). document_id is derived deterministically from each " +
+  "file's relative path, so re-running this on the same directory updates existing documents instead " +
+  "of duplicating them. Binary or undecodable files are skipped, not treated as errors. Processes " +
+  "files sequentially, one mesh call at a time -- a large directory will take a while; the response " +
+  "is a summary (counts + any per-file failures), not a per-file log.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "re-running updates, doesn't duplicate" and the sequential/slow-for-large-directories caveat. */
+const REMEMBER_DIRECTORY_DESCRIPTION_TERSE =
+  "Recursively ingest matching files under a LOCAL directory into shared mesh memory (hecate-rag), one " +
+  "call per file -- for real documents/corpora, not conversational snippets (use mesh_remember for " +
+  "those). Re-running the same directory updates existing documents, doesn't duplicate. Sequential, " +
+  "one file at a time -- a large directory takes a while; response is a summary, not a per-file log.";
+
 export function registerMeshMemory(server: McpServer): void {
   server.tool(
     "mesh_recall",
-    "Query the mesh's shared memory (hecate-rag, a realm-bound RAG service) for anything relevant to " +
-      "query_text -- semantic retrieval, not keyword match. Auto-discovers which realm hecate-rag is " +
-      "currently advertised under, then calls its answer_query capability. Returns whatever chunks other " +
-      "agents (or you, earlier) deposited via mesh_remember that are semantically close to the query, " +
-      "each with a similarity score, source_path, and chunk metadata. Empty results mean nothing relevant " +
-      "has been deposited yet, not an error. Not automatic -- call this deliberately when you actually " +
-      "want to check shared memory, e.g. early in a session working on a repo others may have touched.",
+    toolDescription(RECALL_DESCRIPTION_FULL, RECALL_DESCRIPTION_TERSE),
     {
       query_text: z.string().describe("What to search for, in natural language."),
       top_k: z.number().int().positive().max(100).optional().describe("Max results (default 10)."),
@@ -162,13 +203,7 @@ export function registerMeshMemory(server: McpServer): void {
 
   server.tool(
     "mesh_remember",
-    "Deposit something worth remembering into the mesh's shared memory (hecate-rag) -- one mesh RPC " +
-      "(add_knowledge), so it becomes searchable via mesh_recall for any agent, not just you, in future " +
-      "sessions. Short deposits (a sentence or two) are fine -- unlike raw document ingestion, this is " +
-      "designed for conversational snippets and won't silently produce zero chunks. Be deliberate about " +
-      "what you write here: this is shared, not private to you, and this mesh doesn't encrypt payloads -- " +
-      "the same caveat mesh_say and mesh_open_room already carry. Don't deposit anything " +
-      "you wouldn't want another agent or operator reading.",
+    toolDescription(REMEMBER_DESCRIPTION_FULL, REMEMBER_DESCRIPTION_TERSE),
     {
       content: z.string().describe("The text to remember, in your own words. Markdown is fine -- header-aware chunking splits it if long."),
       source_label: z.string().optional().describe("Grouping/attribution label, e.g. \"agent-notes/macula-mcp-presence\". Defaults to \"conversational\" if omitted."),
@@ -207,16 +242,7 @@ export function registerMeshMemory(server: McpServer): void {
 
   server.tool(
     "mesh_remember_directory",
-    "Recursively ingest every matching file under a LOCAL directory into the mesh's shared memory " +
-      "(hecate-rag), one hecate-rag.upload_knowledge call per file -- for real documents (a corpus, a " +
-      "set of notes), not conversational snippets (use mesh_remember for those). Each file's content " +
-      "travels in its own mesh call, so this works regardless of where hecate-rag is physically running " +
-      "-- it does NOT ask hecate-rag to read from its own filesystem (hecate-rag's seed_corpus does that, " +
-      "and isn't reachable over the mesh at all). document_id is derived deterministically from each " +
-      "file's relative path, so re-running this on the same directory updates existing documents instead " +
-      "of duplicating them. Binary or undecodable files are skipped, not treated as errors. Processes " +
-      "files sequentially, one mesh call at a time -- a large directory will take a while; the response " +
-      "is a summary (counts + any per-file failures), not a per-file log.",
+    toolDescription(REMEMBER_DIRECTORY_DESCRIPTION_FULL, REMEMBER_DIRECTORY_DESCRIPTION_TERSE),
     {
       directory: z.string().describe("Local directory to walk, recursively. Must exist and be readable."),
       include_extensions: z

@@ -16,13 +16,19 @@ import { publish } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
+import { toolDescription } from "./tool_description.js";
+
+const DESCRIPTION_FULL =
+  "Publish an integration fact to a mesh topic so other parties' agents can react. " +
+  "Use a business verb for the fact type (e.g. 'module_generated', 'capability_announced'), " +
+  `never CRUD. Returns the topic and duration_ms. Defaults to ${defaultStation()} if host isn't given.`;
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the business-verb-not-CRUD naming rule. */
+const DESCRIPTION_TERSE = `Publish a fact to a mesh topic. Use a business verb for the fact type (e.g. 'module_generated'), never CRUD. Defaults to ${defaultStation()} if host isn't given.`;
 
 export function registerMeshPublish(server: McpServer): void {
   server.tool(
     "mesh_publish",
-    "Publish an integration fact to a mesh topic so other parties' agents can react. " +
-      "Use a business verb for the fact type (e.g. 'module_generated', 'capability_announced'), " +
-      `never CRUD. Returns the topic and duration_ms. Defaults to ${defaultStation()} if host isn't given.`,
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       topic: z.string().describe("Topic name (e.g. 'agents.module_generated')."),
       fact: z.record(z.string(), z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire)."),

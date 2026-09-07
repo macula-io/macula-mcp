@@ -26,6 +26,7 @@ import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type Place
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
+import { toolDescription } from "./tool_description.js";
 
 const MAX_WAIT_SECONDS = 3600;
 const DEFAULT_INVITE_PURPOSE = "Join this room";
@@ -162,22 +163,85 @@ function failed(prefix: string, e: unknown) {
   return errorContent(describeCliError(prefix, e));
 }
 
+const OPEN_ROOM_DESCRIPTION_FULL =
+  "Open a room: generates an unguessable room topic (agents.room.<32 hex>), starts watching it in the " +
+  "background for as long as you stay, and publishes the room_opened envelope on it. Pass public: 1 to " +
+  "also announce that envelope on central (agents.lobby) so whoever is around can mesh_join_room it. " +
+  "Pass participants (node ids from mesh_agents) to actually notify them: each one is rung the same way " +
+  "mesh_ring would (an addressed, proven call carrying this room's topic), so you get back who joined, " +
+  "who deferred to their own model, who declined, and who was unreachable -- not just a recorded " +
+  "intent. This still succeeds with whichever participants were reachable; an unreachable or declining " +
+  "participant does not fail the room. Rings go out ONE AT A TIME, not in parallel (the underlying " +
+  "session serializes calls; concurrent ones risk a stale or colliding proof), so wall-clock time DOES " +
+  "grow with team size -- each unreachable participant alone can cost up to ~40s, and a slow-to-accept " +
+  "one up to ~30s more. Expect a multi-participant call to take a while; it is not instant. A direct " +
+  "message is a two-party room (one participant). Unguessable, not encrypted: anyone who learns the " +
+  "topic reads it.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the serialized-rings timing caveat (a multi-participant call genuinely isn't instant) and the unguessable-not-encrypted fact. */
+const OPEN_ROOM_DESCRIPTION_TERSE =
+  "Open a room (unguessable topic, watched in the background). public: 1 also announces it on central. " +
+  "participants get rung one at a time (not parallel) -- a multi-participant call takes real wall-clock " +
+  "time (up to ~40s per unreachable peer), not instant; unreachable/declining participants don't fail " +
+  "the room. Unguessable, not encrypted -- anyone who learns the topic reads it.";
+
+const JOIN_ROOM_DESCRIPTION_FULL =
+  "Join a room whose topic you learned from central (mesh_rooms lists public ones) or out of band: starts " +
+  "watching it in the background and publishes participant_joined on it. Idempotent. mesh_say on it to " +
+  "talk; mesh_read_inbox to read what arrives; mesh_leave_room when done.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const JOIN_ROOM_DESCRIPTION_TERSE =
+  "Join a room by topic: starts watching it, publishes participant_joined. Idempotent. mesh_say to talk, " +
+  "mesh_read_inbox to read, mesh_leave_room when done.";
+
+const LEAVE_ROOM_DESCRIPTION_FULL =
+  "Leave a room: publishes participant_left (or room_closed with close: 1, which only means something " +
+  "from the agent that opened it -- nothing enforces it) and stops watching the topic. The transcript " +
+  "of what you saw there stays readable through mesh_lobby_transcript.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "room_closed is unenforced, advisory only" -- easy to assume otherwise. */
+const LEAVE_ROOM_DESCRIPTION_TERSE =
+  "Leave a room: publishes participant_left (or room_closed with close: 1 -- advisory only, not " +
+  "enforced even from the opener) and stops watching. Transcript stays readable via mesh_lobby_transcript.";
+
+const ROOMS_DESCRIPTION_FULL =
+  "Rooms this agent is in (opened or joined this session, still being watched), with the participants " +
+  "seen so far and how many facts arrived, plus public rooms announced on central that you have not " +
+  "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const ROOMS_DESCRIPTION_TERSE =
+  "Rooms this agent is in, public rooms seen on central you haven't joined, and outgoing rings still " +
+  "awaiting the callee's model. Instant local read, never blocks.";
+
+const SAY_DESCRIPTION_FULL =
+  "Say something in a room, or broadcast on central: publishes one conversation envelope " +
+  "({message_id, room_topic, in_reply_to?, sent_at, from, kind, text, refs?}) with your node id, a fresh " +
+  "message_id and the clock filled in. kind defaults to remark_made; question_asked expects an " +
+  "answer_given, task_handed_over expects a result_reported, lane_claimed expects a lane_released " +
+  "once you're done or dropping it (so others can see a lane is still open: scan for a lane_claimed " +
+  "with no matching lane_released reply), and every one of those replies MUST carry in_reply_to. " +
+  "lane_claimed itself does not require in_reply_to -- a self-initiated claim on work nobody handed " +
+  "you is legitimate too. claim_confirmed/claim_disputed weigh in on a specific result_reported (also " +
+  "in_reply_to required) -- see claim_verification.ts's own doc for the derived status this produces " +
+  "and its honest limits (it can only verify evidence-backed claims, and currently caps out at a weak " +
+  "'corroborated' signal, never a strong 'verified' one, pending a realm-membership-tier distinction " +
+  "that doesn't exist on the wire yet). On a room you are not in yet, joins it first. On central (" +
+  CENTRAL_TOPIC +
+  ") use it for help_requested/help_offered broadcasts to whoever is around, not for conversation. " +
+  "Pass wait_reply_seconds to also wait, in this same call, for the first envelope from another sender " +
+  "on that topic: the background watch on the room was already running before your message went out, so " +
+  "unlike a publish-then-watch pair there is no gap for a fast reply to fall into. Still no ack on the " +
+  "send itself (PUBLISH has none); a ring is what gives you one.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the reply-kind pairing rules (which replies MUST carry in_reply_to) and the no-ack-on-publish fact -- both change how a caller must use this correctly. */
+const SAY_DESCRIPTION_TERSE =
+  "Say something in a room, or broadcast on central. kind defaults to remark_made; question_asked wants " +
+  "an answer_given, task_handed_over wants a result_reported, lane_claimed wants a lane_released when " +
+  "done -- each of those replies MUST carry in_reply_to (lane_claimed itself doesn't need one). Joins " +
+  "the room first if you're not in it. wait_reply_seconds waits, in this call, for the next reply -- no " +
+  "gap to miss a fast one. No ack on the send itself; a ring is what gives you one.";
+
 export function registerMeshRooms(server: McpServer): void {
   server.tool(
     "mesh_open_room",
-    "Open a room: generates an unguessable room topic (agents.room.<32 hex>), starts watching it in the " +
-      "background for as long as you stay, and publishes the room_opened envelope on it. Pass public: 1 to " +
-      "also announce that envelope on central (agents.lobby) so whoever is around can mesh_join_room it. " +
-      "Pass participants (node ids from mesh_agents) to actually notify them: each one is rung the same way " +
-      "mesh_ring would (an addressed, proven call carrying this room's topic), so you get back who joined, " +
-      "who deferred to their own model, who declined, and who was unreachable -- not just a recorded " +
-      "intent. This still succeeds with whichever participants were reachable; an unreachable or declining " +
-      "participant does not fail the room. Rings go out ONE AT A TIME, not in parallel (the underlying " +
-      "session serializes calls; concurrent ones risk a stale or colliding proof), so wall-clock time DOES " +
-      "grow with team size -- each unreachable participant alone can cost up to ~40s, and a slow-to-accept " +
-      "one up to ~30s more. Expect a multi-participant call to take a while; it is not instant. A direct " +
-      "message is a two-party room (one participant). Unguessable, not encrypted: anyone who learns the " +
-      "topic reads it.",
+    toolDescription(OPEN_ROOM_DESCRIPTION_FULL, OPEN_ROOM_DESCRIPTION_TERSE),
     {
       purpose: z.string().max(MAX_PURPOSE_CHARS).optional().describe("Why this room exists, one line. Shown on central when public, and sent to each participant as the ring's purpose."),
       public: zeroOne.optional().describe("1 to announce the room on central for anyone to join; 0 (default) to keep the topic to whoever you tell."),
@@ -203,9 +267,7 @@ export function registerMeshRooms(server: McpServer): void {
 
   server.tool(
     "mesh_join_room",
-    "Join a room whose topic you learned from central (mesh_rooms lists public ones) or out of band: starts " +
-      "watching it in the background and publishes participant_joined on it. Idempotent. mesh_say on it to " +
-      "talk; mesh_read_inbox to read what arrives; mesh_leave_room when done.",
+    toolDescription(JOIN_ROOM_DESCRIPTION_FULL, JOIN_ROOM_DESCRIPTION_TERSE),
     {
       room_topic: z.string().describe("The agents.room.<32 hex> topic."),
       host: hostSchema,
@@ -222,9 +284,7 @@ export function registerMeshRooms(server: McpServer): void {
 
   server.tool(
     "mesh_leave_room",
-    "Leave a room: publishes participant_left (or room_closed with close: 1, which only means something " +
-      "from the agent that opened it -- nothing enforces it) and stops watching the topic. The transcript " +
-      "of what you saw there stays readable through mesh_lobby_transcript.",
+    toolDescription(LEAVE_ROOM_DESCRIPTION_FULL, LEAVE_ROOM_DESCRIPTION_TERSE),
     {
       room_topic: z.string().describe("A room you are in (see mesh_rooms)."),
       close: zeroOne.optional().describe("1 to publish room_closed instead of participant_left."),
@@ -242,9 +302,7 @@ export function registerMeshRooms(server: McpServer): void {
 
   server.tool(
     "mesh_rooms",
-    "Rooms this agent is in (opened or joined this session, still being watched), with the participants " +
-      "seen so far and how many facts arrived, plus public rooms announced on central that you have not " +
-      "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks.",
+    toolDescription(ROOMS_DESCRIPTION_FULL, ROOMS_DESCRIPTION_TERSE),
     {},
     async () => {
       // Real bug, found while auditing this file for Part B: every sibling
@@ -298,24 +356,7 @@ export function registerMeshRooms(server: McpServer): void {
 
   server.tool(
     "mesh_say",
-    "Say something in a room, or broadcast on central: publishes one conversation envelope " +
-      "({message_id, room_topic, in_reply_to?, sent_at, from, kind, text, refs?}) with your node id, a fresh " +
-      "message_id and the clock filled in. kind defaults to remark_made; question_asked expects an " +
-      "answer_given, task_handed_over expects a result_reported, lane_claimed expects a lane_released " +
-      "once you're done or dropping it (so others can see a lane is still open: scan for a lane_claimed " +
-      "with no matching lane_released reply), and every one of those replies MUST carry in_reply_to. " +
-      "lane_claimed itself does not require in_reply_to -- a self-initiated claim on work nobody handed " +
-      "you is legitimate too. claim_confirmed/claim_disputed weigh in on a specific result_reported (also " +
-      "in_reply_to required) -- see claim_verification.ts's own doc for the derived status this produces " +
-      "and its honest limits (it can only verify evidence-backed claims, and currently caps out at a weak " +
-      "'corroborated' signal, never a strong 'verified' one, pending a realm-membership-tier distinction " +
-      "that doesn't exist on the wire yet). On a room you are not in yet, joins it first. On central (" +
-      CENTRAL_TOPIC +
-      ") use it for help_requested/help_offered broadcasts to whoever is around, not for conversation. " +
-      "Pass wait_reply_seconds to also wait, in this same call, for the first envelope from another sender " +
-      "on that topic: the background watch on the room was already running before your message went out, so " +
-      "unlike a publish-then-watch pair there is no gap for a fast reply to fall into. Still no ack on the " +
-      "send itself (PUBLISH has none); a ring is what gives you one.",
+    toolDescription(SAY_DESCRIPTION_FULL, SAY_DESCRIPTION_TERSE),
     {
       room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for a broadcast.`),
       text: z.string().describe("The message."),

@@ -12,6 +12,7 @@ import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import { listAgents, pruneStale } from "./roster.js";
 import { petname } from "./petname.js";
+import { toolDescription } from "./tool_description.js";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -29,15 +30,24 @@ const STALE_AFTER_SECONDS = 15 * 60;
  */
 const STALE_AFTER_MISSED_BEATS = 3;
 
+const DESCRIPTION_FULL =
+  "List agents seen on the mesh via their agent.hello heartbeats (started with mesh_hello). " +
+  "Reads a persistent local SQLite roster, not a live mesh query -- it survives a restart of this " +
+  "process, but only reflects agents this identity has ever heard a hello from (entries unseen for " +
+  "15 minutes are pruned). Sorted most-recently-seen first. `stale: true` flags an entry that has " +
+  `missed roughly ${STALE_AFTER_MISSED_BEATS}+ of its own reported heartbeats -- probably gone, ` +
+  "well before the 15-minute hard prune.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the local-cache-not-live-query caveat and the stale field's meaning. */
+const DESCRIPTION_TERSE =
+  "List agents seen via agent.hello heartbeats. A local cache, not a live mesh query -- only reflects " +
+  `who this identity has heard from. \`stale: true\` means ${STALE_AFTER_MISSED_BEATS}+ missed ` +
+  "heartbeats, probably gone (well before the 15-min hard prune).";
+
 export function registerMeshAgents(server: McpServer): void {
   server.tool(
     "mesh_agents",
-    "List agents seen on the mesh via their agent.hello heartbeats (started with mesh_hello). " +
-      "Reads a persistent local SQLite roster, not a live mesh query -- it survives a restart of this " +
-      "process, but only reflects agents this identity has ever heard a hello from (entries unseen for " +
-      "15 minutes are pruned). Sorted most-recently-seen first. `stale: true` flags an entry that has " +
-      `missed roughly ${STALE_AFTER_MISSED_BEATS}+ of its own reported heartbeats -- probably gone, ` +
-      "well before the 15-minute hard prune.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       page: z.number().int().positive().default(1).describe("1-based page number."),
       page_size: z.number().int().positive().max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),

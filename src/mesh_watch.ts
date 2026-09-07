@@ -33,18 +33,27 @@ import { defaultStation, watchIdentityPath } from "./mesh_config.js";
 import { watch } from "./macula_ts_client.js";
 import { HELLO_TOPIC, GOODBYE_TOPIC, ensurePresence } from "./presence.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { toolDescription } from "./tool_description.js";
 
 const MAX_DURATION_SECONDS = 3600;
+
+const DESCRIPTION_FULL =
+  "Watch a mesh topic for inbound facts for up to duration_seconds, then return whatever " +
+  "arrived. This call BLOCKS for the full duration (or until count events arrive, " +
+  "whichever is first) -- there is no standing/background subscription to poll later; " +
+  `call this again to keep watching. Defaults to ${defaultStation()} if host isn't given. ` +
+  `Presence heartbeats are ordinary facts on "${HELLO_TOPIC}"/"${GOODBYE_TOPIC}" -- watch ` +
+  "those directly to react to an arrival/departure yourself instead of polling mesh_agents.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "blocks, no standing subscription" -- easy to assume otherwise. */
+const DESCRIPTION_TERSE =
+  `Watch a mesh topic for up to duration_seconds, return what arrived. BLOCKS for the duration ` +
+  `(or until count events) -- no standing subscription, call again to keep watching. Defaults to ` +
+  `${defaultStation()} if host isn't given.`;
 
 export function registerMeshWatch(server: McpServer): void {
   server.tool(
     "mesh_watch",
-    "Watch a mesh topic for inbound facts for up to duration_seconds, then return whatever " +
-      "arrived. This call BLOCKS for the full duration (or until count events arrive, " +
-      "whichever is first) -- there is no standing/background subscription to poll later; " +
-      `call this again to keep watching. Defaults to ${defaultStation()} if host isn't given. ` +
-      `Presence heartbeats are ordinary facts on "${HELLO_TOPIC}"/"${GOODBYE_TOPIC}" -- watch ` +
-      "those directly to react to an arrival/departure yourself instead of polling mesh_agents.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       topic: z.string().describe("Topic name (e.g. 'chat.demo')."),
       duration_seconds: z

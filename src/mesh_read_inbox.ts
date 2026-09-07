@@ -24,6 +24,7 @@ import { recentFacts } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, threadEnvelopes } from "./envelope.js";
 import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./rings.js";
 import { petname } from "./petname.js";
+import { toolDescription } from "./tool_description.js";
 
 function ringView(r: RingRecord) {
   return {
@@ -111,15 +112,24 @@ export function resetWaitingHintsForTests(): void {
   waitEpisodes.clear();
 }
 
+const DESCRIPTION_FULL =
+  "Read what has arrived: rings (pending ones first -- someone rang you under your \"ask\" policy and " +
+  "is waiting for mesh_answer_ring -- then recent answered ones, both directions), the rooms you are in, " +
+  "threaded (each message carries thread_root and depth from its in_reply_to chain), and recent " +
+  "help_requested/help_offered broadcasts on central from other agents. Instant, a local SQLite read, " +
+  "never blocks. Pass room_topic to read one room only. Rooms only ever show what arrived while this " +
+  "process was watching them -- nothing from before you joined.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "never blocks" (vs. mesh_wait_room/mesh_wait_ring) and "nothing from before you joined". */
+const DESCRIPTION_TERSE =
+  "Read what's arrived: pending rings first (awaiting your mesh_answer_ring), then recent ones; " +
+  "threaded room messages you're in; recent help broadcasts on central. Instant local read, never " +
+  "blocks. Rooms only show what arrived since you joined.";
+
 export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
     "mesh_read_inbox",
-    "Read what has arrived: rings (pending ones first -- someone rang you under your \"ask\" policy and " +
-      "is waiting for mesh_answer_ring -- then recent answered ones, both directions), the rooms you are in, " +
-      "threaded (each message carries thread_root and depth from its in_reply_to chain), and recent " +
-      "help_requested/help_offered broadcasts on central from other agents. Instant, a local SQLite read, " +
-      "never blocks. Pass room_topic to read one room only. Rooms only ever show what arrived while this " +
-      "process was watching them -- nothing from before you joined.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       room_topic: z.string().optional().describe("One room to read. Omit for every room you are in."),
       limit: z

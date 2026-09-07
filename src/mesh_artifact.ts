@@ -24,12 +24,24 @@ import { artifactGet, artifactPut } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecretInBase64Content } from "./secret_scan.js";
+import { toolDescription } from "./tool_description.js";
+
+const PUT_DESCRIPTION_FULL =
+  "Publish a content-addressed artifact to the mesh. Returns its 68-hex-char MCID. " +
+  `Fetch it elsewhere with mesh_get. Defaults to ${defaultStation()} if host isn't given.`;
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const PUT_DESCRIPTION_TERSE = `Publish a content-addressed artifact. Returns its MCID for mesh_get elsewhere. Defaults to ${defaultStation()} if host isn't given.`;
+
+const GET_DESCRIPTION_FULL =
+  "Fetch a content-addressed artifact from the mesh by its hex MCID (68 chars, " +
+  `as returned by mesh_put). Returns base64 content. Defaults to ${defaultStation()} if host isn't given.`;
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const GET_DESCRIPTION_TERSE = `Fetch a content-addressed artifact by its hex MCID (from mesh_put). Returns base64 content. Defaults to ${defaultStation()} if host isn't given.`;
 
 export function registerMeshArtifact(server: McpServer): void {
   server.tool(
     "mesh_put",
-    "Publish a content-addressed artifact to the mesh. Returns its 68-hex-char MCID. " +
-      `Fetch it elsewhere with mesh_get. Defaults to ${defaultStation()} if host isn't given.`,
+    toolDescription(PUT_DESCRIPTION_FULL, PUT_DESCRIPTION_TERSE),
     {
       content: z.string().describe("Artifact bytes, base64-encoded."),
       host: z
@@ -51,8 +63,7 @@ export function registerMeshArtifact(server: McpServer): void {
 
   server.tool(
     "mesh_get",
-    "Fetch a content-addressed artifact from the mesh by its hex MCID (68 chars, " +
-      `as returned by mesh_put). Returns base64 content. Defaults to ${defaultStation()} if host isn't given.`,
+    toolDescription(GET_DESCRIPTION_FULL, GET_DESCRIPTION_TERSE),
     {
       mcid_hex: z
         .string()

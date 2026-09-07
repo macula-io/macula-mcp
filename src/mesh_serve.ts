@@ -19,20 +19,31 @@ import { z } from "zod";
 import { defaultStation } from "./mesh_config.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as serveModule from "./serve.js";
+import { toolDescription } from "./tool_description.js";
 
 /** Never let a misconfigured caller leave a hung command running indefinitely. */
 const DEFAULT_TIMEOUT_SECONDS = 10;
 const MAX_TIMEOUT_SECONDS = 60;
 
+const DESCRIPTION_FULL =
+  "Advertise a procedure on the mesh, answered by a local shell command run once per inbound call " +
+  "(its stdin is the caller's JSON payload, its stdout is the reply). Starts this process's own " +
+  "serve-daemon on first use. THIS IS A STANDING INBOUND SURFACE, not a one-shot action: once " +
+  "registered, any mesh caller can trigger the command repeatedly until mesh_unserve is called or " +
+  "this process exits. Never register a command you would not want a stranger able to run " +
+  "repeatedly on this machine. Pair with mesh_unserve to stop serving deliberately.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The standing-inbound-surface warning is the single most safety-critical caveat this whole server has -- kept in full force, not shortened away. */
+const DESCRIPTION_TERSE =
+  "Advertise a procedure, answered by a local shell command run once per inbound call (stdin = " +
+  "caller's JSON, stdout = reply). THIS IS A STANDING INBOUND SURFACE: any mesh caller can trigger it " +
+  "repeatedly until mesh_unserve or process exit. Never register a command you wouldn't want a " +
+  "stranger running repeatedly on this machine.";
+
 export function registerMeshServe(server: McpServer): void {
   server.tool(
     "mesh_serve",
-    "Advertise a procedure on the mesh, answered by a local shell command run once per inbound call " +
-      "(its stdin is the caller's JSON payload, its stdout is the reply). Starts this process's own " +
-      "serve-daemon on first use. THIS IS A STANDING INBOUND SURFACE, not a one-shot action: once " +
-      "registered, any mesh caller can trigger the command repeatedly until mesh_unserve is called or " +
-      "this process exits. Never register a command you would not want a stranger able to run " +
-      "repeatedly on this machine. Pair with mesh_unserve to stop serving deliberately.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       procedure: z.string().min(1).describe("The procedure name to advertise, e.g. \"my_agent.summarize\"."),
       exec: z

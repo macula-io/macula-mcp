@@ -8,6 +8,7 @@ import { defaultIdentityPath } from "./mesh_config.js";
 import { tsIdentity } from "./macula_ts_client.js";
 import { errorContent } from "./reply.js";
 import { connectedViaLabel, ensurePresence } from "./presence.js";
+import { toolDescription } from "./tool_description.js";
 
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
@@ -40,17 +41,26 @@ function pendingContent(began: realm.BeginResult, identityPath: string): Content
   ];
 }
 
+const JOIN_REALM_DESCRIPTION_FULL =
+  "Join the io.macula realm as this agent: bind this server's identity (its node_id / citizen_did) to a " +
+  "person's account through macula-realm. Returns a link and a QR code the person opens or scans, signs in, " +
+  "and confirms; it then issues an org identity, a realm certificate, a refresh token, and a " +
+  "membership UCAN (io.macula as issuer, this identity as audience) for this identity, stored under " +
+  "~/.config/macula-mcp/realm/. Two-step by nature: the first call returns the link (and keeps polling in " +
+  "the background); a later call with wait_seconds picks up the outcome, which also shows in " +
+  "mesh://identity. Already joined: reports the membership. The UCAN is what a realm-gated capability " +
+  "checks -- an older realm that hasn't shipped it yet still completes the join, just without one.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the two-step pairing/polling shape and what the UCAN is for. */
+const JOIN_REALM_DESCRIPTION_TERSE =
+  "Join the io.macula realm: bind this agent's identity to a person's account. Returns a link/QR to " +
+  "sign in and confirm; a later call with wait_seconds picks up the outcome (org identity, realm cert, " +
+  "membership UCAN, stored under ~/.config/macula-mcp/realm/). Already joined: reports the membership.";
+
 export function registerMeshJoinRealm(server: McpServer): void {
   server.tool(
     "mesh_join_realm",
-    "Join the io.macula realm as this agent: bind this server's identity (its node_id / citizen_did) to a " +
-      "person's account through macula-realm. Returns a link and a QR code the person opens or scans, signs in, " +
-      "and confirms; it then issues an org identity, a realm certificate, a refresh token, and a " +
-      "membership UCAN (io.macula as issuer, this identity as audience) for this identity, stored under " +
-      "~/.config/macula-mcp/realm/. Two-step by nature: the first call returns the link (and keeps polling in " +
-      "the background); a later call with wait_seconds picks up the outcome, which also shows in " +
-      "mesh://identity. Already joined: reports the membership. The UCAN is what a realm-gated capability " +
-      "checks -- an older realm that hasn't shipped it yet still completes the join, just without one.",
+    toolDescription(JOIN_REALM_DESCRIPTION_FULL, JOIN_REALM_DESCRIPTION_TERSE),
     {
       wait_seconds: z
         .number()

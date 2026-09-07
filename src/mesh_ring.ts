@@ -31,6 +31,7 @@ import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, pars
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
+import { toolDescription } from "./tool_description.js";
 
 // The callee's own handler (ring_service.ts, HANDLER_TIMEOUT_SECONDS=30,
 // plus the local relay's own 25 s budget) can legitimately take close to
@@ -181,20 +182,30 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   };
 }
 
+const DESCRIPTION_FULL =
+  "Ring another agent: an addressed invite delivered as a mesh_call to their agent.<node_id>.ring " +
+  "procedure with your identity proof, carrying a room to talk in (a new one, opened for the two of " +
+  "you, unless you pass a room you are already in). You get exactly one of: answer 1 accepted (they " +
+  "join the room; this call then waits up to wait_join_seconds for their participant_joined, so " +
+  "joined: 1 means the room is genuinely two-sided and PROVEN -- an accepted or declined answer is " +
+  "verified against their own key before it is trusted, not just whoever answered), 2 declined " +
+  "(with their reason), 3 deferred (their operator's policy is \"ask\", their model decides later " +
+  "and mesh_answer_ring carries the answer back to you; the room stays open), or unreachable: 1 " +
+  "(nobody serves that procedure right now, or answered without proving they hold the key). purpose " +
+  "is mandatory and short: a deferred ring is judged from it. This is the ONLY way to reach an agent " +
+  "that has not invited you; never write into a room they have not joined.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. A separately-authored summary, not a truncation: keeps the answer-code meanings and the "only way to reach an uninvited agent" rule, since both are load-bearing for correct use. */
+const DESCRIPTION_TERSE =
+  "Ring another agent (an addressed invite with proof, carrying a room to talk in). Reply is one of: " +
+  "1 accepted (room proven two-sided), 2 declined (with reason), 3 deferred (their model answers " +
+  "later via mesh_answer_ring), or unreachable. purpose is mandatory, short, and is what a deferred " +
+  "ring is judged on. The only way to reach an agent that hasn't invited you.";
+
 export function registerMeshRing(server: McpServer): void {
   server.tool(
     "mesh_ring",
-    "Ring another agent: an addressed invite delivered as a mesh_call to their agent.<node_id>.ring " +
-      "procedure with your identity proof, carrying a room to talk in (a new one, opened for the two of " +
-      "you, unless you pass a room you are already in). You get exactly one of: answer 1 accepted (they " +
-      "join the room; this call then waits up to wait_join_seconds for their participant_joined, so " +
-      "joined: 1 means the room is genuinely two-sided and PROVEN -- an accepted or declined answer is " +
-      "verified against their own key before it is trusted, not just whoever answered), 2 declined " +
-      "(with their reason), 3 deferred (their operator's policy is \"ask\", their model decides later " +
-      "and mesh_answer_ring carries the answer back to you; the room stays open), or unreachable: 1 " +
-      "(nobody serves that procedure right now, or answered without proving they hold the key). purpose " +
-      "is mandatory and short: a deferred ring is judged from it. This is the ONLY way to reach an agent " +
-      "that has not invited you; never write into a room they have not joined.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       to: nodeIdOrPetnameSchema.describe("The agent to ring: a node_id or petname from mesh_agents."),
       purpose: z.string().min(1).max(MAX_PURPOSE_CHARS).describe(`Why you are ringing, one line (max ${MAX_PURPOSE_CHARS} chars).`),

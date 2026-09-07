@@ -41,21 +41,55 @@ import { errorContent, jsonContent } from "./reply.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";
 import { petname } from "./petname.js";
+import { toolDescription } from "./tool_description.js";
 
 const DEFAULT_TRANSCRIPT_LIMIT = 50;
 const MAX_TRANSCRIPT_LIMIT = 500;
 
+const OBSERVE_DESCRIPTION_FULL =
+  "Start a standing, read-only watch over central (agents.lobby) and every PUBLIC room announced there, " +
+  "recording every broadcast and every public room's chat this process can see -- from any agent, not " +
+  "just this one's own conversations -- into a durable local transcript. mesh_hello already starts this " +
+  "automatically, so you usually don't need to call it -- use this to raise max_rooms above the " +
+  "default (20), or to restart the watch after mesh_unobserve_lobby without a full mesh_goodbye+" +
+  "mesh_hello cycle. Idempotent: a second call just raises the cap if the new value is higher. Never " +
+  "retroactive -- only sees facts published after this call. Read the transcript with " +
+  "mesh_lobby_transcript (instant, local, never blocks); stop with mesh_unobserve_lobby.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "mesh_hello already does this" and "never retroactive". */
+const OBSERVE_DESCRIPTION_TERSE =
+  "Start a standing read-only watch over central + every public room announced there, into a local " +
+  "transcript. mesh_hello already starts this automatically -- use this to raise max_rooms (default 20) " +
+  "or restart after mesh_unobserve_lobby. Never retroactive. Read with mesh_lobby_transcript.";
+
+const TRANSCRIPT_DESCRIPTION_FULL =
+  "Read what mesh_observe_lobby has recorded -- instant, a local SQLite read, never blocks and never " +
+  "makes a mesh round trip. Omit topic to see every topic observed (central broadcasts and every room's " +
+  "chat, interleaved by arrival time) plus the list of distinct topics seen, so you can narrow into " +
+  "one. Pass topic (agents.lobby, or a room_topic) to read just that conversation, raw; mesh_read_inbox " +
+  "is the threaded view of the rooms you are actually in. Never retroactive: only contains what arrived after the watch started, " +
+  "even if it's since been stopped -- the transcript persists like mesh_agents' roster does.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const TRANSCRIPT_DESCRIPTION_TERSE =
+  "Read what mesh_observe_lobby recorded -- instant local read, never blocks. Omit topic for " +
+  "everything observed + the list of topics seen; pass one to read just it, raw. Never retroactive; " +
+  "persists even after the watch is stopped.";
+
+const UNOBSERVE_DESCRIPTION_FULL =
+  "Stop mesh_observe_lobby: kills the central watch and every room tap, including rooms you are in " +
+  "(without saying participant_left -- mesh_leave_room or mesh_goodbye do that). " +
+  "The recorded transcript is NOT cleared -- mesh_lobby_transcript still reads what was already " +
+  "seen. No-op if not currently observing. A later mesh_hello call (or mesh_observe_lobby itself) " +
+  "restarts it -- this only opts out for now, it isn't sticky across the next mesh_hello.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "leaves rooms silently, use mesh_leave_room/mesh_goodbye to announce it" caveat -- an etiquette-relevant gotcha. */
+const UNOBSERVE_DESCRIPTION_TERSE =
+  "Stop mesh_observe_lobby: kills the central watch and every room tap, including rooms you're in -- " +
+  "silently, no participant_left (use mesh_leave_room/mesh_goodbye to announce that). Transcript stays " +
+  "readable. Not sticky -- the next mesh_hello restarts it.";
+
 export function registerMeshLobbyObserver(server: McpServer): void {
   server.tool(
     "mesh_observe_lobby",
-    "Start a standing, read-only watch over central (agents.lobby) and every PUBLIC room announced there, " +
-      "recording every broadcast and every public room's chat this process can see -- from any agent, not " +
-      "just this one's own conversations -- into a durable local transcript. mesh_hello already starts this " +
-      "automatically, so you usually don't need to call it -- use this to raise max_rooms above the " +
-      "default (20), or to restart the watch after mesh_unobserve_lobby without a full mesh_goodbye+" +
-      "mesh_hello cycle. Idempotent: a second call just raises the cap if the new value is higher. Never " +
-      "retroactive -- only sees facts published after this call. Read the transcript with " +
-      "mesh_lobby_transcript (instant, local, never blocks); stop with mesh_unobserve_lobby.",
+    toolDescription(OBSERVE_DESCRIPTION_FULL, OBSERVE_DESCRIPTION_TERSE),
     {
       max_rooms: z
         .number()
@@ -80,12 +114,7 @@ export function registerMeshLobbyObserver(server: McpServer): void {
 
   server.tool(
     "mesh_lobby_transcript",
-    "Read what mesh_observe_lobby has recorded -- instant, a local SQLite read, never blocks and never " +
-      "makes a mesh round trip. Omit topic to see every topic observed (central broadcasts and every room's " +
-      "chat, interleaved by arrival time) plus the list of distinct topics seen, so you can narrow into " +
-      "one. Pass topic (agents.lobby, or a room_topic) to read just that conversation, raw; mesh_read_inbox " +
-      "is the threaded view of the rooms you are actually in. Never retroactive: only contains what arrived after the watch started, " +
-      "even if it's since been stopped -- the transcript persists like mesh_agents' roster does.",
+    toolDescription(TRANSCRIPT_DESCRIPTION_FULL, TRANSCRIPT_DESCRIPTION_TERSE),
     {
       topic: z.string().optional().describe("Narrow to one topic. Omit to see everything observed, across all topics."),
       limit: z
@@ -121,11 +150,7 @@ export function registerMeshLobbyObserver(server: McpServer): void {
 
   server.tool(
     "mesh_unobserve_lobby",
-    "Stop mesh_observe_lobby: kills the central watch and every room tap, including rooms you are in " +
-      "(without saying participant_left -- mesh_leave_room or mesh_goodbye do that). " +
-      "The recorded transcript is NOT cleared -- mesh_lobby_transcript still reads what was already " +
-      "seen. No-op if not currently observing. A later mesh_hello call (or mesh_observe_lobby itself) " +
-      "restarts it -- this only opts out for now, it isn't sticky across the next mesh_hello.",
+    toolDescription(UNOBSERVE_DESCRIPTION_FULL, UNOBSERVE_DESCRIPTION_TERSE),
     {},
     async () => {
       const result = await lobbyObserver.stop();

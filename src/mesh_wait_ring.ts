@@ -31,26 +31,37 @@ import * as presence from "./presence.js";
 import * as ringService from "./ring_service.js";
 import { waitRing } from "./rings.js";
 import { petname } from "./petname.js";
+import { toolDescription } from "./tool_description.js";
 
 const MAX_WAIT_SECONDS = 3600;
+
+const DESCRIPTION_FULL =
+  "Block for up to wait_seconds (max 3600) for the next incoming ring -- the passive counterpart to " +
+  "polling mesh_read_inbox for a new one under rings.pending. Covers every incoming ring, not only " +
+  "ones still awaiting your own answer: open/closed/allowlist policies resolve theirs immediately, " +
+  "'ask' leaves one pending for mesh_answer_ring -- this call returns the instant any of them is " +
+  "recorded, so check the returned ring's own answer field. Reads the same background recording " +
+  "ring serving already does on every real inbound ring (active from presence.start() onward, " +
+  "independent of this call), so there is nothing new to start watching. An MCP host that backgrounds " +
+  "a slow tool call and delivers the result as a notification (Claude Code does) turns this into real " +
+  "low-latency push, not a client stuck blocking. Still occupies this agent's own turn for the " +
+  "duration -- there is no way for this server to hand a fresh turn to an idle client on its own; if " +
+  "you would rather free this turn entirely and check back later, use your own harness's scheduler " +
+  "(see mesh://etiquette) instead of a manual sleep and re-calling this or mesh_read_inbox. Never " +
+  "call this in a sleep-then-check loop -- one call with the full wait_seconds you actually want does " +
+  "the same waiting server-side, for free.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps that it covers EVERY incoming ring (not just pending ones) and the still-occupies-your-turn honesty -- both change how a caller should use this. */
+const DESCRIPTION_TERSE =
+  "Block up to wait_seconds (max 3600) for the next incoming ring -- passive counterpart to polling " +
+  "mesh_read_inbox for rings.pending. Returns on ANY incoming ring, not just still-pending ones; check " +
+  "the returned ring's answer field. Still occupies your own turn for the wait (MCP has no server-push). " +
+  "Never sleep-then-poll -- one call does the same wait server-side.";
 
 export function registerMeshWaitRing(server: McpServer): void {
   server.tool(
     "mesh_wait_ring",
-    "Block for up to wait_seconds (max 3600) for the next incoming ring -- the passive counterpart to " +
-      "polling mesh_read_inbox for a new one under rings.pending. Covers every incoming ring, not only " +
-      "ones still awaiting your own answer: open/closed/allowlist policies resolve theirs immediately, " +
-      "'ask' leaves one pending for mesh_answer_ring -- this call returns the instant any of them is " +
-      "recorded, so check the returned ring's own answer field. Reads the same background recording " +
-      "ring serving already does on every real inbound ring (active from presence.start() onward, " +
-      "independent of this call), so there is nothing new to start watching. An MCP host that backgrounds " +
-      "a slow tool call and delivers the result as a notification (Claude Code does) turns this into real " +
-      "low-latency push, not a client stuck blocking. Still occupies this agent's own turn for the " +
-      "duration -- there is no way for this server to hand a fresh turn to an idle client on its own; if " +
-      "you would rather free this turn entirely and check back later, use your own harness's scheduler " +
-      "(see mesh://etiquette) instead of a manual sleep and re-calling this or mesh_read_inbox. Never " +
-      "call this in a sleep-then-check loop -- one call with the full wait_seconds you actually want does " +
-      "the same waiting server-side, for free.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
     },

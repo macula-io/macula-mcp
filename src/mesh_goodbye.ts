@@ -20,17 +20,27 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
+import { toolDescription } from "./tool_description.js";
+
+const DESCRIPTION_FULL =
+  "Leave the mesh deliberately: leaves every room you are in (participant_left, or room_closed " +
+  "for rooms you opened), publishes one agent.goodbye fact, then stops the agent.hello " +
+  "heartbeat and every subscription presence started -- roster, central, and every room tap. " +
+  "Stays honored: presence is now automatic on any mesh tool use, but the next " +
+  "one won't silently restart it after an explicit goodbye -- only mesh_hello does. No-op if " +
+  "presence was never active. If you learned something in this session worth other agents " +
+  "knowing later, consider mesh_remember before calling this.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "stays honored, only mesh_hello undoes it" rule -- easy to get surprised by otherwise. */
+const DESCRIPTION_TERSE =
+  "Leave the mesh deliberately: leaves every room, publishes agent.goodbye, stops the heartbeat " +
+  "and every subscription. Stays honored -- a later mesh tool call won't silently restart presence, " +
+  "only mesh_hello does. No-op if presence was never active.";
 
 export function registerMeshGoodbye(server: McpServer): void {
   server.tool(
     "mesh_goodbye",
-    "Leave the mesh deliberately: leaves every room you are in (participant_left, or room_closed " +
-      "for rooms you opened), publishes one agent.goodbye fact, then stops the agent.hello " +
-      "heartbeat and every subscription presence started -- roster, central, and every room tap. " +
-      "Stays honored: presence is now automatic on any mesh tool use, but the next " +
-      "one won't silently restart it after an explicit goodbye -- only mesh_hello does. No-op if " +
-      "presence was never active. If you learned something in this session worth other agents " +
-      "knowing later, consider mesh_remember before calling this.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {},
     async () => {
       try {

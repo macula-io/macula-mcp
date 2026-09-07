@@ -25,24 +25,35 @@ import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC } from "./envelope.js";
+import { toolDescription } from "./tool_description.js";
 
 const MAX_WAIT_SECONDS = 3600;
+
+const DESCRIPTION_FULL =
+  "Block for up to wait_seconds (max 3600) for the first envelope from someone else on a room you are " +
+  "already in (or central), without saying anything yourself first -- the passive counterpart to " +
+  "mesh_say's wait_reply_seconds, for when you have nothing to say yet and are just waiting on the next " +
+  "objective, an answer, or a reply. The room was already being watched in the background before this " +
+  "call (presence's own standing tap), so this reads that same feed rather than opening anything new; " +
+  "an MCP host that backgrounds a slow tool call and delivers the result as a notification (Claude Code " +
+  "does) turns this into real low-latency push, not a client stuck blocking. Still occupies this agent's " +
+  "own turn for the duration -- there is no way for this server to hand a fresh turn to an idle client on " +
+  "its own; if you would rather free this turn entirely and check back later, use your own harness's " +
+  "scheduler (see mesh://etiquette) instead of a manual sleep and re-calling this or mesh_read_inbox. " +
+  "Never call this in a sleep-then-check loop -- one call with the full wait_seconds you actually want " +
+  "does the same waiting server-side, for free.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "still occupies your turn, no server push" honesty and the never-sleep-and-poll rule -- both change how a caller should actually use this. */
+const DESCRIPTION_TERSE =
+  "Block up to wait_seconds (max 3600) for the next envelope from someone else in a room (or central), " +
+  "saying nothing yourself. Reads the room's existing background tap -- nothing new to watch. Still " +
+  "occupies your own turn for the wait (MCP has no server-push); use your harness's scheduler instead " +
+  "if you'd rather free the turn. Never sleep-then-poll -- one call does the same wait server-side.";
 
 export function registerMeshWaitRoom(server: McpServer): void {
   server.tool(
     "mesh_wait_room",
-    "Block for up to wait_seconds (max 3600) for the first envelope from someone else on a room you are " +
-      "already in (or central), without saying anything yourself first -- the passive counterpart to " +
-      "mesh_say's wait_reply_seconds, for when you have nothing to say yet and are just waiting on the next " +
-      "objective, an answer, or a reply. The room was already being watched in the background before this " +
-      "call (presence's own standing tap), so this reads that same feed rather than opening anything new; " +
-      "an MCP host that backgrounds a slow tool call and delivers the result as a notification (Claude Code " +
-      "does) turns this into real low-latency push, not a client stuck blocking. Still occupies this agent's " +
-      "own turn for the duration -- there is no way for this server to hand a fresh turn to an idle client on " +
-      "its own; if you would rather free this turn entirely and check back later, use your own harness's " +
-      "scheduler (see mesh://etiquette) instead of a manual sleep and re-calling this or mesh_read_inbox. " +
-      "Never call this in a sleep-then-check loop -- one call with the full wait_seconds you actually want " +
-      "does the same waiting server-side, for free.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for central. Joins it first if you are not in it yet.`),
       wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),

@@ -46,6 +46,7 @@ import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { call, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
+import { toolDescription } from "./tool_description.js";
 
 const LIST_STATIONS_PROCEDURE = "hecate_stations.list_stations";
 const TEXT_FIELDS = ["city", "continent", "country", "hostname", "kind", "version"];
@@ -72,14 +73,19 @@ function decodeStation(station: Record<string, unknown>): Record<string, unknown
   return out;
 }
 
+const DESCRIPTION_FULL =
+  "List macula stations via hecate_stations.list_stations, the mesh's canonical station directory -- " +
+  "so an agent never has to hand-maintain a station list. Auto-discovers which realm hecate_stations " +
+  "is currently advertised under (never the default all-zero realm) via a DHT lookup, then calls it. " +
+  "Optional near (nearest-first by great-circle distance) or continent/country/city filters, matching " +
+  `the service's own filter API -- omit all filters to list every known station. Defaults to ${defaultStation()} if host isn't given.`;
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const DESCRIPTION_TERSE = `List macula stations via hecate_stations.list_stations (auto-discovers its realm via DHT). Optional near/continent/country/city filters -- omit all to list everything. Defaults to ${defaultStation()} if host isn't given.`;
+
 export function registerMeshListStations(server: McpServer): void {
   server.tool(
     "mesh_list_stations",
-    "List macula stations via hecate_stations.list_stations, the mesh's canonical station directory -- " +
-      "so an agent never has to hand-maintain a station list. Auto-discovers which realm hecate_stations " +
-      "is currently advertised under (never the default all-zero realm) via a DHT lookup, then calls it. " +
-      "Optional near (nearest-first by great-circle distance) or continent/country/city filters, matching " +
-      `the service's own filter API -- omit all filters to list every known station. Defaults to ${defaultStation()} if host isn't given.`,
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       near: z
         .object({

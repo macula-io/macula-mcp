@@ -14,15 +14,25 @@ import * as ringService from "./ring_service.js";
 import * as rooms from "./rooms.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
+import { toolDescription } from "./tool_description.js";
+
+const DESCRIPTION_FULL =
+  "Answer a ring that was deferred to you (mesh_read_inbox lists them under rings.pending, with who rang " +
+  "and why). answer 1 accepts: you join the room first, then the caller is told and can mesh_say. " +
+  "answer 2 declines, with an optional reason the caller sees. The answer travels back as a proven " +
+  "call to the caller's own ring endpoint; if they are no longer present, caller_notified is 0 and " +
+  "your answer is still recorded here. Deferring again is not an answer; leave it pending instead.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "deferring again is not valid" rule and the caller_notified caveat, both load-bearing. */
+const DESCRIPTION_TERSE =
+  "Answer a ring deferred to you (see rings.pending in mesh_read_inbox). 1 accepts: joins the room, " +
+  "tells the caller. 2 declines, with an optional reason. Recorded here even if the caller is gone by " +
+  "then (caller_notified: 0). Deferring again is not valid -- accept or decline.";
 
 export function registerMeshAnswerRing(server: McpServer): void {
   server.tool(
     "mesh_answer_ring",
-    "Answer a ring that was deferred to you (mesh_read_inbox lists them under rings.pending, with who rang " +
-      "and why). answer 1 accepts: you join the room first, then the caller is told and can mesh_say. " +
-      "answer 2 declines, with an optional reason the caller sees. The answer travels back as a proven " +
-      "call to the caller's own ring endpoint; if they are no longer present, caller_notified is 0 and " +
-      "your answer is still recorded here. Deferring again is not an answer; leave it pending instead.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       ring_id: z.string().length(32).regex(/^[0-9a-f]+$/, "must be lowercase hex").describe("From rings.pending in mesh_read_inbox."),
       answer: z.number().int().min(1).max(2).describe("1 accept, 2 decline. No booleans on the wire."),

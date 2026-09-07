@@ -10,12 +10,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as serveModule from "./serve.js";
+import { toolDescription } from "./tool_description.js";
+
+const DESCRIPTION_FULL =
+  "Stop serving a procedure registered by mesh_serve. If nothing else is registered afterward, " +
+  "also stops this process's own serve-daemon. No-op if the procedure was never registered.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const DESCRIPTION_TERSE = "Stop serving a procedure registered by mesh_serve. No-op if it was never registered.";
 
 export function registerMeshUnserve(server: McpServer): void {
   server.tool(
     "mesh_unserve",
-    "Stop serving a procedure registered by mesh_serve. If nothing else is registered afterward, " +
-      "also stops this process's own serve-daemon. No-op if the procedure was never registered.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       procedure: z.string().min(1).describe("The procedure name to stop serving, as passed to mesh_serve."),
     },

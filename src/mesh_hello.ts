@@ -37,6 +37,7 @@ import { defaultStation } from "./mesh_config.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
+import { toolDescription } from "./tool_description.js";
 
 const DEFAULT_BANNER = `
    __  __   _   ___ _   _ _      _
@@ -56,29 +57,39 @@ function banner(): string {
   }
 }
 
+const DESCRIPTION_FULL =
+  "Announce this agent's presence on the mesh: prints a welcome banner and starts a periodic " +
+  "agent.hello heartbeat (default every 60s), a durable subscription to other agents' hellos " +
+  "(feeding mesh_agents' roster), AND a standing watch over central (agents.lobby) plus every room " +
+  "this agent opens, joins or sees announced there (feeding mesh_read_inbox and " +
+  "mesh_lobby_transcript) -- being discoverable, reachable, and present on central are all the same " +
+  "action now. You usually don't need to call this yourself: " +
+  "any mesh_call/mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/" +
+  "mesh_open_room/mesh_join_room/mesh_leave_room/mesh_rooms/mesh_ring/mesh_answer_ring/mesh_read_inbox/" +
+  "mesh_join_realm/mesh_recall/mesh_remember/mesh_remember_directory call already starts presence " +
+  "automatically, with " +
+  "operator_name/message/model taken from MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL if set. Call " +
+  "mesh_hello directly to override those, or to see the banner/lobby_topic explicitly, or " +
+  "to restart presence after mesh_goodbye -- an explicit goodbye is NOT undone automatically by the " +
+  "next mesh tool call, only by calling this again. Calling this again while already active just " +
+  "updates operator_name/message/model/connected_via for future heartbeats -- it also re-confirms the " +
+  "lobby watch is running, in case mesh_unobserve_lobby turned it off. connected_via (which MCP " +
+  "client you're running as, e.g. \"claude-code 1.2.3\") is read automatically from the MCP handshake, " +
+  "not a parameter. Pair with mesh_goodbye to leave deliberately -- it stops the lobby watch too. " +
+  "Worth checking mesh_recall early too, for anything other agents already learned about this repo " +
+  "or task -- shared mesh memory, not this session's own context.";
+
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the two easiest-to-get-wrong facts: presence auto-starts on other mesh tools (you rarely need this directly), and an explicit mesh_goodbye is only undone by calling this again, never automatically. */
+const DESCRIPTION_TERSE =
+  "Announce presence: heartbeat, roster subscription, central+room watch. Most mesh tools start " +
+  "this automatically, so you rarely need to call it directly -- call it to override " +
+  "operator_name/message/model, or to restart presence after an explicit mesh_goodbye (which nothing " +
+  "else undoes automatically). Pair with mesh_goodbye to leave deliberately.";
+
 export function registerMeshHello(server: McpServer): void {
   server.tool(
     "mesh_hello",
-    "Announce this agent's presence on the mesh: prints a welcome banner and starts a periodic " +
-      "agent.hello heartbeat (default every 60s), a durable subscription to other agents' hellos " +
-      "(feeding mesh_agents' roster), AND a standing watch over central (agents.lobby) plus every room " +
-      "this agent opens, joins or sees announced there (feeding mesh_read_inbox and " +
-      "mesh_lobby_transcript) -- being discoverable, reachable, and present on central are all the same " +
-      "action now. You usually don't need to call this yourself: " +
-      "any mesh_call/mesh_publish/mesh_watch/mesh_list_stations/mesh_dht/mesh_artifact/mesh_say/" +
-      "mesh_open_room/mesh_join_room/mesh_leave_room/mesh_rooms/mesh_ring/mesh_answer_ring/mesh_read_inbox/" +
-      "mesh_join_realm/mesh_recall/mesh_remember/mesh_remember_directory call already starts presence " +
-      "automatically, with " +
-      "operator_name/message/model taken from MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL if set. Call " +
-      "mesh_hello directly to override those, or to see the banner/lobby_topic explicitly, or " +
-      "to restart presence after mesh_goodbye -- an explicit goodbye is NOT undone automatically by the " +
-      "next mesh tool call, only by calling this again. Calling this again while already active just " +
-      "updates operator_name/message/model/connected_via for future heartbeats -- it also re-confirms the " +
-      "lobby watch is running, in case mesh_unobserve_lobby turned it off. connected_via (which MCP " +
-      "client you're running as, e.g. \"claude-code 1.2.3\") is read automatically from the MCP handshake, " +
-      "not a parameter. Pair with mesh_goodbye to leave deliberately -- it stops the lobby watch too. " +
-      "Worth checking mesh_recall early too, for anything other agents already learned about this repo " +
-      "or task -- shared mesh memory, not this session's own context.",
+    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       operator_name: z.string().optional().describe("Customizable human-readable name for whoever's behind this agent."),
       message: z.string().optional().describe("A short greeting or status, sent with every heartbeat."),

@@ -29,17 +29,42 @@ import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
 import { findRecord, findRecords, findRecordsByType } from "./macula_ts_client.js";
 import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
+import { toolDescription } from "./tool_description.js";
 
 const KEY_DESCRIPTION =
   "32-byte DHT storage key as hex (64 chars) -- e.g. from ProcedureKey(procedure_uri) " +
   "on the publishing side, or a key already seen in a mesh_find_records_by_type result. " +
   "This is NOT the same as a record's own advertiser/signer key.";
 
+const FIND_RECORD_DESCRIPTION_FULL =
+  "Fetch one DHT record by its 32-byte storage key. Always the DHT's own all-zero realm " +
+  `(no realm parameter -- DHT storage is protocol-internal). Defaults to ${defaultStation()} if host isn't given.`;
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const FIND_RECORD_DESCRIPTION_TERSE = `Fetch one DHT record by its 32-byte storage key. Always the all-zero DHT realm. Defaults to ${defaultStation()} if host isn't given.`;
+
+const FIND_RECORDS_DESCRIPTION_FULL =
+  "Fetch EVERY record stored at a DHT key -- the full signer-deduped multiset (e.g. every " +
+  "procedure_advertisement one procedure has from different providers). Always the DHT's own " +
+  `all-zero realm. Defaults to ${defaultStation()} if host isn't given.`;
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
+const FIND_RECORDS_DESCRIPTION_TERSE = `Fetch EVERY record stored at a DHT key (full signer-deduped multiset). Always the all-zero DHT realm. Defaults to ${defaultStation()} if host isn't given.`;
+
+const FIND_RECORDS_BY_TYPE_DESCRIPTION_FULL =
+  "List every DHT record of one type currently visible from the connecting station -- the " +
+  "discovery entry point. Pass record_type \"procedure_advertisement\" to see every capability " +
+  "this station knows about (each record's realm and plain procedure name decoded out of its " +
+  "procedure_uri). Coverage depends on that station's own view of the DHT, not the whole mesh. " +
+  `Always the DHT's own all-zero realm. Defaults to ${defaultStation()} if host isn't given.`;
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "this station's view, not the whole mesh" caveat -- a real coverage limit, not just color. */
+const FIND_RECORDS_BY_TYPE_DESCRIPTION_TERSE =
+  "List every DHT record of one type (discovery entry point -- try \"procedure_advertisement\" " +
+  `for every capability this station knows about). Coverage is this station's own DHT view, not ` +
+  `the whole mesh. Always the all-zero DHT realm. Defaults to ${defaultStation()} if host isn't given.`;
+
 export function registerMeshDht(server: McpServer): void {
   server.tool(
     "mesh_find_record",
-    "Fetch one DHT record by its 32-byte storage key. Always the DHT's own all-zero realm " +
-      `(no realm parameter -- DHT storage is protocol-internal). Defaults to ${defaultStation()} if host isn't given.`,
+    toolDescription(FIND_RECORD_DESCRIPTION_FULL, FIND_RECORD_DESCRIPTION_TERSE),
     {
       key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION),
       host: z
@@ -60,9 +85,7 @@ export function registerMeshDht(server: McpServer): void {
 
   server.tool(
     "mesh_find_records",
-    "Fetch EVERY record stored at a DHT key -- the full signer-deduped multiset (e.g. every " +
-      "procedure_advertisement one procedure has from different providers). Always the DHT's own " +
-      `all-zero realm. Defaults to ${defaultStation()} if host isn't given.`,
+    toolDescription(FIND_RECORDS_DESCRIPTION_FULL, FIND_RECORDS_DESCRIPTION_TERSE),
     {
       key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION),
       host: z
@@ -83,11 +106,7 @@ export function registerMeshDht(server: McpServer): void {
 
   server.tool(
     "mesh_find_records_by_type",
-    "List every DHT record of one type currently visible from the connecting station -- the " +
-      "discovery entry point. Pass record_type \"procedure_advertisement\" to see every capability " +
-      "this station knows about (each record's realm and plain procedure name decoded out of its " +
-      "procedure_uri). Coverage depends on that station's own view of the DHT, not the whole mesh. " +
-      `Always the DHT's own all-zero realm. Defaults to ${defaultStation()} if host isn't given.`,
+    toolDescription(FIND_RECORDS_BY_TYPE_DESCRIPTION_FULL, FIND_RECORDS_BY_TYPE_DESCRIPTION_TERSE),
     {
       record_type: z
         .string()

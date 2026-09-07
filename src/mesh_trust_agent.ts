@@ -32,6 +32,7 @@ import { errorContent, jsonContent } from "./reply.js";
 import { addToAllowlist, removeFromAllowlist, policyFilePath, type AllowlistMutationResult } from "./policy.js";
 import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
+import { toolDescription } from "./tool_description.js";
 
 /** What the caller should understand about a mutation beyond the raw fields -- the file changed, but is that change actually in effect right now? */
 function explain(res: AllowlistMutationResult, verb: "added" | "removed"): string {
@@ -53,19 +54,41 @@ function explain(res: AllowlistMutationResult, verb: "added" | "removed"): strin
   return `${verb} in ${res.path}.`;
 }
 
+const TRUST_DESCRIPTION_FULL =
+  "Add a peer's node_id to this operator's own contact-policy allowlist (~/.config/macula-mcp/contact_policy.json), " +
+  "so their NEXT ring skips the \"ask\" round-trip and is auto-accepted -- without hand-editing that file. " +
+  "Call this once you have decided a peer is trustworthy, e.g. right after mesh_answer_ring accepted their " +
+  "ring, or from mesh_ring's/mesh_agents' own node_id. If contact_policy is still the \"ask\" default, this " +
+  "also switches it to \"allowlist\" (an allowlist nobody is consulting does nothing); an explicit \"closed\" " +
+  "or \"open\" policy is left as-is (closed stays authoritative, open already accepts everyone) -- the reply " +
+  "says which happened. Keyed by node_id, never by operator_name or petname: only node_id is a verified, " +
+  "signed identity here (see ring_service.ts's proof checks) -- operator_name is self-reported and petname " +
+  "can collide, neither is safe as a trust boundary. The policy file re-reads on every ring, so this takes " +
+  "effect immediately, no restart needed.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The "keyed by node_id, never operator_name/petname" rule is a real trust-boundary fact, kept in full force. */
+const TRUST_DESCRIPTION_TERSE =
+  "Add a peer's node_id to this operator's contact-policy allowlist -- their next ring skips \"ask\" " +
+  "and is auto-accepted. Switches contact_policy from \"ask\" to \"allowlist\" if that's still the " +
+  "default (leaves closed/open as-is). Keyed by node_id ONLY -- operator_name/petname are never the " +
+  "trust boundary. Takes effect immediately.";
+
+const UNTRUST_DESCRIPTION_FULL =
+  "Remove a peer's node_id from this operator's own contact-policy allowlist " +
+  "(~/.config/macula-mcp/contact_policy.json), added earlier by mesh_trust_agent or by hand. Never changes " +
+  "contact_policy itself either way -- untrusting one peer says nothing about whether \"allowlist\" should " +
+  "still be the standing answer for everyone else on it, so that decision is left to the operator. A peer " +
+  `that was never listed is a no-op, not an error. The file lives at ${policyFilePath()} unless ` +
+  "MACULA_MCP_CONTACT_POLICY_FILE overrides the path.";
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "never changes contact_policy itself" -- easy to wrongly assume this reverts to \"ask\". */
+const UNTRUST_DESCRIPTION_TERSE =
+  "Remove a peer's node_id from this operator's contact-policy allowlist. Never changes contact_policy " +
+  "itself -- that decision (still \"allowlist\" for everyone else on it?) is left to the operator. " +
+  "No-op if never listed.";
+
 export function registerMeshTrustAgent(server: McpServer): void {
   server.tool(
     "mesh_trust_agent",
-    "Add a peer's node_id to this operator's own contact-policy allowlist (~/.config/macula-mcp/contact_policy.json), " +
-      "so their NEXT ring skips the \"ask\" round-trip and is auto-accepted -- without hand-editing that file. " +
-      "Call this once you have decided a peer is trustworthy, e.g. right after mesh_answer_ring accepted their " +
-      "ring, or from mesh_ring's/mesh_agents' own node_id. If contact_policy is still the \"ask\" default, this " +
-      "also switches it to \"allowlist\" (an allowlist nobody is consulting does nothing); an explicit \"closed\" " +
-      "or \"open\" policy is left as-is (closed stays authoritative, open already accepts everyone) -- the reply " +
-      "says which happened. Keyed by node_id, never by operator_name or petname: only node_id is a verified, " +
-      "signed identity here (see ring_service.ts's proof checks) -- operator_name is self-reported and petname " +
-      "can collide, neither is safe as a trust boundary. The policy file re-reads on every ring, so this takes " +
-      "effect immediately, no restart needed.",
+    toolDescription(TRUST_DESCRIPTION_FULL, TRUST_DESCRIPTION_TERSE),
     {
       node_id: nodeIdOrPetnameSchema.describe("The peer to trust: a node_id or petname from mesh_agents, mesh_ring's `to`, mesh_answer_ring's `peer`, or mesh_read_inbox's rings.pending."),
     },
@@ -79,12 +102,7 @@ export function registerMeshTrustAgent(server: McpServer): void {
 
   server.tool(
     "mesh_untrust_agent",
-    "Remove a peer's node_id from this operator's own contact-policy allowlist " +
-      "(~/.config/macula-mcp/contact_policy.json), added earlier by mesh_trust_agent or by hand. Never changes " +
-      "contact_policy itself either way -- untrusting one peer says nothing about whether \"allowlist\" should " +
-      "still be the standing answer for everyone else on it, so that decision is left to the operator. A peer " +
-      `that was never listed is a no-op, not an error. The file lives at ${policyFilePath()} unless ` +
-      "MACULA_MCP_CONTACT_POLICY_FILE overrides the path.",
+    toolDescription(UNTRUST_DESCRIPTION_FULL, UNTRUST_DESCRIPTION_TERSE),
     {
       node_id: nodeIdOrPetnameSchema.describe(
         "The peer to remove: a node_id from mesh_agents or the allowlist itself, or a petname -- petname resolution needs " +
