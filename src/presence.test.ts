@@ -141,22 +141,39 @@ describe("start()", () => {
       expect.objectContaining({
         topic: presence.HELLO_TOPIC,
         identityPath: DEFAULT_IDENTITY_PATH,
-        fact: expect.objectContaining({ node_id: NODE_ID, citizen_did: NODE_ID, operator_name: "raf", message: "hi" }),
+        fact: expect.objectContaining({ node_id: NODE_ID, citizen_did: NODE_ID, operator_name: "raf", message: "hi", interval_seconds: presence.DEFAULT_INTERVAL_SECONDS }),
       }),
     );
   });
 
-  it("the hello subscription's handler upserts the roster; the goodbye subscription's handler removes from it", async () => {
+  // macula-io/macula-mcp#3: every heartbeat carries the interval it was
+  // actually started with, so a PEER's roster can judge this agent's
+  // staleness against its real cadence rather than assuming the default.
+  it("carries the actual configured interval, not always the default", async () => {
+    await presence.start({ intervalSeconds: 45 });
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ fact: expect.objectContaining({ interval_seconds: 45 }) }));
+  });
+
+  it("the hello subscription's handler upserts the roster (including the peer's own reported interval); the goodbye subscription's handler removes from it", async () => {
     await presence.start({});
     const helloHandler = createdSessions[0]!.subscribeCalls[0]!.handler;
     const goodbyeHandler = createdSessions[1]!.subscribeCalls[0]!.handler;
     const PEER = "b".repeat(64);
 
-    helloHandler(fakeEvent({ node_id: PEER, operator_name: "Bob", model: "sonnet" }));
-    expect(listAgents(1, 10).agents).toEqual([expect.objectContaining({ node_id: PEER, operator_name: "Bob", model: "sonnet" })]);
+    helloHandler(fakeEvent({ node_id: PEER, operator_name: "Bob", model: "sonnet", interval_seconds: 30 }));
+    expect(listAgents(1, 10).agents).toEqual([expect.objectContaining({ node_id: PEER, operator_name: "Bob", model: "sonnet", interval_seconds: "30" })]);
 
     goodbyeHandler(fakeEvent({ node_id: PEER }));
     expect(listAgents(1, 10).agents).toEqual([]);
+  });
+
+  it("upserts with a null interval when the peer's hello doesn't report one (pre-#3 peer)", async () => {
+    await presence.start({});
+    const helloHandler = createdSessions[0]!.subscribeCalls[0]!.handler;
+    const PEER = "c".repeat(64);
+
+    helloHandler(fakeEvent({ node_id: PEER, operator_name: "Carol" }));
+    expect(listAgents(1, 10).agents[0]).toMatchObject({ interval_seconds: null });
   });
 
   it("if the goodbye leg's first connect fails, the hello leg it already opened is closed and its identity disposed, and start() rejects", async () => {

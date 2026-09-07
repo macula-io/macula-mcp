@@ -123,7 +123,8 @@ import * as deviceMembership from "./device_membership.js";
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";
 
-const DEFAULT_INTERVAL_SECONDS = 60;
+/** The default heartbeat interval, and (mesh_agents.ts) the fallback used to judge a PEER's staleness when its own hello never reported one -- see roster.ts's interval_seconds column doc. */
+export const DEFAULT_INTERVAL_SECONDS = 60;
 /** Never let a misconfigured caller hammer a shared demo station. */
 const MIN_INTERVAL_SECONDS = 10;
 
@@ -263,6 +264,8 @@ interface PresenceState {
   message?: string;
   model?: string;
   connectedVia?: string;
+  /** Fixed for this process's lifetime at the interval start() actually used (doStart()'s own clamped value) -- included in every heartbeat so OTHER agents' rosters can judge staleness against this agent's real cadence, not a guess. */
+  intervalSeconds: number;
   host: string;
   helloLeg: Leg;
   goodbyeLeg: Leg;
@@ -418,6 +421,28 @@ async function doStart(args: StartArgs): Promise<StartResult> {
 
   const { node_id: nodeId } = tsIdentity(defaultIdentityPath());
 
+  // TRUST MODEL, hello and goodbye both (macula-io/macula-mcp#4, #5):
+  // payload.node_id here is a plain, self-claimed field inside the pubsub
+  // fact -- NOT bound to the mesh transport's own publisher identity by
+  // any proof or signature, unlike a ring/ring_answer (ring_service.ts's
+  // proofs are bound to a specific ring_id + answer precisely because a
+  // real exploit demanded it: "any peer can serve agent.<victim>.ring").
+  // This is a DELIBERATE choice, not an oversight: agent.hello/agent.goodbye
+  // feed mesh_agents, a courtesy discovery/display cache with no
+  // authorization decision riding on it anywhere in this codebase --
+  // proof-binding every heartbeat (signed at the sender, verified at
+  // every listener, for a topic that fires every intervalSeconds forever)
+  // would add real, recurring crypto cost to protect a value nothing
+  // trusts for correctness. The accepted consequence: any agent can
+  // publish a fake agent.goodbye naming another agent's real node_id and
+  // make it vanish from every observer's roster, or a fake agent.hello
+  // spoofing another agent's presence -- low severity, self-healing (a
+  // spoofed absence is undone by that agent's own next real hello, at
+  // most intervalSeconds later; nothing routes or authorizes against this
+  // roster). If a future caller ever wants to gate something real on
+  // "is this agent actually present," that decision needs its own
+  // proof-bound check at that call site -- mesh_agents must never be
+  // treated as having gained one implicitly by reading this comment.
   const helloLeg = await connectLeg(args.host, presenceIdentityPath(), HELLO_TOPIC, (evt) => {
     const payload = evt.payload as Record<string, unknown>;
     const seenNodeId = typeof payload.node_id === "string" ? payload.node_id : undefined;
@@ -428,12 +453,16 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       message: typeof payload.message === "string" ? payload.message : undefined,
       model: typeof payload.model === "string" ? payload.model : undefined,
       connected_via: typeof payload.connected_via === "string" ? payload.connected_via : undefined,
+      interval_seconds: typeof payload.interval_seconds === "number" ? payload.interval_seconds : undefined,
       at: new Date().toISOString(),
     });
   });
   let goodbyeLeg: Leg;
   try {
     goodbyeLeg = await connectLeg(args.host, presenceGoodbyeIdentityPath(), GOODBYE_TOPIC, (evt) => {
+      // Same unauthenticated-by-design trust model as the hello handler
+      // above -- see that comment. removeAgent() only ever touches this
+      // process's own local roster cache.
       const payload = evt.payload as Record<string, unknown>;
       if (typeof payload.node_id === "string") removeAgent(payload.node_id);
     });
@@ -463,6 +492,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     message: args.message,
     model: args.model,
     connectedVia: args.connectedVia,
+    intervalSeconds,
     host,
     helloLeg,
     goodbyeLeg,
@@ -531,6 +561,10 @@ async function beat(): Promise<void> {
         ...(state.message ? { message: state.message } : {}),
         ...(state.model ? { model: state.model } : {}),
         ...(state.connectedVia ? { connected_via: state.connectedVia } : {}),
+        // Lets every observer's roster judge THIS agent's staleness against
+        // its real cadence instead of assuming DEFAULT_INTERVAL_SECONDS --
+        // see mesh_agents.ts's `stale` field and roster.ts's column doc.
+        interval_seconds: state.intervalSeconds,
         at: new Date().toISOString(),
       },
     });

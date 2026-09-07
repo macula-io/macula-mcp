@@ -61,6 +61,17 @@ describe("upsertAgent / listAgents", () => {
     expect(agents[0]).toMatchObject({ model: "claude-opus-5", connected_via: "claude-code 1.2.4" });
   });
 
+  it("records interval_seconds (as text) and refreshes it, defaults to null when omitted", () => {
+    upsertAgent({ node_id: "a1", interval_seconds: 60, at: "2026-08-30T00:00:00.000Z" });
+    expect(listAgents(1, 10).agents[0]).toMatchObject({ interval_seconds: "60" });
+
+    upsertAgent({ node_id: "a1", interval_seconds: 30, at: "2026-08-30T00:05:00.000Z" });
+    expect(listAgents(1, 10).agents[0]).toMatchObject({ interval_seconds: "30" });
+
+    upsertAgent({ node_id: "a2", at: "2026-08-30T00:00:00.000Z" });
+    expect(listAgents(1, 10).agents.find((a) => a.node_id === "a2")?.interval_seconds).toBeNull();
+  });
+
   it("sorts most-recently-seen first", () => {
     upsertAgent({ node_id: "old", at: "2026-08-30T00:00:00.000Z" });
     upsertAgent({ node_id: "new", at: "2026-08-30T01:00:00.000Z" });
@@ -147,12 +158,12 @@ describe("schema migration", () => {
 
       const before = listAgents(1, 10);
       expect(before.total).toBe(1);
-      expect(before.agents[0]).toMatchObject({ node_id: "pre-existing", operator_name: "Old Agent", model: null, connected_via: null });
+      expect(before.agents[0]).toMatchObject({ node_id: "pre-existing", operator_name: "Old Agent", model: null, connected_via: null, interval_seconds: null });
 
-      upsertAgent({ node_id: "new", model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", at: "2026-08-30T00:00:00.000Z" });
+      upsertAgent({ node_id: "new", model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", interval_seconds: 60, at: "2026-08-30T00:00:00.000Z" });
       const after = listAgents(1, 10);
       expect(after.total).toBe(2);
-      expect(after.agents.find((a) => a.node_id === "new")).toMatchObject({ model: "claude-sonnet-5", connected_via: "claude-code 1.2.3" });
+      expect(after.agents.find((a) => a.node_id === "new")).toMatchObject({ model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", interval_seconds: "60" });
     } finally {
       closeRoster();
       rmSync(dir, { recursive: true, force: true });

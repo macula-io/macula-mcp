@@ -67,7 +67,7 @@ function open(): DatabaseSync {
       last_seen_at TEXT NOT NULL
     )
   `);
-  migrateAddColumns(db, ["model", "connected_via"]);
+  migrateAddColumns(db, ["model", "connected_via", "interval_seconds"]);
   return db;
 }
 
@@ -91,6 +91,8 @@ export interface AgentRecord {
   message: string | null;
   model: string | null;
   connected_via: string | null;
+  /** The heartbeat interval that agent's own mesh_hello was started with, self-reported (stored as TEXT like every other optional column here; parse with Number() at the read site -- see mesh_agents.ts). Absent for a peer running a macula-mcp older than this field, or if it hasn't sent a hello yet this process's lifetime -- callers must treat null as "unknown," not zero. */
+  interval_seconds: string | null;
   first_seen_at: string;
   last_seen_at: string;
 }
@@ -102,17 +104,19 @@ export function upsertAgent(rec: {
   message?: string;
   model?: string;
   connected_via?: string;
+  interval_seconds?: number;
   at: string;
 }): void {
   open()
     .prepare(
-      `INSERT INTO agents (node_id, operator_name, message, model, connected_via, first_seen_at, last_seen_at)
-       VALUES (@node_id, @operator_name, @message, @model, @connected_via, @at, @at)
+      `INSERT INTO agents (node_id, operator_name, message, model, connected_via, interval_seconds, first_seen_at, last_seen_at)
+       VALUES (@node_id, @operator_name, @message, @model, @connected_via, @interval_seconds, @at, @at)
        ON CONFLICT(node_id) DO UPDATE SET
          operator_name = excluded.operator_name,
          message = excluded.message,
          model = excluded.model,
          connected_via = excluded.connected_via,
+         interval_seconds = excluded.interval_seconds,
          last_seen_at = excluded.last_seen_at`,
     )
     .run({
@@ -121,6 +125,7 @@ export function upsertAgent(rec: {
       message: rec.message ?? null,
       model: rec.model ?? null,
       connected_via: rec.connected_via ?? null,
+      interval_seconds: rec.interval_seconds !== undefined ? String(rec.interval_seconds) : null,
       at: rec.at,
     });
 }
