@@ -39,10 +39,10 @@ import * as presence from "./presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 
 const DEFAULT_BANNER = `
-   __  __  _____   ___  _   _  _      _
-  |  \\/  ||_   _| / __|| | | || |    /_\\
-  | |\\/| |  | |  | (__ | |_| || |__ / _ \\
-  |_|  |_|  |_|   \\___| \\___/ |____/_/ \\_\\
+   __  __   _   ___ _   _ _      _
+  |  \\/  | /_\\ / __| | | | |    /_\\
+  | |\\/| |/ _ \\ (__| |_| | |__ / _ \\
+  |_|  |_/_/ \\_\\___|\\___/|____/_/ \\_\\
   macula mesh -- an agent just said hello
 `;
 
