@@ -399,6 +399,59 @@ export function getRing(ringId: string, self: string): RingRecord | undefined {
   return open().prepare("SELECT * FROM rings WHERE ring_id = ? AND self = ?").get(ringId, self.toLowerCase()) as RingRecord | undefined;
 }
 
+/**
+ * Highest SQLite rowid among `self`'s own rows right now -- waitRing's own
+ * "afterId" cursor, the same shape lobby_transcript.ts's lastFactId()/
+ * factsAfter() give rooms.ts's waitRoom/waitForReply. No schema change
+ * needed for this: ring_id is TEXT PRIMARY KEY, not INTEGER, so SQLite
+ * still maintains an implicit, monotonically-increasing rowid alongside
+ * it (rows are never deleted here, so it never gets reused). 0 for a
+ * self with no rows yet, so "wait for the next one" means exactly that,
+ * not "the first one ever."
+ */
+function lastRingRowid(self: string): number {
+  const row = open().prepare("SELECT MAX(rowid) AS id FROM rings WHERE self = ?").get(self.toLowerCase()) as { id: number | null };
+  return row.id ?? 0;
+}
+
+/** How often waitRing polls while blocked -- same cadence and reasoning as rooms.ts's own REPLY_POLL_MS (cheap local reads already fed by the background tap; here, by handleRing's own recordRing() call on every real inbound ring, active whenever ring serving is, independent of whether anything is waiting). Not imported from rooms.ts: same value, deliberately duplicated rather than coupling two otherwise-independent modules over one shared constant -- matches how ring_service.ts's own RENEW_RETRY_BASE_MS and presence.ts's reconnect backoff are documented as parallel, not shared via import. */
+export const RING_POLL_MS = 250;
+
+export interface WaitRingResult {
+  ring: RingRecord | null;
+  timed_out: 0 | 1;
+}
+
+/**
+ * Blocks up to waitSeconds for the next INCOMING ring recorded for
+ * `self` -- mirrors rooms.ts's waitRoom/waitForReply (poll the local
+ * store already being kept current in the background, not a fresh mesh
+ * round trip per poll), but simpler: rooms.ts's waitForReply has to keep
+ * advancing its cursor across several new facts hunting for one that
+ * matches (attested, not from me) because a room mixes everyone's
+ * messages together. Every row this query can see is already scoped to
+ * `direction = 'in'` for `self` -- there is no "whose message is this"
+ * filtering left to do, so the first new row past the cursor is
+ * unconditionally the answer; no need to re-check or advance mid-loop.
+ * Covers every incoming ring, not only ones still pending an answer
+ * (open/closed/allowlist policies record theirs already-answered) --
+ * matching waitRoom's own "any new envelope from someone else," not a
+ * narrower "only ones awaiting your model." Never throws; returns
+ * `timed_out: 1` on a plain timeout, the same as waitRoom.
+ */
+export async function waitRing(args: { self: string; waitSeconds: number }): Promise<WaitRingResult> {
+  const after = lastRingRowid(args.self);
+  const deadline = Date.now() + args.waitSeconds * 1000;
+  while (Date.now() < deadline) {
+    const ring = open()
+      .prepare("SELECT * FROM rings WHERE self = ? AND direction = 'in' AND rowid > ? ORDER BY rowid ASC LIMIT 1")
+      .get(args.self.toLowerCase(), after) as RingRecord | undefined;
+    if (ring) return { ring, timed_out: 0 };
+    await new Promise((resolve) => setTimeout(resolve, RING_POLL_MS));
+  }
+  return { ring: null, timed_out: 1 };
+}
+
 /** Most recent first, always scoped to `self`. pendingOnly narrows to rings with no answer yet; answer narrows to one answer (e.g. 3 for outgoing rings still awaiting the callee's model). */
 export function listRings(args: { self: string; direction?: Direction; pendingOnly?: boolean; answer?: Answer; limit?: number }): RingRecord[] {
   const where: string[] = ["self = @self"];

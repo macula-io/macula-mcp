@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ANSWER,
   answerRing,
   buildRingAnswerArgs,
   buildRingArgs,
@@ -21,6 +22,8 @@ import {
   ringProcedure,
   ringProofProcedure,
   ringReplyProofProcedure,
+  RING_POLL_MS,
+  waitRing,
 } from "./rings.js";
 
 const ME = "a".repeat(64);
@@ -181,5 +184,79 @@ describe("parseProven", () => {
     expect(parseProven(good)).toEqual({ citizen_did: ME, proof: { timestamp: 1, signature: "ab" } });
     expect(parseProven({ citizen_did: ME })).toBeUndefined();
     expect(parseProven({ citizen_did: ME, proof: { timestamp: "1", signature: "ab" } })).toBeUndefined();
+  });
+});
+
+// macula-io/macula-mcp: mesh_wait_ring's whole mechanism -- mirrors
+// rooms.ts's waitRoom/waitForReply tests (same fake-timer, advance-past-
+// RING_POLL_MS shape) since waitRing reuses the identical "poll the
+// local store already being kept current in the background" pattern.
+describe("waitRing", () => {
+  it("ignores a ring recorded BEFORE the wait started, then returns the next one recorded after", async () => {
+    vi.useFakeTimers();
+    try {
+      recordRing({ ring_id: "1".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "already here", room_topic: ROOM, sent_at: Date.now() });
+      const pending = waitRing({ self: ME, waitSeconds: 5 });
+      await vi.advanceTimersByTimeAsync(0); // let the cursor (lastRingRowid) be taken before the ring below arrives
+      recordRing({ ring_id: "2".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "the new one", room_topic: ROOM, sent_at: Date.now() });
+      await vi.advanceTimersByTimeAsync(RING_POLL_MS);
+      const res = await pending;
+      expect(res.timed_out).toBe(0);
+      expect(res.ring).toMatchObject({ ring_id: "2".repeat(32), purpose: "the new one" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports timed_out: 1 when nothing new arrives before the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = waitRing({ self: ME, waitSeconds: 1 });
+      await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
+      expect(await pending).toEqual({ ring: null, timed_out: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a ring regardless of whether it was already answered (open/closed/allowlist) or is still pending (ask)", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = waitRing({ self: ME, waitSeconds: 5 });
+      await vi.advanceTimersByTimeAsync(0);
+      recordRing({ ring_id: "3".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "auto-accepted", room_topic: ROOM, sent_at: Date.now(), answer: ANSWER.accepted });
+      await vi.advanceTimersByTimeAsync(RING_POLL_MS);
+      const res = await pending;
+      expect(res.timed_out).toBe(0);
+      expect(res.ring).toMatchObject({ ring_id: "3".repeat(32), answer: ANSWER.accepted });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never matches an OUTGOING ring", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = waitRing({ self: ME, waitSeconds: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      recordRing({ ring_id: "4".repeat(32), self: ME, direction: "out", peer: THEM, purpose: "i rang them", room_topic: ROOM, sent_at: Date.now() });
+      await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
+      expect(await pending).toEqual({ ring: null, timed_out: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never matches another self's ring, even an incoming one recorded at the same moment", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = waitRing({ self: ME, waitSeconds: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+      recordRing({ ring_id: "5".repeat(32), self: THEM, direction: "in", peer: ME, purpose: "someone else's ring", room_topic: ROOM, sent_at: Date.now() });
+      await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
+      expect(await pending).toEqual({ ring: null, timed_out: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

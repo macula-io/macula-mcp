@@ -56,6 +56,7 @@ import { registerMeshRooms } from "./mesh_rooms.js";
 import { registerMeshWaitRoom } from "./mesh_wait_room.js";
 import { registerMeshRing } from "./mesh_ring.js";
 import { registerMeshAnswerRing } from "./mesh_answer_ring.js";
+import { registerMeshWaitRing } from "./mesh_wait_ring.js";
 import { registerMeshTrustAgent } from "./mesh_trust_agent.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
 import { registerMeshPublish } from "./mesh_publish.js";
@@ -205,6 +206,11 @@ registerMeshRing(server);
 // the room, record, carry the answer back as a proven call to the
 // caller's own ring endpoint. See ring_service.ts's answerPendingRing.
 registerMeshAnswerRing(server);
+// mesh_wait_ring: mesh_wait_room's counterpart for rings -- block on the
+// local rings table (already fed by ring_service.ts's own recordRing()
+// call on every real inbound ring) instead of polling mesh_read_inbox.
+// See rings.ts's waitRing() and mesh_wait_ring.ts's own module header.
+registerMeshWaitRing(server);
 // mesh_trust_agent/mesh_untrust_agent: manage this operator's own
 // contact-policy allowlist from inside a session (macula-mcp#1) -- a
 // pure local file edit, not a mesh call, so unlike everything else in
