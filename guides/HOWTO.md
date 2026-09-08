@@ -11,13 +11,13 @@ if you want to verify it yourself.
 
 ```bash
 npm install -g @macula-io/mcp
-macula-mcp-install
+macula-mcp-register
 ```
 
 Two steps, in order: `npm install -g @macula-io/mcp` (requires Node.js
 24.18.1+ — declared in `engines`, so npm itself enforces it; this package
 ships zero lifecycle scripts of its own, so nothing registers a client
-automatically as part of the install itself), then `macula-mcp-install`
+automatically as part of the install itself), then `macula-mcp-register`
 to actually do that registration. That's the whole install — mesh
 operations run in-process via `@macula-io/ts`, an ordinary npm
 dependency, so there's nothing else to fetch, version, or keep in sync
@@ -28,13 +28,13 @@ current — that entire concern is gone now, not just simplified.)
 
 Pin a version the normal npm way: `npm install -g @macula-io/mcp@0.3.0`.
 Want the package without registering a client yet? Just stop after the
-first command — `macula-mcp-install` is a separate, explicit step,
+first command — `macula-mcp-register` is a separate, explicit step,
 never something `npm install` triggers on its own; run it whenever
 you're ready, or skip it entirely and wire up your client's MCP config
 by hand instead.
 
 If more than one MCP client is detected and you're running in a real
-terminal (not piped), `macula-mcp-install` asks which to register with
+terminal (not piped), `macula-mcp-register` asks which to register with
 -- press Enter to register with all of them. `--only <a,b,c>` picks
 specific ones non-interactively.
 
@@ -50,7 +50,7 @@ to it -- config-file presence alone ("macula registered" in `status`)
 would have looked identical for two real bugs this project shipped and
 only caught by a human restarting their client and trying it (a wrong
 hardcoded config path, and a launch command that failed outright because
-this package ships 4 bin entries and none is literally "mcp"). `doctor`
+this package ships 6 bin entries and none is literally "mcp"). `doctor`
 is the check that would have caught both immediately.
 
 ```bash
@@ -81,7 +81,7 @@ global bin directory isn't on your shell's `PATH`. The installer prints the
 exact directory (`npm config get prefix` + `/bin`, or `\...\npm` on
 Windows) — add it, or just restart your terminal.
 
-**opencode.** Detected and configured by `macula-mcp-install` since 0.13.0
+**opencode.** Detected and configured by `macula-mcp-register` since 0.13.0
 (`~/.config/opencode/opencode.json`, under `mcp`). opencode accepts comments in
 that file; the installer's JSON reader does not and refuses to touch a file it
 cannot parse, so if yours is JSONC add the entry by hand:
@@ -96,7 +96,7 @@ cannot parse, so if yours is JSONC add the entry by hand:
 }
 ```
 
-**Goose.** Detected and configured by `macula-mcp-install` (`~/.config/goose/config.yaml`, under
+**Goose.** Detected and configured by `macula-mcp-register` (`~/.config/goose/config.yaml`, under
 `extensions`). This is Goose's real config format — YAML, with a `type`-tagged entry, not the
 `mcpServers`/`{command, args}` shape every other client here uses. If you need to add it by hand:
 

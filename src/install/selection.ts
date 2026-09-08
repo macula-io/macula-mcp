@@ -1,7 +1,7 @@
-// Pure parsing logic for bin/install.ts's interactive client picker.
-// Lives here, not in bin/install.ts, so it can be imported and tested
+// Pure parsing logic for bin/register.ts's interactive client picker.
+// Lives here, not in bin/register.ts, so it can be imported and tested
 // without triggering that file's unconditional `main()` call at module
-// load -- bin/install.ts is a script, not a library, and importing a
+// load -- bin/register.ts is a script, not a library, and importing a
 // script for its logic would run the whole installer as a side effect.
 
 /**

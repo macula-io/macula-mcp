@@ -1,4 +1,4 @@
-// Registry of supported MCP clients. Used by bin/install,
+// Registry of supported MCP clients. Used by bin/register,
 // bin/uninstall, and bin/status to iterate over the install matrix
 // without each command knowing about every client.
 

@@ -5,6 +5,32 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.0] - 2026-09-08
+
+### Changed
+- **`macula-mcp-install` renamed to `macula-mcp-register`, no compat
+  alias.** Raf's own words on the macula.io/connect page's install box:
+  "maybe it should be called `macula-mcp-register` or better still: IT
+  SHOULD NOT BE REQUIRED!" Investigated eliminating the step first: it
+  ships zero lifecycle scripts on purpose (README already documented
+  why -- a global-install-time hook silently writing into a host's own
+  config is exactly the kind of installation-script behavior supply-chain
+  scanners flag, and some environments run with `--allow-scripts` off by
+  default specifically to block it), so folding registration into `npm
+  install -g` itself was rejected, not just skipped. A handful of hosts
+  (Cursor, Goose, and Claude Desktop via its `.mcpb` bundle format) do
+  support a genuine one-click/deep-link install path that could bypass
+  this command entirely for them -- real, but a separate feature (a
+  hosted page, a bundle build+release step) with its own scope, not a
+  quick follow-on to a rename. Flagged separately, not built here. Given
+  the step stays required for at least four of the six supported clients
+  either way, renamed it instead: "install" wrongly implied this fetches
+  or sets up software -- `npm install -g` already did that; what the
+  command actually does is register an already-installed package into a
+  host's own config. No compat alias -- the only two callers (this repo's
+  own docs, macula-portal's connect page) are both updated in the same
+  change, so nothing external depends on the old name.
+
 ## [0.27.0] - 2026-09-08
 
 ### Added

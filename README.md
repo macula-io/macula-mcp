@@ -810,22 +810,30 @@ Requires Node.js 24.18.1+.
 
 ```bash
 npm install -g @macula-io/mcp
-macula-mcp-install
+macula-mcp-register
 ```
 
-`npm install -g` puts the `macula-mcp`/`macula-mcp-install`/
-`macula-mcp-uninstall`/`macula-mcp-status`/`macula-mcp-doctor` commands on
-your PATH — this package ships **zero lifecycle scripts of its own** (no
-postinstall hook, so no `--allow-scripts` flag is needed either), which is
-why registration is its own explicit second command rather than something
-`npm install` triggers by itself. `macula-mcp-install` registers the
-`macula` MCP server with every detected client (Claude Code, Claude
-Desktop, Cursor, Windsurf, opencode, Goose) — safe-merges into existing
-configs and backs them up first. Idempotent; re-running is a no-op if
-everything's already current. If more than one client is detected in a
-real terminal, it asks which to register with (Enter for all). Skip this
-command entirely to wire up your client's MCP config yourself instead
-(the JSON near the top of this README).
+`npm install -g` puts the `macula-mcp`/`macula-mcp-register`/
+`macula-mcp-uninstall`/`macula-mcp-status`/`macula-mcp-doctor`/
+`macula-mcp-realm` commands on your PATH — this package ships **zero
+lifecycle scripts of its own** (no postinstall hook, so no
+`--allow-scripts` flag is needed either), which is why registration is
+its own explicit second command rather than something `npm install`
+triggers by itself: a global install silently reaching into a host's own
+config would be a real supply-chain smell, the exact thing scanners flag
+installation scripts for. `macula-mcp-register` registers the `macula`
+MCP server with every detected client (Claude Code, Claude Desktop,
+Cursor, Windsurf, opencode, Goose) — safe-merges into existing configs and
+backs them up first. Idempotent; re-running is a no-op if everything's
+already current. If more than one client is detected in a real terminal,
+it asks which to register with (Enter for all). Skip this command
+entirely to wire up your client's MCP config yourself instead (the JSON
+near the top of this README).
+
+(Renamed from `macula-mcp-install` in 0.28.0 — "install" wrongly implied
+this step fetches or sets up software; `npm install -g` already did
+that. What this command does is register an already-installed package
+into a host's own config, so it's named for that.)
 
 Then verify it actually works, not just that the config file has the
 entry:
@@ -848,7 +856,7 @@ npm uninstall -g @macula-io/mcp
 npm install
 npm run build
 npm link            # puts `macula-mcp` on PATH
-macula-mcp-install  # register with detected MCP clients
+macula-mcp-register  # register with detected MCP clients
 ```
 
 See the [guide](guides/HOWTO.md) for env var overrides (pinning a version,
@@ -886,7 +894,7 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**Current release: v0.27.0.** Every tool talks to the
+**Current release: v0.28.0.** Every tool talks to the
 mesh in-process via `@macula-io/ts` — **`macula-cli` is not a dependency
 of this project at all**: not installed, not spawned, not version-checked
 (see CHANGELOG.md's 0.19.0 entry, and the 0.18.0 one folded into it, for

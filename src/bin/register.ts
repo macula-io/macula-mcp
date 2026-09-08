@@ -1,6 +1,13 @@
 #!/usr/bin/env node
-// macula-mcp install — wire macula-mcp into every detected MCP client's
+// macula-mcp register — wire macula-mcp into every detected MCP client's
 // config in one shot.
+//
+// Renamed from `macula-mcp-install` 2026-09-08: "install" wrongly implied
+// this fetches or sets up software -- the npm install already did that.
+// What this command actually does is register/configure an already-
+// installed package into each detected host's own config. No compat
+// alias: the only two callers (this repo's own docs and macula-portal's
+// connect page) are both updated in the same change.
 //
 // Scope:
 //   * Detects installed MCP clients (see mcp_clients/index.ts's ALL for
@@ -52,9 +59,9 @@ function parseArgs(argv: string[]): Args {
 
 function help(): void {
   console.log(
-    `macula-mcp install ${VERSION}
+    `macula-mcp register ${VERSION}
 
-Usage: macula-mcp-install [--force] [--only <client[,client,...]>]
+Usage: macula-mcp-register [--force] [--only <client[,client,...]>]
 
 Detects installed MCP clients and registers the 'macula' MCP server.
 Idempotent; safe-merges into existing configs and backs up first.
@@ -73,7 +80,7 @@ If more than one client is detected and --only wasn't given, and this is
 running in a real terminal (not piped), you'll be asked which to register
 with -- press Enter to register with all of them, same as before.
 
-After install: restart your MCP client; ask your LLM to read the
+After registering: restart your MCP client; ask your LLM to read the
 mesh://identity resource or call mesh_publish on any topic.
 `,
   );
@@ -106,16 +113,16 @@ async function pickInteractively(clients: ClientAdapter[]): Promise<ClientAdapte
 }
 
 function ok(msg: string) {
-  console.log(`[macula-mcp install] ✓ ${msg}`);
+  console.log(`[macula-mcp register] ✓ ${msg}`);
 }
 function info(msg: string) {
-  console.log(`[macula-mcp install]   ${msg}`);
+  console.log(`[macula-mcp register]   ${msg}`);
 }
 function warn(msg: string) {
-  console.warn(`[macula-mcp install] ! ${msg}`);
+  console.warn(`[macula-mcp register] ! ${msg}`);
 }
 function err(msg: string) {
-  console.error(`[macula-mcp install] ✗ ${msg}`);
+  console.error(`[macula-mcp register] ✗ ${msg}`);
 }
 
 async function main(): Promise<void> {

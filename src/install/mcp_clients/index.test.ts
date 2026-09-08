@@ -62,7 +62,7 @@ vi.mock("node:os", async (importOriginal) => {
 
 describe("MCP client adapters", () => {
   beforeEach(async () => {
-    fakeHome = await mkdtemp(join(tmpdir(), "macula-mcp-install-test-"));
+    fakeHome = await mkdtemp(join(tmpdir(), "macula-mcp-register-test-"));
   });
 
   afterEach(async () => {
