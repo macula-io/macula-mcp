@@ -5,6 +5,26 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.1] - 2026-09-09
+
+### Changed
+- **Install collapsed to one command, no permanent global install needed.**
+  Raf, directly: "all this install/config theatre, is there no easier
+  way?" There was: `npm install -g @macula-io/mcp` was never actually
+  required to run `macula-mcp-register` (or `-doctor`/`-status`/
+  `-uninstall`/`-realm`) at all -- `npx -y -p @macula-io/mcp <bin>` runs
+  any of them straight from npm's own cache, no global install, no PATH
+  changes. This is not a new mechanism: it's the exact invocation every
+  registered client config already uses to launch the server itself on
+  every real run (`{"command": "npx", "args": ["-y", "-p",
+  "@macula-io/mcp", "macula-mcp"]}`) -- the install docs were just never
+  pointed at the same trick. `npm install -g @macula-io/mcp` first is now
+  documented as optional, for a persistent PATH copy (repeated
+  `doctor`/`status` calls, or skipping npx's cache resolution each time),
+  not the default path. Zero code changes -- README/HOWTO.md only, plus a
+  version bump so npmjs.com's published README (bundled at publish time,
+  not fetched live from GitHub) stops showing the two-step version.
+
 ## [0.28.0] - 2026-09-08
 
 ### Changed

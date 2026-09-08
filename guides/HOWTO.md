@@ -10,39 +10,45 @@ if you want to verify it yourself.
 ## 1. Install / uninstall reference
 
 ```bash
-npm install -g @macula-io/mcp
-macula-mcp-register
+npx -y -p @macula-io/mcp macula-mcp-register
 ```
 
-Two steps, in order: `npm install -g @macula-io/mcp` (requires Node.js
-24.18.1+ — declared in `engines`, so npm itself enforces it; this package
-ships zero lifecycle scripts of its own, so nothing registers a client
-automatically as part of the install itself), then `macula-mcp-register`
-to actually do that registration. That's the whole install — mesh
-operations run in-process via `@macula-io/ts`, an ordinary npm
-dependency, so there's nothing else to fetch, version, or keep in sync
-beyond the npm package itself. (Before the 0.19.0 cutover, this server
-shelled out to a separately installed `macula-cli` binary and the
-install/uninstall/doctor flow had several steps dedicated to keeping it
-current — that entire concern is gone now, not just simplified.)
+One command (requires Node.js 24.18.1+ — declared in `engines`, so npm
+itself enforces it). No separate install step first: `npx -y -p <pkg>
+<bin>` fetches into npm's own cache and runs that one bin directly,
+without a permanent global install — the identical mechanism every
+registered client config already uses to launch the server itself on
+demand, so this isn't a special case, it's the same trick pointed at a
+different bin name. `-p @macula-io/mcp <bin>` (rather than bare `npx -y
+@macula-io/mcp`) is load-bearing, not decoration: this package ships six
+bin entries and none is literally `mcp`, so npx's default "run the bin
+matching the package's own short name" heuristic has nothing to match.
+That's the whole install — mesh operations run in-process via
+`@macula-io/ts`, an ordinary npm dependency, so there's nothing else to
+fetch, version, or keep in sync beyond the npm package itself. (Before
+the 0.19.0 cutover, this server shelled out to a separately installed
+`macula-cli` binary and the install/uninstall/doctor flow had several
+steps dedicated to keeping it current — that entire concern is gone now,
+not just simplified.)
 
-Pin a version the normal npm way: `npm install -g @macula-io/mcp@0.3.0`.
-Want the package without registering a client yet? Just stop after the
-first command — `macula-mcp-register` is a separate, explicit step,
-never something `npm install` triggers on its own; run it whenever
-you're ready, or skip it entirely and wire up your client's MCP config
-by hand instead.
+Pin a version the normal npm way: `npx -y -p @macula-io/mcp@0.3.0
+macula-mcp-register`. Want a persistent copy on `PATH` instead, e.g. for
+frequent `doctor`/`status` calls without re-resolving npx's cache each
+time? `npm install -g @macula-io/mcp`, then run any bin name below bare.
+This package ships zero lifecycle scripts of its own either way — nothing
+registers a client automatically as a side effect of installing; `register`
+is always something you run yourself, explicitly, whichever path you took.
 
 If more than one MCP client is detected and you're running in a real
 terminal (not piped), `macula-mcp-register` asks which to register with
 -- press Enter to register with all of them. `--only <a,b,c>` picks
 specific ones non-interactively.
 
-**After installing, verify the entry actually works, not just that the
+**After registering, verify the entry actually works, not just that the
 config file has it:**
 
 ```bash
-macula-mcp-doctor
+npx -y -p @macula-io/mcp macula-mcp-doctor
 ```
 
 This spawns the exact command your client would run and talks real MCP
@@ -54,19 +60,25 @@ this package ships 6 bin entries and none is literally "mcp"). `doctor`
 is the check that would have caught both immediately.
 
 ```bash
-macula-mcp-uninstall --all
-npm uninstall -g @macula-io/mcp
+npx -y -p @macula-io/mcp macula-mcp-uninstall --all
 ```
 
 `--all` on purpose, so a client you've since uninstalled still gets its
-stale config entry cleaned up. (If you've had macula-mcp installed since
-before v0.4.0, there may be one legacy leftover neither command above
-touches: `~/.macula-mcp/watch-identity.seed`. Nothing has read it since
-that version — every identity since is minted fresh per process in a
+stale config entry cleaned up. Took the persistent-`PATH`-copy route
+above instead? `macula-mcp-uninstall --all` bare, then `npm uninstall -g
+@macula-io/mcp`. (If you've had macula-mcp installed since before v0.4.0,
+there may be one legacy leftover neither command above touches:
+`~/.macula-mcp/watch-identity.seed`. Nothing has read it since that
+version — every identity since is minted fresh per process in a
 self-cleaning temp directory — so it's safe to `rm` by hand if you find
 it; not worth its own flag for what's by now a narrow, historical case.)
 
 ### Troubleshooting the install
+
+The two entries below are specific to the optional persistent-`PATH`-copy
+path (`npm install -g @macula-io/mcp`) — the default `npx -y -p ...`
+command above doesn't touch your global npm tree at all, so neither
+applies to it.
 
 **`npm install -g` fails with `EACCES`.** npm's global prefix isn't owned
 by your user — common with a system-package-manager-installed Node. See

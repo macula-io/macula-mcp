@@ -806,49 +806,58 @@ version, or keep in sync.
 
 ## Install
 
-Requires Node.js 24.18.1+.
+Requires Node.js 24.18.1+. One command, nothing to install first:
 
 ```bash
-npm install -g @macula-io/mcp
-macula-mcp-register
+npx -y -p @macula-io/mcp macula-mcp-register
 ```
 
-`npm install -g` puts the `macula-mcp`/`macula-mcp-register`/
-`macula-mcp-uninstall`/`macula-mcp-status`/`macula-mcp-doctor`/
-`macula-mcp-realm` commands on your PATH — this package ships **zero
-lifecycle scripts of its own** (no postinstall hook, so no
-`--allow-scripts` flag is needed either), which is why registration is
-its own explicit second command rather than something `npm install`
-triggers by itself: a global install silently reaching into a host's own
-config would be a real supply-chain smell, the exact thing scanners flag
-installation scripts for. `macula-mcp-register` registers the `macula`
-MCP server with every detected client (Claude Code, Claude Desktop,
-Cursor, Windsurf, opencode, Goose) — safe-merges into existing configs and
-backs them up first. Idempotent; re-running is a no-op if everything's
-already current. If more than one client is detected in a real terminal,
-it asks which to register with (Enter for all). Skip this command
-entirely to wire up your client's MCP config yourself instead (the JSON
-near the top of this README).
+Detects every MCP client already on your machine (Claude Code, Claude
+Desktop, Cursor, Windsurf, opencode, Goose) and safe-merges a `macula`
+entry into each one's own config — backs up first, idempotent (re-running
+is a no-op once everything's current). If more than one client is
+detected in a real terminal, it asks which to register with (Enter for
+all). This is the exact same `npx -y -p @macula-io/mcp <bin>` invocation
+every registered client entry itself uses to launch the server on demand
+(see the JSON near the top of this README) — nothing is ever installed
+onto your machine by this step, npm's own package cache is doing the
+fetching, the same as it does for the server on every real launch. Skip
+this command entirely to wire up your client's MCP config yourself
+instead.
 
-(Renamed from `macula-mcp-install` in 0.28.0 — "install" wrongly implied
-this step fetches or sets up software; `npm install -g` already did
-that. What this command does is register an already-installed package
-into a host's own config, so it's named for that.)
+(`-p @macula-io/mcp <bin>` rather than bare `npx -y @macula-io/mcp`: this
+package publishes six bin entries and none is literally `mcp`, so npx has
+nothing to guess at without being told which one to run. `register` was
+`macula-mcp-install` before 0.28.0 — renamed because "install" wrongly
+implied this fetches or sets up software, which `npx` already does; what
+the command does is register an already-fetched package into a host's own
+config.)
+
+Prefer a persistent copy on `PATH` instead (repeated `doctor`/`status`
+calls, or you'd rather not re-resolve `npx`'s cache every time)?
+`npm install -g @macula-io/mcp` first, then run any of the bin names
+below bare. Either way works identically — this package ships **zero
+lifecycle scripts of its own** (no postinstall hook, so no
+`--allow-scripts` flag is needed either), so nothing about registration
+happens automatically as a side effect of either install path; you always
+run `register` yourself, explicitly.
 
 Then verify it actually works, not just that the config file has the
 entry:
 
 ```bash
-macula-mcp-doctor
+npx -y -p @macula-io/mcp macula-mcp-doctor
 ```
 
-To uninstall (unregisters from every MCP client, then removes the `npm`
-package):
+To uninstall (unregisters from every MCP client; only needed if you
+never asked npm to remember anything):
 
 ```bash
-macula-mcp-uninstall
-npm uninstall -g @macula-io/mcp
+npx -y -p @macula-io/mcp macula-mcp-uninstall
 ```
+
+Took the persistent-`PATH`-copy route above instead? `macula-mcp-uninstall`
+bare, then `npm uninstall -g @macula-io/mcp`.
 
 **From source** (contributing, or before a version is published):
 
@@ -894,7 +903,7 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**Current release: v0.28.0.** Every tool talks to the
+**Current release: v0.28.1.** Every tool talks to the
 mesh in-process via `@macula-io/ts` — **`macula-cli` is not a dependency
 of this project at all**: not installed, not spawned, not version-checked
 (see CHANGELOG.md's 0.19.0 entry, and the 0.18.0 one folded into it, for
