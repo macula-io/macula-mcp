@@ -2,7 +2,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/macula-io/macula-mcp/ci.yml?branch=main&label=CI)](https://github.com/macula-io/macula-mcp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
-[![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-24.18.1%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-support-ea4aaa.svg?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/rgfaber)
 
 <p align="center">
@@ -763,26 +763,26 @@ version, or keep in sync.
 
 ## Install
 
-**Linux / macOS:**
+Requires Node.js 24.18.1+.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.sh | bash
+npm install -g @macula-io/mcp
+macula-mcp-install
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | iex
-```
-
-Both check Node.js, `npm install -g @macula-io/mcp` (this package ships
-**zero lifecycle scripts of its own**, so no `--allow-scripts` flag is
-needed either), then run `macula-mcp-install` to register the `macula` MCP
-server with every detected client (Claude Code, Claude Desktop, Cursor,
-Windsurf, opencode, Goose) — safe-merges into existing configs and backs
-them up first. Idempotent; re-running is a no-op if everything's already current.
-If more than one client is detected in a real terminal, it asks which to
-register with (Enter for all).
+`npm install -g` puts the `macula-mcp`/`macula-mcp-install`/
+`macula-mcp-uninstall`/`macula-mcp-status`/`macula-mcp-doctor` commands on
+your PATH — this package ships **zero lifecycle scripts of its own** (no
+postinstall hook, so no `--allow-scripts` flag is needed either), which is
+why registration is its own explicit second command rather than something
+`npm install` triggers by itself. `macula-mcp-install` registers the
+`macula` MCP server with every detected client (Claude Code, Claude
+Desktop, Cursor, Windsurf, opencode, Goose) — safe-merges into existing
+configs and backs them up first. Idempotent; re-running is a no-op if
+everything's already current. If more than one client is detected in a
+real terminal, it asks which to register with (Enter for all). Skip this
+command entirely to wire up your client's MCP config yourself instead
+(the JSON near the top of this README).
 
 Then verify it actually works, not just that the config file has the
 entry:
@@ -795,11 +795,8 @@ To uninstall (unregisters from every MCP client, then removes the `npm`
 package):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.sh | bash
-```
-
-```powershell
-irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.ps1 | iex
+macula-mcp-uninstall
+npm uninstall -g @macula-io/mcp
 ```
 
 **From source** (contributing, or before a version is published):

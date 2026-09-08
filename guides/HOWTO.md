@@ -10,28 +10,33 @@ if you want to verify it yourself.
 ## 1. Install / uninstall reference
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.sh | bash
+npm install -g @macula-io/mcp
+macula-mcp-install
 ```
 
-```powershell
-irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/install.ps1 | iex
-```
+Two steps, in order: `npm install -g @macula-io/mcp` (requires Node.js
+24.18.1+ — declared in `engines`, so npm itself enforces it; this package
+ships zero lifecycle scripts of its own, so nothing registers a client
+automatically as part of the install itself), then `macula-mcp-install`
+to actually do that registration. That's the whole install — mesh
+operations run in-process via `@macula-io/ts`, an ordinary npm
+dependency, so there's nothing else to fetch, version, or keep in sync
+beyond the npm package itself. (Before the 0.19.0 cutover, this server
+shelled out to a separately installed `macula-cli` binary and the
+install/uninstall/doctor flow had several steps dedicated to keeping it
+current — that entire concern is gone now, not just simplified.)
 
-Three steps, in order: check Node.js 24.18.1+ is present (won't install it
-for you), `npm install -g @macula-io/mcp`, then run `macula-mcp-install`.
-That's the whole install — this package ships zero lifecycle scripts of
-its own (mesh operations run in-process via `@macula-io/ts`, an ordinary
-npm dependency), so there's nothing to fetch, version, or
-keep in sync beyond the npm package itself. (Before the 0.19.0 cutover,
-this server shelled out to a separately installed `macula-cli` binary and
-the install/uninstall/doctor flow had several steps dedicated to keeping
-it current — that entire concern is gone now, not just simplified.)
+Pin a version the normal npm way: `npm install -g @macula-io/mcp@0.3.0`.
+Want the package without registering a client yet? Just stop after the
+first command — `macula-mcp-install` is a separate, explicit step,
+never something `npm install` triggers on its own; run it whenever
+you're ready, or skip it entirely and wire up your client's MCP config
+by hand instead.
 
 If more than one MCP client is detected and you're running in a real
-terminal (not a piped `curl | bash`), `macula-mcp-install` asks which to
-register with -- press Enter to register with all of them, same as
-before this existed. A piped install never prompts (`--only <a,b,c>`
-still works non-interactively if you want to be specific there too).
+terminal (not piped), `macula-mcp-install` asks which to register with
+-- press Enter to register with all of them. `--only <a,b,c>` picks
+specific ones non-interactively.
 
 **After installing, verify the entry actually works, not just that the
 config file has it:**
@@ -48,27 +53,18 @@ hardcoded config path, and a launch command that failed outright because
 this package ships 4 bin entries and none is literally "mcp"). `doctor`
 is the check that would have caught both immediately.
 
-| Env var | Effect |
-|---|---|
-| `MACULA_MCP_VERSION` | Pin a version (e.g. `0.3.0`) instead of latest. |
-| `MACULA_MCP_SKIP_CONFIGURE` | Install the package but don't register any MCP client — run `macula-mcp-install` yourself later. |
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.sh | bash
-# add --purge to also remove mesh_watch's dedicated identity file:
-curl -fsSL .../uninstall.sh | bash -s -- --purge
+macula-mcp-uninstall --all
+npm uninstall -g @macula-io/mcp
 ```
 
-```powershell
-irm https://raw.githubusercontent.com/macula-io/macula-mcp/main/uninstall.ps1 | iex
-# -Purge needs a local copy first (piped iex can't take script params):
-iwr -useb .../uninstall.ps1 -OutFile uninstall.ps1; .\uninstall.ps1 -Purge
-```
-
-Unregisters from every detected MCP client (`macula-mcp-uninstall --all`
-under the hood — `--all` on purpose, so a client you've since uninstalled
-still gets its stale config entry cleaned up), then `npm uninstall -g
-@macula-io/mcp`.
+`--all` on purpose, so a client you've since uninstalled still gets its
+stale config entry cleaned up. (If you've had macula-mcp installed since
+before v0.4.0, there may be one legacy leftover neither command above
+touches: `~/.macula-mcp/watch-identity.seed`. Nothing has read it since
+that version — every identity since is minted fresh per process in a
+self-cleaning temp directory — so it's safe to `rm` by hand if you find
+it; not worth its own flag for what's by now a narrow, historical case.)
 
 ### Troubleshooting the install
 
