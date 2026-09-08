@@ -626,7 +626,7 @@ Phase 0 decisions (settled 2026-05-16):
 ## Cross-plan links
 
 - [`PLAN_MACULA_MCP.md`](PLAN_MACULA_MCP.md) — Phase 1+2 daemon HTTP surface (already shipped); this installer plan is the user-acquisition layer above it.
-- `macula-internal/macula-architecture/plans/PLAN_PROVISIONAL_REALM_TIER.md` — Phase 0 of that plan is the hard blocker on Phase 1 here; cert acquisition cannot happen without the realm endpoint.
+- `macula-io/macula-architecture/plans/PLAN_PROVISIONAL_REALM_TIER.md` — Phase 0 of that plan is the hard blocker on Phase 1 here; cert acquisition cannot happen without the realm endpoint.
 - `macula-io/macula-comm-docs/manifesto/MANIFESTO_AGENT_FABRIC.md` — §5's install snippet is the contract this plan implements.
 
 ## Success criteria
