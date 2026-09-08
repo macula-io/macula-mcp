@@ -1,3 +1,7 @@
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ANSWER,
@@ -119,7 +123,7 @@ describe("ring records", () => {
   it("records an incoming ring as pending until answered", () => {
     recordRing({ ring_id: "1".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "p", room_topic: ROOM, sent_at: 5 });
     expect(pendingIncoming(ME)).toEqual([expect.objectContaining({ ring_id: "1".repeat(32), self: ME, peer: THEM, answer: null })]);
-    answerRing("1".repeat(32), 1);
+    answerRing("1".repeat(32), "in", 1);
     expect(pendingIncoming(ME)).toEqual([]);
     expect(getRing("1".repeat(32), ME)).toMatchObject({ answer: 1, answered_at: expect.any(String) });
   });
@@ -127,8 +131,8 @@ describe("ring records", () => {
   it("records an outgoing ring, then its answer, or the reason it got none", () => {
     recordRing({ ring_id: "2".repeat(32), self: ME, direction: "out", peer: THEM, purpose: "p", room_topic: ROOM, sent_at: 5 });
     recordRing({ ring_id: "3".repeat(32), self: ME, direction: "out", peer: THEM, purpose: "q", room_topic: ROOM, sent_at: 6 });
-    answerRing("2".repeat(32), 2, "closed");
-    answerRing("3".repeat(32), null, "unreachable: no route");
+    answerRing("2".repeat(32), "out", 2, "closed");
+    answerRing("3".repeat(32), "out", null, "unreachable: no route");
     expect(listRings({ self: ME, direction: "out", pendingOnly: true })).toEqual([]);
     expect(getRing("2".repeat(32), ME)).toMatchObject({ answer: 2, reason: "closed" });
     expect(getRing("3".repeat(32), ME)).toMatchObject({ answer: null, reason: "unreachable: no route" });
@@ -257,6 +261,93 @@ describe("waitRing", () => {
       expect(await pending).toEqual({ ring: null, timed_out: 1 });
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+// macula-io/macula-mcp, found live 2026-09-08: rings.sqlite3 is one file
+// per MACHINE (not per identity), so a caller's own "out" row and a
+// callee's own "in" row for the SAME ring_id both land in it whenever
+// caller and callee share a machine -- not a rare case. ring_id alone as
+// PRIMARY KEY meant the second one always silently no-opped via
+// ON CONFLICT DO NOTHING, and since the caller's row is written
+// synchronously before the network call even goes out, the caller's row
+// deterministically won every time, not a 50/50 race -- the callee's own
+// side of the ring simply never existed in its own database.
+describe("same-machine caller+callee: both rows for one ring_id must coexist", () => {
+  it("records the caller's OUT row and the callee's IN row for the identical ring_id without either dropping the other", () => {
+    const ringId = "6".repeat(32);
+    recordRing({ ring_id: ringId, self: ME, direction: "out", peer: THEM, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
+    // The callee's write always lands SECOND in real life (it's downstream
+    // of an actual network round trip) -- recorded here in that same
+    // order to match, not to matter: ON CONFLICT is keyed on
+    // (ring_id, direction) now, so arrival order can never cause a drop
+    // regardless of which side goes first.
+    recordRing({ ring_id: ringId, self: THEM, direction: "in", peer: ME, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
+
+    expect(getRing(ringId, ME)).toMatchObject({ ring_id: ringId, self: ME, direction: "out", peer: THEM });
+    expect(getRing(ringId, THEM)).toMatchObject({ ring_id: ringId, self: THEM, direction: "in", peer: ME });
+  });
+
+  it("answerRing scoped by direction updates only the matching row, never the other party's row for the same ring_id", () => {
+    const ringId = "7".repeat(32);
+    recordRing({ ring_id: ringId, self: ME, direction: "out", peer: THEM, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
+    recordRing({ ring_id: ringId, self: THEM, direction: "in", peer: ME, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
+
+    answerRing(ringId, "out", ANSWER.accepted, undefined);
+
+    expect(getRing(ringId, ME)).toMatchObject({ direction: "out", answer: ANSWER.accepted });
+    expect(getRing(ringId, THEM)).toMatchObject({ direction: "in", answer: null }); // untouched, not silently overwritten
+  });
+});
+
+describe("schema migration: existing on-disk rings.sqlite3 from before the composite key", () => {
+  it("upgrades a pre-existing single-ring_id-primary-key database, keeps every existing row, and no longer drops a same-ring_id different-direction insert afterward", () => {
+    const dir = mkdtempSync(join(tmpdir(), "macula-mcp-rings-test-"));
+    const dbFile = join(dir, "rings.sqlite3");
+    try {
+      const old = new DatabaseSync(dbFile);
+      old.exec(`
+        CREATE TABLE rings (
+          ring_id TEXT PRIMARY KEY,
+          direction TEXT NOT NULL,
+          peer TEXT NOT NULL,
+          purpose TEXT NOT NULL,
+          room_topic TEXT NOT NULL,
+          sent_at INTEGER NOT NULL,
+          recorded_at TEXT NOT NULL,
+          answer INTEGER,
+          reason TEXT,
+          answered_at TEXT,
+          self TEXT
+        )
+      `);
+      old
+        .prepare(
+          `INSERT INTO rings (ring_id, direction, peer, purpose, room_topic, sent_at, recorded_at, answer, reason, answered_at, self)
+           VALUES (?, 'out', ?, 'pre-existing', ?, 1, '2026-09-01T00:00:00.000Z', NULL, NULL, NULL, ?)`,
+        )
+        .run("8".repeat(32), THEM, ROOM, ME);
+      old.close();
+
+      process.env.MACULA_MCP_RINGS_DB = dbFile;
+      closeRings(); // drop the :memory: handle from beforeEach so the next open() reads dbFile
+
+      // Old row survived the rebuild.
+      expect(getRing("8".repeat(32), ME)).toMatchObject({ ring_id: "8".repeat(32), direction: "out", purpose: "pre-existing", self: ME });
+
+      // The actual bug, proven fixed against a REAL migrated on-disk file,
+      // not just a fresh :memory: one: a same-ring_id different-direction
+      // row (the shape a same-machine caller+callee pair produces) no
+      // longer collides.
+      const newRingId = "9".repeat(32);
+      recordRing({ ring_id: newRingId, self: ME, direction: "out", peer: THEM, purpose: "after migration", room_topic: ROOM, sent_at: 2 });
+      recordRing({ ring_id: newRingId, self: THEM, direction: "in", peer: ME, purpose: "after migration", room_topic: ROOM, sent_at: 2 });
+      expect(getRing(newRingId, ME)).toMatchObject({ direction: "out" });
+      expect(getRing(newRingId, THEM)).toMatchObject({ direction: "in" });
+    } finally {
+      closeRings();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

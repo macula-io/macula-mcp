@@ -110,7 +110,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
     payload = res.payload;
   } catch (e) {
     const reason = `unreachable: ${e instanceof Error ? e.message : String(e)}`;
-    answerRing(ring.ring_id, null, reason);
+    answerRing(ring.ring_id, "out", null, reason);
     return {
       ring_id: ring.ring_id,
       to,
@@ -123,7 +123,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
 
   const reply = parseRingReply(payload);
   if (!reply || (reply.ring_id !== undefined && reply.ring_id !== ring.ring_id)) {
-    answerRing(ring.ring_id, null, "malformed reply");
+    answerRing(ring.ring_id, "out", null, "malformed reply");
     throw new RingError(`${procedure} answered with something that is not a reply to this ring: ${JSON.stringify(payload)}`);
   }
   // A definitive answer (accepted or declined, as opposed to the
@@ -144,7 +144,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
       verifyOwnershipProof({ node_id: to, proof: reply.proven.proof, procedure: ringReplyProofProcedure(to, reply.ring_id, reply.answer) }).ok === 1;
     if (!proven) {
       const reason = `unreachable: an answer arrived for ${procedure} but was not verifiably signed by ${to}'s own key -- treating as unreachable rather than trusting it`;
-      answerRing(ring.ring_id, null, reason);
+      answerRing(ring.ring_id, "out", null, reason);
       return {
         ring_id: ring.ring_id,
         to,
@@ -155,7 +155,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
       };
     }
   }
-  answerRing(ring.ring_id, reply.answer, reply.reason);
+  answerRing(ring.ring_id, "out", reply.answer, reply.reason);
 
   let joined: 0 | 1 | undefined;
   if (reply.answer === ANSWER.accepted) {

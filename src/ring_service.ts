@@ -468,7 +468,7 @@ async function handleRingAnswer(payload: unknown, nodeId: string, deps: HandleDe
   if (ring.answer === ANSWER.accepted || ring.answer === ANSWER.declined) {
     return { ring_id: ans.ring_id, received: 1, already_answered: 1 };
   }
-  answerRing(ans.ring_id, ans.answer, ans.reason);
+  answerRing(ans.ring_id, ring.direction, ans.answer, ans.reason);
   return { ring_id: ans.ring_id, received: 1 };
 }
 
@@ -518,7 +518,7 @@ export async function answerPendingRing(
     const joinRoom = deps.joinRoom ?? rooms.joinRoom;
     await joinRoom({ host: args.host ?? state?.host, room_topic: ring.room_topic, openedBy: ring.peer });
   }
-  answerRing(args.ring_id, args.answer, args.reason);
+  answerRing(args.ring_id, ring.direction, args.answer, args.reason);
 
   const procedure = ringProcedure(ring.peer);
   const answerArgs = buildRingAnswerArgs({ from: nodeId, to: ring.peer, ring_id: ring.ring_id, answer: args.answer, room_topic: ring.room_topic, reason: args.reason });

@@ -5,6 +5,47 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.26.1] - 2026-09-08
+
+### Fixed
+- **A ring's callee-side bookkeeping was silently dropped whenever caller
+  and callee run on the same machine -- not a rare race, deterministic
+  every time.** `rings.sqlite3` is one file per MACHINE (identities are
+  per session, but this store isn't), so a ring's two legitimate rows --
+  the caller's own "out" row (`mesh_ring.ts`'s `placeRing()`, written
+  synchronously, before the network call even goes out) and the callee's
+  own "in" row (`ring_service.ts`'s `handleRing()`, written when the call
+  arrives) -- both land in the same file. `ring_id TEXT PRIMARY KEY`
+  alone meant the second insert always hit `ON CONFLICT(ring_id) DO
+  NOTHING` and silently no-opped -- and since the caller's write is local
+  and synchronous while the callee's is downstream of an actual network
+  round trip, the caller's row won every time two agents sharing a
+  machine rang each other, not 50/50. The callee's own copy of the ring
+  -- what `mesh_read_inbox`, `mesh_wait_ring`, and `mesh_answer_ring` all
+  read on its side -- simply never existed there. Found live 2026-09-08.
+  - `ring_id` alone can't be a row's own identity when one ring
+    legitimately produces two rows in a shared file -- the primary key is
+    now `(ring_id, direction)` (a caller and a callee never share a
+    direction for the same ring_id, even in the degenerate case of an
+    agent ringing itself). `recordRing`'s conflict target updated to
+    match.
+  - `answerRing` now takes `direction` as a required parameter and scopes
+    its `UPDATE` by it: with two rows now able to share a `ring_id`, the
+    old `WHERE ring_id = ?` alone would have updated BOTH rows whenever
+    they land in the same file, silently overwriting the OTHER party's
+    own answer with this side's.
+  - SQLite can't alter a primary key in place, so an existing on-disk
+    `rings.sqlite3` still on the old schema is rebuilt under the new one
+    and every row copied across on next open -- safe, since every
+    ring_id was already globally unique under the old schema. Verified
+    against a real on-disk file created with the pre-fix schema, not
+    just a fresh `:memory:` one.
+  - 3 new tests reproduce the exact reported shape (both rows for one
+    ring_id, `answerRing` not cross-contaminating the other party's row,
+    and the on-disk migration itself) and were confirmed RED against the
+    unfixed schema before the fix, then GREEN after. Full suite: 476
+    tests, typecheck and build clean.
+
 ## [0.26.0] - 2026-09-07
 
 ### Added

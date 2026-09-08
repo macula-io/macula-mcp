@@ -310,29 +310,89 @@ function open(): DatabaseSync {
   // particular, since ring_service.ts and mesh_ring.ts both write from
   // this same process (see the module header).
   db.exec("PRAGMA busy_timeout = 5000");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS rings (
-      ring_id TEXT PRIMARY KEY,
-      direction TEXT NOT NULL,
-      peer TEXT NOT NULL,
-      purpose TEXT NOT NULL,
-      room_topic TEXT NOT NULL,
-      sent_at INTEGER NOT NULL,
-      recorded_at TEXT NOT NULL,
-      answer INTEGER,
-      reason TEXT,
-      answered_at TEXT
-    )
-  `);
-  // `self`: which agent (node id) this row belongs to. The file is one per
-  // machine while identities are one per logical session, so two sessions
-  // on one machine must not see or answer each other's rings. Added
-  // after the first schema; older rows have NULL and belong to nobody.
-  const cols = new Set((db.prepare("PRAGMA table_info(rings)").all() as { name: string }[]).map((c) => c.name));
-  if (!cols.has("self")) db.exec("ALTER TABLE rings ADD COLUMN self TEXT");
+  migrateToCompositeRingKey(db);
   db.exec(`CREATE INDEX IF NOT EXISTS rings_direction_idx ON rings (direction, recorded_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS rings_self_idx ON rings (self, direction)`);
   return db;
+}
+
+/** The current schema, `ring_id` NOT unique alone -- see migrateToCompositeRingKey's own doc for why. */
+const RINGS_SCHEMA = `
+  CREATE TABLE rings (
+    ring_id TEXT NOT NULL,
+    self TEXT,
+    direction TEXT NOT NULL,
+    peer TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    room_topic TEXT NOT NULL,
+    sent_at INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL,
+    answer INTEGER,
+    reason TEXT,
+    answered_at TEXT,
+    PRIMARY KEY (ring_id, direction)
+  )
+`;
+
+/**
+ * Real bug, found live 2026-09-08 (macula-io/macula-mcp, same-day as
+ * mesh_wait_ring): `ring_id TEXT PRIMARY KEY` alone meant a ring's TWO
+ * legitimate rows -- the caller's own "out" row (recordRing, in
+ * mesh_ring.ts's placeRing(), written BEFORE the network call even goes
+ * out) and the callee's own "in" row (recordRing, in ring_service.ts's
+ * handleRing(), written when the call arrives) -- collided on the same
+ * ring_id in this one-file-per-MACHINE store (see the module header:
+ * identities are per session, but rings.sqlite3 is shared by every
+ * session on one box). `ON CONFLICT(ring_id) DO NOTHING` then silently
+ * dropped whichever row lost the race -- and since the caller's write is
+ * synchronous and local while the callee's is downstream of an actual
+ * network round trip, the caller's row deterministically won every time
+ * caller and callee share a machine, not a rare race. The callee's own
+ * ring bookkeeping (what mesh_read_inbox/mesh_wait_ring/mesh_answer_ring
+ * all read) simply never existed on its own side. Confirmed reproduced
+ * live: two same-machine macula-mcp processes, only the caller's row
+ * ever landed in rings.sqlite3.
+ *
+ * Fix: `ring_id` alone can't be the row's own identity when one ring
+ * legitimately produces two rows in a shared file -- `(ring_id,
+ * direction)` is (a caller and a callee never share a direction for the
+ * same ring_id, even in the degenerate case of an agent ringing itself).
+ * SQLite can't ALTER a primary key in place, so an existing on-disk file
+ * still on the old schema gets rebuilt under the new one and every
+ * existing row copied across -- safe, since every ring_id was already
+ * globally unique under the old schema, so there is nothing to
+ * deduplicate. Column list for the copy is read from the OLD table's own
+ * `PRAGMA table_info`, not assumed, so this works whether or not that
+ * file already went through the older self-column migration this
+ * replaces (self is part of the schema itself now, not a separate
+ * ALTER TABLE step -- a table already on the composite key already has
+ * it either way).
+ *
+ * Known, narrow, pre-existing limitation this does NOT solve: an agent
+ * ringing itself still produces two rows with the same self AND the
+ * same ring_id, distinguished only by direction -- getRing(ringId, self)
+ * could return either one for that specific case. Both real callers
+ * (handleRingAnswer, answerPendingRing) already re-check `ring.direction`
+ * immediately after calling getRing and reject a mismatch, so this is
+ * self-correcting today, not silently wrong -- just flagging it's still
+ * there, unrelated to and not widened by this fix.
+ */
+function migrateToCompositeRingKey(db: DatabaseSync): void {
+  const existing = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='rings'").get() as { name: string } | undefined;
+  if (!existing) {
+    db.exec(RINGS_SCHEMA);
+    return;
+  }
+  const oldCols = db.prepare("PRAGMA table_info(rings)").all() as { name: string; pk: number }[];
+  const pkCols = oldCols.filter((c) => c.pk > 0).map((c) => c.name);
+  const alreadyComposite = pkCols.length === 2 && pkCols.includes("ring_id") && pkCols.includes("direction");
+  if (alreadyComposite) return;
+
+  const copyCols = oldCols.map((c) => c.name).join(", ");
+  db.exec("ALTER TABLE rings RENAME TO rings_pre_composite_key");
+  db.exec(RINGS_SCHEMA);
+  db.exec(`INSERT INTO rings (${copyCols}) SELECT ${copyCols} FROM rings_pre_composite_key`);
+  db.exec("DROP TABLE rings_pre_composite_key");
 }
 
 export type Direction = "in" | "out";
@@ -353,7 +413,7 @@ export interface RingRecord {
   answered_at: string | null;
 }
 
-/** Records a ring once; answer may be given now (accepted/declined on the spot) or later via answerRing. Idempotent per ring_id. */
+/** Records a ring once per (ring_id, direction) -- see migrateToCompositeRingKey's own doc for why ring_id alone isn't enough. Answer may be given now (accepted/declined on the spot) or later via answerRing. Idempotent. */
 export function recordRing(rec: {
   ring_id: string;
   self: string;
@@ -370,7 +430,7 @@ export function recordRing(rec: {
     .prepare(
       `INSERT INTO rings (ring_id, self, direction, peer, purpose, room_topic, sent_at, recorded_at, answer, reason, answered_at)
        VALUES (@ring_id, @self, @direction, @peer, @purpose, @room_topic, @sent_at, @now, @answer, @reason, @answered_at)
-       ON CONFLICT(ring_id) DO NOTHING`,
+       ON CONFLICT(ring_id, direction) DO NOTHING`,
     )
     .run({
       ring_id: rec.ring_id,
@@ -387,11 +447,20 @@ export function recordRing(rec: {
     });
 }
 
-/** Sets (or overwrites) the answer on a recorded ring. A reason with no answer records why an outgoing ring never got one (unreachable). */
-export function answerRing(ringId: string, answer: Answer | null, reason?: string): void {
+/**
+ * Sets (or overwrites) the answer on a recorded ring. A reason with no
+ * answer records why an outgoing ring never got one (unreachable).
+ * `direction` is required, not optional: since a caller's "out" row and
+ * a callee's "in" row can share the same ring_id (see
+ * migrateToCompositeRingKey's own doc), a WHERE clause scoped by
+ * ring_id alone would update BOTH rows whenever they land in the same
+ * shared file -- silently overwriting the OTHER party's own record of
+ * the same ring with this side's answer.
+ */
+export function answerRing(ringId: string, direction: Direction, answer: Answer | null, reason?: string): void {
   open()
-    .prepare(`UPDATE rings SET answer = @answer, reason = @reason, answered_at = @now WHERE ring_id = @ring_id`)
-    .run({ ring_id: ringId, answer, reason: reason ?? null, now: new Date().toISOString() });
+    .prepare(`UPDATE rings SET answer = @answer, reason = @reason, answered_at = @now WHERE ring_id = @ring_id AND direction = @direction`)
+    .run({ ring_id: ringId, direction, answer, reason: reason ?? null, now: new Date().toISOString() });
 }
 
 /** One ring by id, only if it belongs to `self` (rows from another session on this machine are invisible). */
