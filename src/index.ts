@@ -69,6 +69,7 @@ import { registerMeshUnserve } from "./mesh_unserve.js";
 import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
 import { serverVersion } from "./version.js";
 import { registerMeshJoinRealm } from "./mesh_join_realm.js";
+import { registerMeshListRealms } from "./mesh_list_realms.js";
 import * as serve from "./serve.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
@@ -233,6 +234,7 @@ registerMeshWatch(server);
 // mesh_goodbye.
 registerMeshHello(server);
 registerMeshJoinRealm(server);
+registerMeshListRealms(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);
 // mesh_read_inbox reads, threaded, what the observer's room taps (see

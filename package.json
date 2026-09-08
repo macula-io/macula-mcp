@@ -1,6 +1,6 @@
 {
   "name": "@macula-io/mcp",
-  "version": "0.26.3",
+  "version": "0.27.0",
   "description": "Model Context Protocol server that exposes the Macula mesh to any agent harness",
   "license": "Apache-2.0",
   "type": "module",
@@ -33,7 +33,8 @@
     "macula-mcp-install": "dist/bin/install.js",
     "macula-mcp-uninstall": "dist/bin/uninstall.js",
     "macula-mcp-status": "dist/bin/status.js",
-    "macula-mcp-doctor": "dist/bin/doctor.js"
+    "macula-mcp-doctor": "dist/bin/doctor.js",
+    "macula-mcp-realm": "dist/bin/realm.js"
   },
   "files": [
     "dist"

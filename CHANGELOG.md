@@ -5,6 +5,75 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.27.0] - 2026-09-08
+
+### Added
+- **Multi-realm join, as a new standalone CLI (`macula-mcp-realm join
+  <name>`), deliberately never an MCP tool.** `mesh_join_realm` stays
+  exactly as it was -- no realm parameter, always `io.macula` -- because
+  a `realm` argument on an MCP-callable tool would be reachable from
+  every host running macula-mcp, not just whichever client's own
+  allowlist happens to exclude it: a crafted room message could talk a
+  model into calling `mesh_join_realm({realm:"attacker.controlled"})` on
+  any host that doesn't specifically guard against it (Fable's
+  adversarial review, R1, of the design this ships from). This binary is
+  the actual guard: a human runs it directly, or a harness execs it on
+  the human's own explicit action -- never something a model's own
+  tool-calling loop can reach, because it was never registered as a tool
+  at all.
+  - `<name>` is a dotted-hierarchical realm name (`io.macula`,
+    `net.beam-campus.sales`) the operator TYPES, never selects from a
+    list -- typing forces deliberate intent the way typing a URL does;
+    a populated list is spoofable. Resolved to the realm's own host by
+    reversing every label and prefixing `realm.` (`io.macula` ->
+    `realm.macula.io`, exactly today's real hardcoded default -- not a
+    new convention, a generalization of it) -- fixed, no `.well-known`
+    discovery hop, since a lookup step between what's typed and where it
+    ends up would reintroduce the exact untrusted-indirection problem
+    typing is meant to avoid.
+  - Validated against a real grammar (`src/realm_name.ts`), not a naive
+    one -- Fable's review (R3) found the first draft rejected the
+    project's own `net.beam-campus` example (hyphens), had no
+    case-folding rule (silent credential-file collisions), and admitted
+    IDN homograph lookalikes (a Cyrillic а resolves to a real,
+    differently-owned domain) including punycode, the one lookalike
+    class that survives a naive ASCII-letters filter. Fixed: ASCII-only
+    checked BEFORE lowercasing (so a character that folds TO ascii, like
+    U+212A KELVIN SIGN -> "k", can't hide by folding first), explicit
+    `xn--`-prefix rejection, a DNS-shaped per-label grammar, and a
+    minimum of two labels (a single label would resolve to a domain
+    anyone can register).
+  - Credential storage reshaped to `(node_id, realm)`, not just
+    `node_id` -- `~/.config/macula-mcp/realm/<node_id>/<realm>.json`.
+    An existing pre-multi-realm credential (the old flat
+    `<node_id>.json`, which only ever could have meant `io.macula`) is
+    still read via fallback, so nobody's existing membership is lost;
+    every fresh write, `io.macula` included, migrates forward to the
+    nested layout on its own.
+- **`mesh_list_realms`**: every realm this identity holds a *confirmed*
+  membership for (name, org identity/handle, joined_at, tier) -- an
+  ordinary, read-only MCP tool, unlike join. Never lists a pending
+  session (nothing to leak -- see v0.26.2's own redaction fix) and never
+  returns a bearer credential (`refresh_token`/`cert_pem` stay
+  local-file-only, same posture as `mesh_identity.ts`'s `has_ucan`
+  boolean).
+
+### Verified
+- `realm_name.ts`'s grammar: RED-confirmed on two specifically
+  security-relevant properties (the ASCII-check-before-fold ordering,
+  using a real Unicode character verified in-runtime to fold to plain
+  ASCII, not a hypothetical one; and the legacy-credential fallback's
+  scoping to `io.macula` only, so it can never answer for a different
+  realm) -- reverted each, confirmed the exact assertion fails, restored.
+- `bin/realm.ts`'s and `mesh_list_realms.ts`'s own redaction (no
+  `refresh_token`/`cert_pem` ever reaches an emitted event or tool
+  result) RED-confirmed the same way.
+- Full suite (506 tests), typecheck, and build all green. CLI smoke-
+  tested end to end against the built `dist/bin/realm.js` (`--help`,
+  an invalid realm name's exact error message and exit code); the join
+  flow's own network/polling logic is covered by the fake-fetch unit
+  tests above, not a live run against production `realm.macula.io`.
+
 ## [0.26.3] - 2026-09-08
 
 ### Fixed

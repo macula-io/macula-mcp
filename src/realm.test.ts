@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,7 +121,7 @@ describe("pure shapes", () => {
 });
 
 describe("credential store", () => {
-  it("round-trips a credential, 0600, keyed by node_id, and reports it as joined", async () => {
+  it("round-trips a credential, 0600, keyed by (node_id, realm), and reports it as joined", async () => {
     const path = realm.storeCredential({
       node_id: NODE,
       portal: "https://realm.test",
@@ -132,7 +133,10 @@ describe("credential store", () => {
       citizen_did: NODE,
       ucan: "eyJ.fake.token",
     });
-    expect(path).toBe(join(dir, `${NODE}.json`));
+    // Nested (node_id, realm) layout, not the old flat <node_id>.json --
+    // see credentialPath's own doc for why: a credential now belongs to
+    // one (identity, realm) pair, not just an identity.
+    expect(path).toBe(join(dir, NODE, "io.macula.json"));
     if (process.platform !== "win32") expect(((await stat(path)).mode & 0o777).toString(8)).toBe("600");
     expect(realm.loadCredential(NODE)?.refresh_token).toBe("mrt_1");
     expect(realm.orgHandle(NODE)).toBe("rgfaber");
@@ -196,6 +200,67 @@ describe("credential store", () => {
       tier: "device",
     });
     expect(realm.status(NODE).tier).toBe("device");
+  });
+
+  it("stores and loads independently under different realms for the same identity -- one does not clobber or leak into the other", () => {
+    realm.storeCredential(
+      { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_macula", joined_at: "2026-09-08T00:00:00Z" },
+      "io.macula",
+    );
+    realm.storeCredential(
+      { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z" },
+      "net.beam-campus",
+    );
+    expect(realm.loadCredential(NODE, "io.macula")?.refresh_token).toBe("mrt_macula");
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.refresh_token).toBe("mrt_beamcampus");
+    // omitting realmName defaults to io.macula, same as every pre-multi-realm caller already assumes
+    expect(realm.loadCredential(NODE)?.refresh_token).toBe("mrt_macula");
+  });
+
+  it("falls back to the pre-multi-realm flat <node_id>.json for io.macula specifically, when the nested layout has nothing yet", async () => {
+    // Simulates an operator who joined io.macula before this migration --
+    // written directly to the OLD flat path, not through storeCredential
+    // (which only ever writes the new nested layout, see its own doc).
+    await writeFile(
+      join(dir, `${NODE}.json`),
+      JSON.stringify({ node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_legacy", joined_at: "2026-09-01T00:00:00Z" }),
+      "utf8",
+    );
+    expect(realm.loadCredential(NODE, "io.macula")?.refresh_token).toBe("mrt_legacy");
+    // The fallback is scoped to io.macula only -- a legacy flat file can
+    // only ever have meant that realm (it's the only one that existed),
+    // so it must never be treated as the answer for a DIFFERENT realm.
+    expect(realm.loadCredential(NODE, "net.beam-campus")).toBeUndefined();
+  });
+
+  it("a fresh join for io.macula writes the new nested layout, not the old flat one, migrating forward on its own", () => {
+    const path = realm.storeCredential(
+      { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_1", joined_at: "2026-09-08T00:00:00Z" },
+      "io.macula",
+    );
+    expect(path).toBe(join(dir, NODE, "io.macula.json"));
+    expect(existsSync(join(dir, `${NODE}.json`))).toBe(false);
+  });
+
+  it("listCredentials returns every realm a node_id has a confirmed membership for, tagged by realm, and folds in a legacy flat io.macula credential too", async () => {
+    realm.storeCredential(
+      { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z" },
+      "net.beam-campus",
+    );
+    await writeFile(
+      join(dir, `${NODE}.json`),
+      JSON.stringify({ node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_legacy", joined_at: "2026-09-01T00:00:00Z" }),
+      "utf8",
+    );
+    const memberships = realm.listCredentials(NODE);
+    expect(memberships).toHaveLength(2);
+    const byRealm = Object.fromEntries(memberships.map((m) => [m.realm, m]));
+    expect(byRealm["net.beam-campus"]?.refresh_token).toBe("mrt_beamcampus");
+    expect(byRealm["io.macula"]?.refresh_token).toBe("mrt_legacy");
+  });
+
+  it("listCredentials is empty, not an error, for an identity with no memberships at all", () => {
+    expect(realm.listCredentials(NODE)).toEqual([]);
   });
 });
 

@@ -39,7 +39,7 @@
 // (0600), keyed by the identity they belong to: a session-scoped identity
 // keeps its membership for as long as that identity exists; pin
 // MACULA_MCP_IDENTITY to keep both across harness sessions.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname, arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import QRCode from "qrcode";
@@ -65,8 +65,50 @@ export function realmDir(): string {
   return process.env.MACULA_MCP_REALM_DIR ?? join(homedir(), ".config", "macula-mcp", "realm");
 }
 
-export function credentialPath(nodeId: string): string {
+/**
+ * DEFAULT_REALM_NAME is what every call site in this file meant, always,
+ * before multi-realm join existed: "io.macula", the one realm
+ * mesh_join_realm/device_membership.ts have ever bound an identity to.
+ * Every function below defaults its own realmName param to this, so
+ * every existing caller (unaware multi-realm join exists at all) keeps
+ * working unchanged -- only the new CLI join path (bin/realm.ts) ever
+ * passes something else.
+ */
+export const DEFAULT_REALM_NAME = "io.macula";
+
+/**
+ * <realmDir>/<node_id>/<realm>.json -- one credential per (identity,
+ * realm), not per identity alone. Realm names are already guaranteed
+ * filesystem-safe by realm_name.ts's own grammar (lowercase ASCII
+ * letters/digits/hyphens/single dots only -- no `/`, no `..` as a path
+ * traversal sequence) before anything ever reaches here, so no separate
+ * path-safety check is needed at this layer.
+ */
+export function credentialPath(nodeId: string, realmName: string = DEFAULT_REALM_NAME): string {
+  return join(realmDir(), nodeId, `${realmName}.json`);
+}
+
+/**
+ * The pre-multi-realm flat layout (<realmDir>/<node_id>.json, no realm
+ * segment at all -- there was only ever one realm to mean). loadCredential
+ * falls back to this for DEFAULT_REALM_NAME specifically so an operator
+ * who already joined before this change keeps their membership without a
+ * forced re-join; storeCredential never writes here again, for any
+ * realm, io.macula included -- every fresh write migrates forward to the
+ * nested layout on its own.
+ */
+function legacyCredentialPath(nodeId: string): string {
   return join(realmDir(), `${nodeId}.json`);
+}
+
+function readCredentialFile(path: string): RealmCredential | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as RealmCredential;
+    if (typeof parsed.org_identity !== "string" || typeof parsed.refresh_token !== "string") return undefined;
+    return { ...parsed, tier: parsed.tier ?? "citizen" };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -94,25 +136,63 @@ export interface RealmCredential {
   tier?: RealmTier;
 }
 
-export function loadCredential(nodeId: string): RealmCredential | undefined {
-  const path = credentialPath(nodeId);
-  if (!existsSync(path)) return undefined;
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as RealmCredential;
-    if (typeof parsed.org_identity !== "string" || typeof parsed.refresh_token !== "string") return undefined;
-    return { ...parsed, tier: parsed.tier ?? "citizen" };
-  } catch {
-    return undefined;
+export function loadCredential(nodeId: string, realmName: string = DEFAULT_REALM_NAME): RealmCredential | undefined {
+  const path = credentialPath(nodeId, realmName);
+  if (existsSync(path)) return readCredentialFile(path);
+  if (realmName === DEFAULT_REALM_NAME) {
+    const legacy = legacyCredentialPath(nodeId);
+    if (existsSync(legacy)) return readCredentialFile(legacy);
   }
+  return undefined;
 }
 
-/** Writes the credential 0600 in a 0700 directory and returns its path. */
-export function storeCredential(cred: RealmCredential): string {
-  mkdirSync(realmDir(), { recursive: true, mode: 0o700 });
-  const path = credentialPath(cred.node_id);
+/** Writes the credential 0600 in a 0700 directory and returns its path. Always the nested (node_id, realm) layout -- see legacyCredentialPath's own doc on why an old flat file is only ever READ, never written again. */
+export function storeCredential(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string {
+  mkdirSync(join(realmDir(), cred.node_id), { recursive: true, mode: 0o700 });
+  const path = credentialPath(cred.node_id, realmName);
   writeFileSync(path, JSON.stringify(cred, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
   chmodSync(path, 0o600);
   return path;
+}
+
+export interface RealmMembership extends RealmCredential {
+  realm: string;
+}
+
+/**
+ * Every realm nodeId currently holds a stored credential for -- confirmed
+ * memberships only, never a pending one (a pending join lives only in
+ * whichever process created it, mesh_join_realm's own module state or
+ * bin/realm.ts's own subprocess-local state; neither is ever written to
+ * disk, so there is nothing pending for this function to find or leak).
+ * Backs mesh_list_realms. Folds in the legacy flat io.macula credential
+ * (see legacyCredentialPath) if present and the nested layout hasn't
+ * superseded it yet, so an operator who joined before multi-realm
+ * existed sees it listed too, not just realms joined since.
+ */
+export function listCredentials(nodeId: string): RealmMembership[] {
+  const dir = join(realmDir(), nodeId);
+  const out: RealmMembership[] = [];
+  const seen = new Set<string>();
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir)) {
+      if (!entry.endsWith(".json")) continue;
+      const realmName = entry.slice(0, -".json".length);
+      const cred = readCredentialFile(join(dir, entry));
+      if (cred) {
+        out.push({ ...cred, realm: realmName });
+        seen.add(realmName);
+      }
+    }
+  }
+  if (!seen.has(DEFAULT_REALM_NAME)) {
+    const legacy = legacyCredentialPath(nodeId);
+    if (existsSync(legacy)) {
+      const cred = readCredentialFile(legacy);
+      if (cred) out.push({ ...cred, realm: DEFAULT_REALM_NAME });
+    }
+  }
+  return out;
 }
 
 /** `mri:org:io.macula/rgfaber` -> `rgfaber`; undefined when not joined. Pure. */
@@ -213,8 +293,9 @@ export function parseSessionStatus(httpStatus: number, body: unknown): SessionSt
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
-export async function createSession(body: Record<string, unknown>, fetchImpl: FetchLike = fetch): Promise<CreatedSession> {
-  const res = await fetchImpl(`${realmUrl()}/api/v1/join/sessions`, {
+/** baseURL defaults to realmUrl() (today's single-realm env-var-or-default) -- bin/realm.ts's multi-realm CLI is the only caller that ever passes something else (realm_name.ts's realmBaseURL, resolved from a typed realm name), never the MCP-tool path. */
+export async function createSession(body: Record<string, unknown>, fetchImpl: FetchLike = fetch, baseURL: string = realmUrl()): Promise<CreatedSession> {
+  const res = await fetchImpl(`${baseURL}/api/v1/join/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
@@ -222,8 +303,9 @@ export async function createSession(body: Record<string, unknown>, fetchImpl: Fe
   return parseCreated(res.status, await res.json().catch(() => ({})));
 }
 
-export async function pollSession(sessionId: string, fetchImpl: FetchLike = fetch): Promise<SessionStatus> {
-  const res = await fetchImpl(`${realmUrl()}/api/v1/join/sessions/${encodeURIComponent(sessionId)}`, {
+/** baseURL: see createSession's own doc. */
+export async function pollSession(sessionId: string, fetchImpl: FetchLike = fetch, baseURL: string = realmUrl()): Promise<SessionStatus> {
+  const res = await fetchImpl(`${baseURL}/api/v1/join/sessions/${encodeURIComponent(sessionId)}`, {
     headers: { accept: "application/json" },
   });
   return parseSessionStatus(res.status, await res.json().catch(() => ({})));
