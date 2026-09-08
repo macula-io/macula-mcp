@@ -843,7 +843,7 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**Current release: v0.26.2.** Every tool talks to the
+**Current release: v0.26.3.** Every tool talks to the
 mesh in-process via `@macula-io/ts` — **`macula-cli` is not a dependency
 of this project at all**: not installed, not spawned, not version-checked
 (see CHANGELOG.md's 0.19.0 entry, and the 0.18.0 one folded into it, for

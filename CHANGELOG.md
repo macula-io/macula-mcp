@@ -5,6 +5,23 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.26.3] - 2026-09-08
+
+### Fixed
+- **`mesh_join_realm`'s request body sent device context under the wrong
+  key, so it never reached the realm.** `joinRequest()` sent
+  `agent_info`; macula-realm's `JoinSessionController` reads
+  `params["device_info"]` (defaulting to `%{}` when absent) -- found by
+  Orion (realm-admission side) while adding the join flow's new
+  explicit-confirmation review step, which shows the requesting device to
+  the human deciding whether to approve. Every join session created under
+  the old key had empty device info server-side: not a crash, but it
+  quietly defeated the point of that review step, falling back to "your
+  device" instead of showing the actual hostname/OS. Renamed the field;
+  no other shape change. RED-confirmed (reverted, confirmed the test
+  fails on the exact key name, restored). Full suite (478 tests),
+  typecheck, and build all green.
+
 ## [0.26.2] - 2026-09-08
 
 ### Fixed

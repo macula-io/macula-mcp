@@ -140,7 +140,16 @@ export function joinRequest(input: {
   return {
     public_key: Buffer.from(input.nodeId, "hex").toString("base64"),
     agent_mri: agentMri(input.nodeId),
-    agent_info: {
+    // device_info, not agent_info: found live 2026-09-08 (Orion,
+    // realm-admission side) -- macula-realm's JoinSessionController reads
+    // params["device_info"] (join_session_controller.ex, defaulting to
+    // %{} when absent), so every join session created under the old key
+    // name had empty device info server-side. Not a crash -- the join
+    // still worked -- but it quietly defeated the point of Orion's new
+    // explicit-confirm review step, which shows this to the human
+    // deciding whether to approve the join and falls back to "your
+    // device" with nothing here to show instead.
+    device_info: {
       hostname: hostname(),
       os: `${platform()}/${arch()}`,
       version: `macula-mcp ${serverVersion()}`,

@@ -53,12 +53,13 @@ describe("pure shapes", () => {
     expect(realm.agentMri(NODE)).toBe("mri:agent:io.macula/anonymous/macula-mcp-4f769c4e");
   });
 
-  it("joinRequest sends the key base64 (as the realm decodes it), the agent info, and the proof", () => {
+  it("joinRequest sends the key base64 (as the realm decodes it), device_info (not agent_info -- see the field's own doc comment), and the proof", () => {
     const req = realm.joinRequest({ nodeId: NODE, proof: { timestamp: 7, signature: "ab" }, connectedVia: "opencode 1.18.25" });
     expect(Buffer.from(req.public_key as string, "base64").toString("hex")).toBe(NODE);
     expect(req.agent_mri).toBe(realm.agentMri(NODE));
     expect(req.proof).toEqual({ timestamp: 7, signature: "ab" });
-    const info = req.agent_info as Record<string, unknown>;
+    expect(req.agent_info).toBeUndefined();
+    const info = req.device_info as Record<string, unknown>;
     expect(typeof info.hostname).toBe("string");
     expect(info.client).toBe("opencode 1.18.25");
     expect(String(info.version)).toMatch(/^macula-mcp \d+\.\d+\.\d+/);
