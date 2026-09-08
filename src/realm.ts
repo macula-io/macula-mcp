@@ -287,11 +287,40 @@ export interface RealmStatus {
   has_ucan?: boolean;
   /** "device" (silent, DeviceKeyOwnershipProof-only auto-join) or "citizen" (Hanko-bound human) -- see RealmCredential.tier. Undefined when not joined at all. */
   tier?: RealmTier;
-  pending?: { session_id: string; join_url: string; expires_at: string };
+  /**
+   * session_id/join_url are omitted (see status()'s own redactPending
+   * param) whenever this RealmStatus reaches somewhere other than the
+   * operator's own direct mesh_join_realm call -- a real live join_url
+   * is a bearer link: whoever opens it first and confirms with their own
+   * Hanko account gets the membership. expires_at alone is never
+   * sensitive on its own.
+   */
+  pending?: { session_id?: string; join_url?: string; expires_at: string };
   error?: string;
 }
 
-export function status(nodeId: string | undefined): RealmStatus {
+/**
+ * redactPending (found live 2026-09-08, macula-io/macula-mcp, a real
+ * live info-leak affecting every existing deployment, not a
+ * design-stage concern): mesh://identity (mesh_identity.ts) and
+ * mesh_hello's own result (via presence.ts's StartResult) both embed
+ * this exact RealmStatus, and neither sits behind any tool allowlist in
+ * any macula-mcp client -- so a pending join's session_id/join_url,
+ * meant only for the human who is about to scan/click it, was
+ * reachable by anything that merely checked its own identity or said
+ * hello while a join was in flight. Whoever gets that link first and
+ * confirms with THEIR OWN account gets the membership; the human's own
+ * typed-realm-name care (or, before that existed, simply calling
+ * mesh_join_realm themselves) never mattered once a second, unrelated
+ * read could hand the same link to a steered model.
+ *
+ * mesh_join_realm's own direct call (mesh_join_realm.ts) passes
+ * redactPending=false (the default) deliberately: that IS the
+ * legitimate channel, the one the human explicitly asked for by
+ * calling this tool, and it needs the real link to be useful at all.
+ * Only status reached through some OTHER, incidental read is redacted.
+ */
+export function status(nodeId: string | undefined, opts: { redactPending?: boolean } = {}): RealmStatus {
   const base: RealmStatus = { portal: realmUrl(), joined: false };
   if (!nodeId) return base;
   const cred = loadCredential(nodeId);
@@ -312,7 +341,11 @@ export function status(nodeId: string | undefined): RealmStatus {
   return {
     ...base,
     ...(pending && pending.node_id === nodeId
-      ? { pending: { session_id: pending.session_id, join_url: pending.join_url, expires_at: pending.expires_at } }
+      ? {
+          pending: opts.redactPending
+            ? { expires_at: pending.expires_at }
+            : { session_id: pending.session_id, join_url: pending.join_url, expires_at: pending.expires_at },
+        }
       : {}),
     ...(lastError ? { error: lastError } : {}),
   };

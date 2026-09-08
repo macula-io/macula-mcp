@@ -254,6 +254,17 @@ describe("join flow against a fake realm", () => {
     // bound to the join procedure specifically -- a proof for any other procedure must not verify
     expect(verifyOwnershipProof({ node_id: NODE, proof: sent.proof, procedure: "some.other.procedure" })).toEqual({ ok: 0, reason: "bad_signature" });
     expect(realm.status(NODE).pending?.session_id).toBe("s1");
+    // Found live 2026-09-08: mesh://identity and mesh_hello's own result
+    // both embed this exact status(), neither behind any tool allowlist
+    // -- a pending join's session_id/join_url is a bearer link meant only
+    // for the human about to scan/click it, so anything reached through
+    // an incidental identity/hello check must never carry it, even
+    // though the direct, human-requested channel (the default here,
+    // asserted just above) still legitimately does.
+    const redacted = realm.status(NODE, { redactPending: true });
+    expect(redacted.pending?.session_id).toBeUndefined();
+    expect(redacted.pending?.join_url).toBeUndefined();
+    expect(redacted.pending?.expires_at).toBe("2999-01-01T00:00:00Z");
     // a second begin while pending reuses the same session rather than spamming the realm
     const again = await realm.begin({ fetchImpl: server.fetchImpl });
     expect(again.reused).toBe(true);

@@ -45,7 +45,17 @@ export function registerIdentity(server: McpServer): void {
     },
     async (uri) => {
       const id = tsIdentity(defaultIdentityPath());
-      const shaped = { ...id, citizen_did: id.node_id, citizenship: citizenship.status(), realm: realm.status(id.node_id), ring: ringService.status() };
+      // redactPending: true -- a pending join's session_id/join_url is a
+      // bearer link meant for the human who is about to scan/click it,
+      // not for a routine identity check (see realm.ts's own doc on
+      // status()'s redactPending param for the live leak this closes).
+      const shaped = {
+        ...id,
+        citizen_did: id.node_id,
+        citizenship: citizenship.status(),
+        realm: realm.status(id.node_id, { redactPending: true }),
+        ring: ringService.status(),
+      };
       return {
         contents: [
           { uri: uri.href, mimeType: "application/json", text: JSON.stringify(shaped, null, 2) },

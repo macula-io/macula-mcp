@@ -133,6 +133,34 @@ describe("start()", () => {
     expect(createdSessions[1]!.subscribeCalls[0]!.topic).toBe(presence.GOODBYE_TOPIC);
   });
 
+  // Found live 2026-09-08: StartResult.realm (what mesh_hello actually
+  // returns to whatever called it) embeds realm.status() verbatim -- a
+  // pending join's session_id/join_url is a bearer link meant only for
+  // the human about to scan/click it, and mesh_hello sits behind no
+  // tool allowlist in any macula-mcp client. Wiring, not realm.ts's own
+  // redaction logic (that's realm.test.ts's job) -- this only proves
+  // presence.ts actually asks for the redacted variant, not the raw one.
+  it("asks realm.status() to redact any pending join link -- mesh_hello's own result is not the legitimate channel for it", async () => {
+    const realm = await import("./realm.js");
+    await presence.start({});
+
+    expect(realm.status).toHaveBeenCalledWith(NODE_ID, { redactPending: true });
+  });
+
+  // Same property, the OTHER branch: a second start() call while already
+  // active (already_active: true) is a distinct code path with its own
+  // realm.status() call site -- must redact too, not just the fresh-start one.
+  it("still redacts on a second, already-active start() call", async () => {
+    const realm = await import("./realm.js");
+    await presence.start({});
+    vi.mocked(realm.status).mockClear();
+
+    const result = await presence.start({});
+
+    expect(result.already_active).toBe(true);
+    expect(realm.status).toHaveBeenCalledWith(NODE_ID, { redactPending: true });
+  });
+
   it("announces immediately: publish() is called once before start() resolves, under the DEFAULT identity (not either subscribe leg's)", async () => {
     await presence.start({ operatorName: "raf", message: "hi" });
 

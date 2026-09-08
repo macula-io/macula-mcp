@@ -415,7 +415,11 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       ring: ringService.status(),
       citizen_did: state.nodeId,
       citizenship: citizen,
-      realm: realm.status(state.nodeId),
+      // redactPending: true -- mesh_hello's own result isn't the
+      // legitimate channel for a pending join's link (see realm.ts's
+      // status() doc on the live leak this closes); a human calling
+      // mesh_join_realm directly still gets the real one from there.
+      realm: realm.status(state.nodeId, { redactPending: true }),
     };
   }
 
@@ -531,7 +535,8 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     ring: ringService.status(),
     citizen_did: nodeId,
     citizenship: citizen,
-    realm: realm.status(nodeId),
+    // redactPending: true -- see the other call site's own comment above.
+    realm: realm.status(nodeId, { redactPending: true }),
   };
 }
 

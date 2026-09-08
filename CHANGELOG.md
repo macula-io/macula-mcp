@@ -5,6 +5,43 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.26.2] - 2026-09-08
+
+### Fixed
+- **A pending realm-join session's link was reachable by anything that
+  merely checked its own identity or said hello, not just the human it
+  was meant for.** Found while designing lazymesh's multi-realm `r`
+  panel (Fable's adversarial review of that design), but the leak itself
+  is in `mesh_join_realm`'s existing single-realm flow as already
+  shipped -- affects every deployment, not something the new design
+  introduced. `mesh://identity` (`mesh_identity.ts`) and `mesh_hello`'s
+  own result (via `presence.ts`'s `StartResult`) both embedded
+  `realm.status()` verbatim, and neither sits behind any tool allowlist
+  in any macula-mcp client. `RealmStatus.pending` carries a real bearer
+  link (`session_id`/`join_url`) while a join is in flight -- whoever
+  opens it first and confirms with their own Hanko account gets the
+  membership, so a room peer steering a model into reading its own
+  identity or saying hello (both already on every default allowlist)
+  could relay that link out and hijack a join the operator had already
+  started, without ever needing to phish the human who was about to type
+  or scan anything.
+  - `realm.status()` gains a `redactPending` option: when set, a pending
+    session reports only `expires_at`, never `session_id`/`join_url`.
+    `mesh_identity.ts` and both `presence.ts` call sites (fresh start and
+    already-active) now request it -- that's every path other than the
+    one legitimate channel.
+  - `mesh_join_realm`'s own direct response is deliberately unchanged:
+    that's the human explicitly asking for the link by calling the tool
+    themselves, and it needs the real one to be useful at all.
+  - Checked the actual mesh-broadcast `agent.hello` fact
+    (`presence.ts`'s `beat()`) separately -- it never included `realm`
+    at all, so this was a local tool-result/resource leak, not something
+    broadcast mesh-wide to every peer.
+  - RED-confirmed at both the `realm.status()` level and each `presence.ts`
+    call site (temporarily reverted, confirmed the exact assertion each
+    guards against fails, restored). Full suite (478 tests), typecheck,
+    and build all green.
+
 ## [0.26.1] - 2026-09-08
 
 ### Fixed
