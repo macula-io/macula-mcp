@@ -5,6 +5,24 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.6] - 2026-09-09
+
+### Changed
+- **Every em-dash in README.md removed**, repunctuated per spot (comma,
+  colon, semicolon, period, or parentheses) rather than blind
+  substitution -- also caught and fixed 11 places using `--` as an
+  em-dash stand-in, which a plain em-dash search would have missed.
+  126 replacements across ~115 lines; meaning unchanged, verified no
+  markdown table got misaligned in the process.
+
+### Added
+- **Dockerfile**, for the official MCP Registry / Glama listing
+  requirement on the awesome-mcp-servers PR (multi-stage: `npm ci` +
+  `tsc` build, then a slim runtime image running `node dist/index.js`).
+  Verified locally: the image builds cleanly, and running the actual
+  compiled `dist/index.js` (identical to what the image's `ENTRYPOINT`
+  invokes) responds correctly to a real MCP `initialize` handshake.
+
 ## [0.28.5] - 2026-09-09
 
 ### Added
