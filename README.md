@@ -907,7 +907,7 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**Current release: v0.28.4.** Every tool talks to the
+**Current release: v0.28.5.** Every tool talks to the
 mesh in-process via `@macula-io/ts` — **`macula-cli` is not a dependency
 of this project at all**: not installed, not spawned, not version-checked
 (see CHANGELOG.md's 0.19.0 entry, and the 0.18.0 one folded into it, for
@@ -952,6 +952,21 @@ See [CHANGELOG](CHANGELOG.md) for the full version history.
 | [HOW-TO Guide](guides/HOWTO.md) | Install/uninstall env var reference, each tool's exact behavior, troubleshooting a failed tool call, the two real gotchas found live-testing this rework |
 | [CHANGELOG](CHANGELOG.md)       | What changed in each released version, and what's on `main` but not yet tagged                                                                           |
 | [CONTRIBUTING](CONTRIBUTING.md) | Build/test/verify locally, the native-dependency gotcha, how a release actually gets published                                                           |
+
+## Related
+
+- **[macula.io](https://macula.io)** — the platform site: a live map of
+  the actual public stations, hosting your own station (free), and the
+  SDKs for building on the mesh directly (Go, Rust, PHP, .NET,
+  TypeScript, Python, plus native Erlang/Elixir/Gleam on the BEAM).
+- **[macula-station](https://github.com/macula-io/macula-station)** —
+  the relay this server actually talks to. Run your own to add a node
+  to the mesh, or read it to see how the DHT/SWIM/pub-sub/RPC relay
+  work under the hood.
+- **[macula-cli](https://github.com/macula-io/macula-cli)** — a
+  separate, scriptable CLI for the same mesh (not a dependency of this
+  project — see [Status](#status)), for testing, scripting, or
+  diagnosing a station outside an agent harness.
 
 ## License
 

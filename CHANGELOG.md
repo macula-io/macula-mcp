@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.5] - 2026-09-09
+
+### Added
+- **"Related" section in the README**, linking macula.io (the platform
+  site, live station map, free self-hosting, all SDKs), macula-station
+  (the relay this server actually talks to), and macula-cli (a separate
+  scriptable CLI, not a dependency of this project). Ahead of a public
+  post whose only link is this repo's own README -- there was previously
+  no path from here back out to the wider ecosystem at all.
+
 ## [0.28.4] - 2026-09-09
 
 ### Fixed
