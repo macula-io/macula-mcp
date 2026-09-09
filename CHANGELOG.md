@@ -5,6 +5,29 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.4] - 2026-09-09
+
+### Fixed
+- **README correctness sweep ahead of a public HN post.** Three stale/
+  inaccurate claims, each verified against source before correcting:
+  - Install section overclaimed that `npx` installs nothing on your
+    machine. Verified live (ran `npx` with a throwaway cache dir and
+    watched it write a real `node_modules`): it does install, just into
+    npm's own `~/.npm/_npx/` cache rather than any project or global
+    location. Corrected to say that precisely.
+  - "What it is" section still called `mesh_call`'s `direct` flag a
+    "not-yet-done" gap. False: `macula_ts_client.ts`'s `call()` already
+    routes it through `Session.callDirect`/`callDirectWithUcan`,
+    contradicting this file's own Direct-dial section and Tools table.
+  - Memory section claimed `mesh_recall`/`mesh_remember` aren't wired into
+    automatic presence. False since 2026-08-31 (`mesh_memory.ts` calls
+    `ensurePresence()`), also contradicting this file's own Presence
+    section, which already listed both tools as calling it.
+  - Everything else specific and checkable (backoff timings, DHT TTLs,
+    heartbeat/renewal intervals, session/identity counts, `scripts/
+    ring-two-process-check.mjs`'s actual behavior) was re-verified against
+    source and held up as accurate. No code change.
+
 ## [0.28.3] - 2026-09-09
 
 ### Added

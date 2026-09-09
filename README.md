@@ -79,11 +79,11 @@ runs a full ring exchange between two real identities, and a dedicated
 direct-dial check proved `resolveDirect()`/`callDirect()` genuinely resolve
 and one-hop-dial a real, running `ring_service.ts` endpoint and get a real
 signed reply back — not gossip-routed. `mesh_call`'s own `direct` option is
-the one remaining gap (`@macula-io/ts` exposes `callDirect`/`resolveDirect`,
-and `citizenship.ts`'s `callThenDirect()` already uses them internally —
-but wiring `mesh_call`'s own caller-facing `direct: true` flag to them, and
-by extension UCAN-gated capabilities, which currently only reach
-direct-dial-advertised procedures, is separate, not-yet-done work).
+wired to the same primitives: `macula_ts_client.ts`'s `call()` routes
+`direct: true` through `Session.callDirect`/`callDirectWithUcan` instead of
+`Session.call`/`callWithUcan`, live-verified against the real fleet
+including with a UCAN attached via `callDirectWithUcan` — see
+[Direct-dial](#direct-dial).
 See CHANGELOG.md for the full history of this migration and the known gaps
 (no record-signature verification on the DHT tools yet, no
 `responded_by`/`seq` on some results — including the room tools' own
@@ -227,14 +227,15 @@ these would need to pick one. Generic verb names on purpose — "this
 happens to be `hecate-rag` today" is an implementation detail, the same
 way `mesh_list_stations` hides which service answers it.
 
-**Neither is wired into automatic presence the way most tools here are.**
-Presence's auto-start works because "should this agent be online" has one
-unconditional answer the moment it touches the mesh at all. Memory has no
-such trigger on either side: `mesh_recall` needs a *query* (context only
-the calling agent has), and `mesh_remember` needs *authored content* (this
-server sees tool args and results, never the model's own reasoning or the
-human's messages — it cannot decide what's worth remembering on its own).
-Both stay tools an agent calls deliberately.
+**Since 2026-08-31, both call `presence.ensurePresence()` too** (see the
+tool list in [Presence](#presence)) — an agent that recalls or remembers
+is present the same way one that calls or publishes is. What's still NOT
+automatic is the other direction: neither tool ever fires on its own the
+way presence's own heartbeat does. `mesh_recall` needs a *query* (context
+only the calling agent has), and `mesh_remember` needs *authored content*
+(this server sees tool args and results, never the model's own reasoning
+or the human's messages — it cannot decide what's worth remembering on its
+own). Both stay tools an agent calls deliberately.
 
 `mesh_remember` calls `hecate-rag`'s `add_knowledge` — one mesh RPC;
 chunking and embedding happen entirely on `hecate-rag`'s side, and it
@@ -819,11 +820,14 @@ is a no-op once everything's current). If more than one client is
 detected in a real terminal, it asks which to register with (Enter for
 all). This is the exact same `npx -y -p @macula-io/mcp <bin>` invocation
 every registered client entry itself uses to launch the server on demand
-(see the JSON near the top of this README) — nothing is ever installed
-onto your machine by this step, npm's own package cache is doing the
-fetching, the same as it does for the server on every real launch. Skip
-this command entirely to wire up your client's MCP config yourself
-instead.
+(see the JSON near the top of this README) — nothing shows up in your
+global package list or any project's `node_modules`/`package.json` from
+this step. `npx` does still fetch and install the package for real, into
+its own cache (`~/.npm/_npx/`, keyed by package spec) rather than
+anywhere project- or system-wide; that cache is what every real launch
+of the server reuses too, so this isn't a separate fetch from the one
+you already pay once. Skip this command entirely to wire up your
+client's MCP config yourself instead.
 
 (`-p @macula-io/mcp <bin>` rather than bare `npx -y @macula-io/mcp`: this
 package publishes six bin entries and none is literally `mcp`, so npx has
@@ -903,7 +907,7 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**Current release: v0.28.1.** Every tool talks to the
+**Current release: v0.28.4.** Every tool talks to the
 mesh in-process via `@macula-io/ts` — **`macula-cli` is not a dependency
 of this project at all**: not installed, not spawned, not version-checked
 (see CHANGELOG.md's 0.19.0 entry, and the 0.18.0 one folded into it, for
