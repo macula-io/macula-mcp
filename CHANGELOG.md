@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.7] - 2026-09-09
+
+### Added
+- **`glama.json`**, declaring Raf (`rgfaber`) as maintainer, per Glama's
+  own org-owned-repo claim flow (this repo is under the `macula-io` org,
+  not a personal account, so ownership doesn't auto-resolve from GitHub
+  OAuth alone). Needed before "Login with GitHub to claim" on the
+  listing actually attributes it correctly.
+
 ## [0.28.6] - 2026-09-09
 
 ### Changed
