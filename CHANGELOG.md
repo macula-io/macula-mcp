@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.2] - 2026-09-09
+
+### Changed
+- **Expanded npm `keywords`** for discoverability ahead of listing this
+  package in the official MCP Registry, mcp.so, PulseMCP, Smithery, Glama,
+  and awesome-mcp-servers: added `ai-agent`, `llm`, `llm-tools`, `p2p`,
+  `peer-to-peer`, `decentralized`, `dht`, `quic`, `multi-agent`,
+  `agent-memory`, `rag` alongside the existing `mcp`/`model-context-protocol`/
+  `macula`/`mesh`/`agent`/`claude`. No code change.
+
 ## [0.28.1] - 2026-09-09
 
 ### Changed
