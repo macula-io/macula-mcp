@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.28.3] - 2026-09-09
+
+### Added
+- **`mcpName` field** (`io.github.rgfaber/macula-mcp`) required by the
+  official MCP Registry to verify this npm package matches its registry
+  metadata (`server.json`, added but not yet published -- publishing
+  needs an interactive `mcp-publisher login github` device-code
+  authorization, which only Raf can do). See
+  `plans/PLAN_ECOSYSTEM_DIRECTORY_LISTINGS.md` in macula-architecture for
+  the full directory-listing tracklist this is part of. No code change.
+
 ## [0.28.2] - 2026-09-09
 
 ### Changed
