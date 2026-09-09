@@ -14,8 +14,8 @@
 //
 // See policy.ts's own comment block right above addToAllowlist for the
 // design decision this closes: keyed by node_id (the only thing here
-// that is a cryptographic identity), never by operator_name or petname
-// (both self-asserted or collidable) -- this tool only ever echoes
+// that is a cryptographic identity), never by operator_name, session_name,
+// or petname (all self-asserted or collidable) -- this tool only ever echoes
 // petname(node_id) back as a human-legible label, the same way
 // mesh_ring/mesh_answer_ring already do, never as the lookup key.
 //
@@ -61,15 +61,15 @@ const TRUST_DESCRIPTION_FULL =
   "ring, or from mesh_ring's/mesh_agents' own node_id. If contact_policy is still the \"ask\" default, this " +
   "also switches it to \"allowlist\" (an allowlist nobody is consulting does nothing); an explicit \"closed\" " +
   "or \"open\" policy is left as-is (closed stays authoritative, open already accepts everyone) -- the reply " +
-  "says which happened. Keyed by node_id, never by operator_name or petname: only node_id is a verified, " +
-  "signed identity here (see ring_service.ts's proof checks) -- operator_name is self-reported and petname " +
-  "can collide, neither is safe as a trust boundary. The policy file re-reads on every ring, so this takes " +
+  "says which happened. Keyed by node_id, never by operator_name, session_name, or petname: only node_id is a verified, " +
+  "signed identity here (see ring_service.ts's proof checks) -- operator_name/session_name are self-reported and petname " +
+  "can collide, none is safe as a trust boundary. The policy file re-reads on every ring, so this takes " +
   "effect immediately, no restart needed.";
-/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The "keyed by node_id, never operator_name/petname" rule is a real trust-boundary fact, kept in full force. */
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The "keyed by node_id, never operator_name/session_name/petname" rule is a real trust-boundary fact, kept in full force. */
 const TRUST_DESCRIPTION_TERSE =
   "Add a peer's node_id to this operator's contact-policy allowlist -- their next ring skips \"ask\" " +
   "and is auto-accepted. Switches contact_policy from \"ask\" to \"allowlist\" if that's still the " +
-  "default (leaves closed/open as-is). Keyed by node_id ONLY -- operator_name/petname are never the " +
+  "default (leaves closed/open as-is). Keyed by node_id ONLY -- operator_name/session_name/petname are never the " +
   "trust boundary. Takes effect immediately.";
 
 const UNTRUST_DESCRIPTION_FULL =

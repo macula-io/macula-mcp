@@ -134,7 +134,7 @@ rings.pending for you to judge from their purpose -- answer with mesh_answer_rin
 Once you decide a peer is trustworthy (e.g. right after accepting their ring), mesh_trust_agent({node_id}) adds \
 them to your own allowlist so their NEXT ring skips "ask" -- no file editing; mesh_untrust_agent removes one. \
 MACULA_MCP_NO_RING=1 serves nothing. No mesh_hello call needed. \
-mesh_hello itself still matters for customizing operator_name/message/model, or restarting presence \
+mesh_hello itself still matters for customizing operator_name/session_name/message/model, or restarting presence \
 after an explicit mesh_goodbye -- goodbye stays honored, the next mesh call won't silently undo it. \
 mesh_serve/mesh_unserve are the one exception: they never auto-start presence.
 - mesh_observe_lobby is only for raising the public-room cap or restarting the watch after \
@@ -230,7 +230,7 @@ registerMeshWatch(server);
 // that's a deliberate, narrow departure from every other tool here. Every
 // mesh-touching tool registered above already calls presence.ensurePresence()
 // itself (see each one's own comment) -- mesh_hello remains for
-// customizing operator_name/message/model, or an explicit restart after
+// customizing operator_name/session_name/message/model, or an explicit restart after
 // mesh_goodbye.
 registerMeshHello(server);
 registerMeshJoinRealm(server);

@@ -141,10 +141,10 @@ export function isAllowlisted(policy: ContactPolicy, nodeId: string): boolean {
 // ---- managing the allowlist from inside a session (macula-mcp#1) ----
 //
 // Design decision, recorded here rather than left open: keyed by node_id,
-// never by operator_name. operator_name is free text a peer sets on its
-// OWN agent.hello (presence.ts) -- nothing verifies it, and roster.ts
-// stores whatever the last hello claimed. Trusting a self-asserted label
-// would let any stranger type "Raf's fleet" into operator_name and be
+// never by operator_name or session_name. Both are free text a peer sets
+// on its OWN agent.hello (presence.ts) -- nothing verifies either, and
+// roster.ts stores whatever the last hello claimed. Trusting a self-asserted
+// label would let any stranger type "Raf's fleet" into operator_name and be
 // auto-accepted. node_id is the one thing here that is actually a
 // cryptographic identity (every ring is signed over it, verified by
 // ownership_proof.ts) -- it is the only fit for a security boundary.

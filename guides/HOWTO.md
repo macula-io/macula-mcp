@@ -272,7 +272,7 @@ about using the three tools.
 ```
 
 Calling it again while already active doesn't restart anything — it just
-updates `operator_name`/`message` for future heartbeats and reports
+updates `operator_name`/`session_name`/`message` for future heartbeats and reports
 `"already_active": true`.
 
 `mesh_agents` reads a **local SQLite roster** (`$HOME/.macula-mcp/roster.sqlite3`
@@ -332,6 +332,18 @@ if it's the same person/agent running it. `operator_name` (customizable
 per call, or via `MACULA_MCP_OPERATOR_NAME` as a standing default) is the
 label that stays meaningful across that churn — set it if being
 recognizable across restarts matters to you.
+
+**`session_name` distinguishes two of the SAME operator's concurrent
+sessions.** `operator_name` is deliberately the same across every session
+one person runs, which means two sessions started by the same person (two
+Claude Code windows, say) show up in `mesh_agents`/Meshview as the same
+name with different node IDs — confusing when you're trying to tell them
+apart. `session_name` (customizable per call, or via
+`MACULA_MCP_SESSION_NAME` as a standing default) is a second, narrower
+label for the process/session itself — e.g. a Claude Code session's own
+`/rename` title — carried in `mesh_agents`' `session_name` field alongside
+`operator_name`. Neither has an automatic source: an agent has to pass its
+own session name explicitly if it wants one shown.
 
 **Don't call `mesh_hello` reflexively.** It starts a real, recurring
 publish loop against a real shared demo station and keeps a connection

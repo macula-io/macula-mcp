@@ -35,6 +35,7 @@ function agent(over: Partial<AgentRecord> = {}): AgentRecord {
   return {
     node_id: PEER,
     operator_name: null,
+    session_name: null,
     message: null,
     model: null,
     connected_via: null,
@@ -94,5 +95,24 @@ describe("mesh_agents: graduated `stale` field", () => {
     // 300s interval, 3 missed beats = 900s threshold -- 200s silence is nothing to this peer.
     mocks.listAgents.mockReturnValue({ total: 1, agents: [agent({ interval_seconds: "300", last_seen_at: new Date(NOW - 200_000).toISOString() })] });
     expect((((await callMeshAgents()).agents as { stale: boolean }[])[0]!).stale).toBe(false);
+  });
+});
+
+// macula-io/macula-mcp session_name (2026-09-09): two roster entries can
+// share one operator_name (two of the same person's own sessions) --
+// session_name is the field that tells them apart, so it must round-trip
+// through mesh_agents' own output, not just roster.ts's storage.
+describe("mesh_agents: session_name", () => {
+  it("passes session_name through when set, omits it (undefined, not null) when not", async () => {
+    mocks.listAgents.mockReturnValue({
+      total: 2,
+      agents: [
+        agent({ node_id: "a1", operator_name: "Raf Lefever", session_name: "Jupiter" }),
+        agent({ node_id: "a2", operator_name: "Raf Lefever", session_name: null }),
+      ],
+    });
+    const res = await callMeshAgents();
+    const byId = Object.fromEntries((res.agents as { node_id: string; session_name?: string }[]).map((a) => [a.node_id, a.session_name]));
+    expect(byId).toEqual({ a1: "Jupiter", a2: undefined });
   });
 });

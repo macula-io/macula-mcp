@@ -67,7 +67,7 @@ function open(): DatabaseSync {
       last_seen_at TEXT NOT NULL
     )
   `);
-  migrateAddColumns(db, ["model", "connected_via", "interval_seconds"]);
+  migrateAddColumns(db, ["model", "connected_via", "interval_seconds", "session_name"]);
   return db;
 }
 
@@ -88,6 +88,8 @@ function migrateAddColumns(d: DatabaseSync, names: string[]): void {
 export interface AgentRecord {
   node_id: string;
   operator_name: string | null;
+  /** The per-process/session label that agent's own mesh_hello was started with, e.g. a Claude Code session's `/rename` title -- distinct from operator_name (the stable human behind it), see mesh_hello.ts's own param doc. Self-reported, same trust model as operator_name. */
+  session_name: string | null;
   message: string | null;
   model: string | null;
   connected_via: string | null;
@@ -101,6 +103,7 @@ export interface AgentRecord {
 export function upsertAgent(rec: {
   node_id: string;
   operator_name?: string;
+  session_name?: string;
   message?: string;
   model?: string;
   connected_via?: string;
@@ -109,10 +112,11 @@ export function upsertAgent(rec: {
 }): void {
   open()
     .prepare(
-      `INSERT INTO agents (node_id, operator_name, message, model, connected_via, interval_seconds, first_seen_at, last_seen_at)
-       VALUES (@node_id, @operator_name, @message, @model, @connected_via, @interval_seconds, @at, @at)
+      `INSERT INTO agents (node_id, operator_name, session_name, message, model, connected_via, interval_seconds, first_seen_at, last_seen_at)
+       VALUES (@node_id, @operator_name, @session_name, @message, @model, @connected_via, @interval_seconds, @at, @at)
        ON CONFLICT(node_id) DO UPDATE SET
          operator_name = excluded.operator_name,
+         session_name = excluded.session_name,
          message = excluded.message,
          model = excluded.model,
          connected_via = excluded.connected_via,
@@ -122,6 +126,7 @@ export function upsertAgent(rec: {
     .run({
       node_id: rec.node_id,
       operator_name: rec.operator_name ?? null,
+      session_name: rec.session_name ?? null,
       message: rec.message ?? null,
       model: rec.model ?? null,
       connected_via: rec.connected_via ?? null,

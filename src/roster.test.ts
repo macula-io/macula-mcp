@@ -19,12 +19,13 @@ afterEach(() => {
 
 describe("upsertAgent / listAgents", () => {
   it("records a new sighting", () => {
-    upsertAgent({ node_id: "a1", operator_name: "Alice", message: "hi", at: "2026-08-30T00:00:00.000Z" });
+    upsertAgent({ node_id: "a1", operator_name: "Alice", session_name: "Jupiter", message: "hi", at: "2026-08-30T00:00:00.000Z" });
     const { total, agents } = listAgents(1, 10);
     expect(total).toBe(1);
     expect(agents[0]).toMatchObject({
       node_id: "a1",
       operator_name: "Alice",
+      session_name: "Jupiter",
       message: "hi",
       first_seen_at: "2026-08-30T00:00:00.000Z",
       last_seen_at: "2026-08-30T00:00:00.000Z",
@@ -32,26 +33,44 @@ describe("upsertAgent / listAgents", () => {
   });
 
   it("refreshes last_seen_at and content on a repeat sighting, keeps first_seen_at", () => {
-    upsertAgent({ node_id: "a1", operator_name: "Alice", at: "2026-08-30T00:00:00.000Z" });
-    upsertAgent({ node_id: "a1", operator_name: "Alice v2", message: "updated", at: "2026-08-30T00:05:00.000Z" });
+    upsertAgent({ node_id: "a1", operator_name: "Alice", session_name: "Jupiter", at: "2026-08-30T00:00:00.000Z" });
+    upsertAgent({ node_id: "a1", operator_name: "Alice v2", session_name: "Vega", message: "updated", at: "2026-08-30T00:05:00.000Z" });
     const { total, agents } = listAgents(1, 10);
     expect(total).toBe(1);
     expect(agents[0]).toMatchObject({
       node_id: "a1",
       operator_name: "Alice v2",
+      session_name: "Vega",
       message: "updated",
       first_seen_at: "2026-08-30T00:00:00.000Z",
       last_seen_at: "2026-08-30T00:05:00.000Z",
     });
   });
 
-  it("treats missing operator_name/message/model/connected_via as null, not undefined-crashes", () => {
+  it("treats missing operator_name/session_name/message/model/connected_via as null, not undefined-crashes", () => {
     upsertAgent({ node_id: "a1", at: "2026-08-30T00:00:00.000Z" });
     const { agents } = listAgents(1, 10);
     expect(agents[0]?.operator_name).toBeNull();
+    expect(agents[0]?.session_name).toBeNull();
     expect(agents[0]?.message).toBeNull();
     expect(agents[0]?.model).toBeNull();
     expect(agents[0]?.connected_via).toBeNull();
+  });
+
+  // Two sessions run by the SAME operator (e.g. two concurrent Claude Code
+  // windows both defaulting operator_name to the person's name) are the
+  // exact scenario session_name exists to disambiguate -- found live
+  // 2026-09-09, see mesh_hello.ts's own doc comment.
+  it("distinguishes two node_ids sharing one operator_name via session_name", () => {
+    upsertAgent({ node_id: "a1", operator_name: "Raf Lefever", session_name: "Jupiter", at: "2026-08-30T00:00:00.000Z" });
+    upsertAgent({ node_id: "a2", operator_name: "Raf Lefever", session_name: "Vega", at: "2026-08-30T00:00:00.000Z" });
+    const { agents } = listAgents(1, 10);
+    expect(agents.map((a) => ({ node_id: a.node_id, session_name: a.session_name }))).toEqual(
+      expect.arrayContaining([
+        { node_id: "a1", session_name: "Jupiter" },
+        { node_id: "a2", session_name: "Vega" },
+      ]),
+    );
   });
 
   it("records model and connected_via, and refreshes them on a repeat sighting", () => {
@@ -158,12 +177,12 @@ describe("schema migration", () => {
 
       const before = listAgents(1, 10);
       expect(before.total).toBe(1);
-      expect(before.agents[0]).toMatchObject({ node_id: "pre-existing", operator_name: "Old Agent", model: null, connected_via: null, interval_seconds: null });
+      expect(before.agents[0]).toMatchObject({ node_id: "pre-existing", operator_name: "Old Agent", session_name: null, model: null, connected_via: null, interval_seconds: null });
 
-      upsertAgent({ node_id: "new", model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", interval_seconds: 60, at: "2026-08-30T00:00:00.000Z" });
+      upsertAgent({ node_id: "new", session_name: "Jupiter", model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", interval_seconds: 60, at: "2026-08-30T00:00:00.000Z" });
       const after = listAgents(1, 10);
       expect(after.total).toBe(2);
-      expect(after.agents.find((a) => a.node_id === "new")).toMatchObject({ model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", interval_seconds: "60" });
+      expect(after.agents.find((a) => a.node_id === "new")).toMatchObject({ session_name: "Jupiter", model: "claude-sonnet-5", connected_via: "claude-code 1.2.3", interval_seconds: "60" });
     } finally {
       closeRoster();
       rmSync(dir, { recursive: true, force: true });

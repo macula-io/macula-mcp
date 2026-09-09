@@ -5,11 +5,12 @@
 // entry point, so touching the mesh at all makes an agent present on
 // it -- see presence.ts's own top comment for the full reasoning and
 // the tradeoff that was deliberately accepted. This tool still matters
-// for: customizing operator_name/message/model (ensurePresence() only
-// has env-var defaults to work with), reading the welcome banner and
-// inbox_topic/lobby_topic back explicitly, and restarting presence
-// after an explicit mesh_goodbye (ensurePresence() deliberately won't
-// do that on its own -- see presence.ts's explicitlyLeft).
+// for: customizing operator_name/session_name/message/model
+// (ensurePresence() only has env-var defaults to work with), reading the
+// welcome banner and inbox_topic/lobby_topic back explicitly, and
+// restarting presence after an explicit mesh_goodbye (ensurePresence()
+// deliberately won't do that on its own -- see presence.ts's
+// explicitlyLeft).
 //
 // First call: prints a welcome banner, publishes one agent.hello
 // immediately, and starts a periodic heartbeat (see presence.ts) that
@@ -19,7 +20,7 @@
 // sees announced there (feeding mesh_read_inbox/mesh_lobby_transcript,
 // see lobby_observer.ts and rooms.ts). Being discoverable, reachable,
 // and present on central are all the same action now. A later call while
-// already active just updates operator_name/message/model/
+// already active just updates operator_name/session_name/message/model/
 // connected_via for future heartbeats, without restarting anything.
 //
 // connected_via is deliberately NOT a tool parameter: it's read from
@@ -29,6 +30,19 @@
 // know, so self-reporting is the only option there). An agent can
 // claim any model string it likes; it cannot claim to be a different
 // MCP client than the one actually connected.
+//
+// session_name (2026-09-09, feature request from Raf): operator_name
+// alone made two of the SAME person's concurrent sessions
+// indistinguishable in mesh_agents/Meshview -- found live when Raf
+// `/rename`'d a Claude Code session to "Jupiter" and still saw "Raf
+// Lefever" twice, once for that session and once for a sibling ("Vega")
+// that had independently said hello under the same operator_name.
+// `/rename` is a Claude Code session-local concept the MCP handshake
+// never surfaces (connected_via is only "claude-code 2.1.267", identical
+// across every session of that client), so there is no way to derive
+// this automatically -- an agent that knows its own session name (e.g.
+// via ListAgents' "This session is X") has to pass it explicitly, same
+// as operator_name.
 
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -68,11 +82,12 @@ const DESCRIPTION_FULL =
   "mesh_open_room/mesh_join_room/mesh_leave_room/mesh_rooms/mesh_ring/mesh_answer_ring/mesh_read_inbox/" +
   "mesh_join_realm/mesh_recall/mesh_remember/mesh_remember_directory call already starts presence " +
   "automatically, with " +
-  "operator_name/message/model taken from MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL if set. Call " +
+  "operator_name/session_name/message/model taken from " +
+  "MACULA_MCP_OPERATOR_NAME/SESSION_NAME/HELLO_MESSAGE/MODEL if set. Call " +
   "mesh_hello directly to override those, or to see the banner/lobby_topic explicitly, or " +
   "to restart presence after mesh_goodbye -- an explicit goodbye is NOT undone automatically by the " +
   "next mesh tool call, only by calling this again. Calling this again while already active just " +
-  "updates operator_name/message/model/connected_via for future heartbeats -- it also re-confirms the " +
+  "updates operator_name/session_name/message/model/connected_via for future heartbeats -- it also re-confirms the " +
   "lobby watch is running, in case mesh_unobserve_lobby turned it off. connected_via (which MCP " +
   "client you're running as, e.g. \"claude-code 1.2.3\") is read automatically from the MCP handshake, " +
   "not a parameter. Pair with mesh_goodbye to leave deliberately -- it stops the lobby watch too. " +
@@ -83,7 +98,7 @@ const DESCRIPTION_FULL =
 const DESCRIPTION_TERSE =
   "Announce presence: heartbeat, roster subscription, central+room watch. Most mesh tools start " +
   "this automatically, so you rarely need to call it directly -- call it to override " +
-  "operator_name/message/model, or to restart presence after an explicit mesh_goodbye (which nothing " +
+  "operator_name/session_name/message/model, or to restart presence after an explicit mesh_goodbye (which nothing " +
   "else undoes automatically). Pair with mesh_goodbye to leave deliberately.";
 
 export function registerMeshHello(server: McpServer): void {
@@ -92,6 +107,15 @@ export function registerMeshHello(server: McpServer): void {
     toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       operator_name: z.string().optional().describe("Customizable human-readable name for whoever's behind this agent."),
+      session_name: z
+        .string()
+        .optional()
+        .describe(
+          "Customizable label for THIS session/process, distinct from operator_name: operator_name stays the " +
+            "same across every session the same person runs (e.g. \"Raf Lefever\"), session_name tells two of " +
+            "that operator's own concurrent sessions apart in mesh_agents/Meshview (e.g. a Claude Code " +
+            "session's own /rename title). Not auto-populated -- pass it explicitly if you know it.",
+        ),
       message: z.string().optional().describe("A short greeting or status, sent with every heartbeat."),
       model: z
         .string()
@@ -111,21 +135,23 @@ export function registerMeshHello(server: McpServer): void {
         .optional()
         .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ operator_name, message, model, interval_seconds, host }) => {
+    async ({ operator_name, session_name, message, model, interval_seconds, host }) => {
       try {
         // Only the explicit tool args, not the MACULA_MCP_*-env-var
         // fallbacks below -- those are an operator's own standing
         // configuration, not a live agent decision, and out of scope for
         // a gate aimed at a careless AGENT's real-time content choices.
         if (operator_name !== undefined) assertNoLikelySecret(operator_name, "operator_name");
+        if (session_name !== undefined) assertNoLikelySecret(session_name, "session_name");
         if (message !== undefined) assertNoLikelySecret(message, "message");
         const result = await presence.start({
           host,
-          // Explicit args win; MACULA_MCP_OPERATOR_NAME/HELLO_MESSAGE/MODEL
-          // are an operator's standing default so an agent doesn't have to
-          // type them on every call, same spirit as MACULA_MCP_IDENTITY
-          // pinning a default elsewhere in this server.
+          // Explicit args win; MACULA_MCP_OPERATOR_NAME/SESSION_NAME/
+          // HELLO_MESSAGE/MODEL are an operator's standing default so an
+          // agent doesn't have to type them on every call, same spirit as
+          // MACULA_MCP_IDENTITY pinning a default elsewhere in this server.
           operatorName: operator_name ?? process.env.MACULA_MCP_OPERATOR_NAME,
+          sessionName: session_name ?? process.env.MACULA_MCP_SESSION_NAME,
           message: message ?? process.env.MACULA_MCP_HELLO_MESSAGE,
           model: model ?? process.env.MACULA_MCP_MODEL,
           connectedVia: presence.connectedViaLabel(server),

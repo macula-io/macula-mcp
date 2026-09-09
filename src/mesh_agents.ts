@@ -83,6 +83,7 @@ export function registerMeshAgents(server: McpServer): void {
               node_id: a.node_id,
               petname: petname(a.node_id),
               operator_name: a.operator_name ?? undefined,
+              session_name: a.session_name ?? undefined,
               message: a.message ?? undefined,
               model: a.model ?? undefined,
               connected_via: a.connected_via ?? undefined,

@@ -91,11 +91,14 @@ const TOPICS: HelpTopic[] = [
       "(leaves your rooms, removes you from others' rosters immediately, and stops the central and room watches " +
       "too, instead of waiting for your heartbeat to simply stop). Emphasize that presence is " +
       "now AUTOMATIC (2026-08-31): any genuinely mesh-touching tool call starts it in the " +
-      "background the first time it's used, with operator_name/message/model taken from env " +
-      "vars if set -- mesh_hello is no longer required, it now exists for customizing those, " +
+      "background the first time it's used, with operator_name/session_name/message/model taken from env " +
+      "vars if set -- mesh_hello is no longer required, it now " +
+      "exists for customizing those, " +
       "reading the banner/topics back explicitly, or restarting presence after an explicit " +
       "mesh_goodbye (which stays honored, not silently undone by the next mesh call). Mention " +
-      "operator_name as the stable human-facing label over what's often an ephemeral node ID, " +
+      "operator_name as the stable human-facing label over what's often an ephemeral node ID, and " +
+      "session_name as the narrower, per-process label that tells two of the SAME operator's " +
+      "concurrent sessions apart in mesh_agents (e.g. a Claude Code session's own /rename title) -- " +
       "and that mesh_serve/mesh_unserve are the one deliberate exception to the automatic start.",
   },
   {
@@ -128,7 +131,7 @@ const TOPICS: HelpTopic[] = [
       "Mention mesh_trust_agent({node_id}): once this agent decides a peer is trustworthy (e.g. right after " +
       "mesh_answer_ring accepted their ring), it adds them to this operator's own allowlist -- their next ring " +
       "then skips \"ask\" -- without hand-editing contact_policy.json; mesh_untrust_agent removes an entry. " +
-      "Keyed by node_id only, never operator_name or petname, since only node_id is a verified, signed identity here.",
+      "Keyed by node_id only, never operator_name, session_name, or petname, since only node_id is a verified, signed identity here.",
   },
   {
     name: "help_serve",

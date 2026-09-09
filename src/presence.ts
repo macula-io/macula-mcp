@@ -38,7 +38,7 @@
 // fleet, unprompted) and chose frictionless over quiet-by-default.
 // mesh_hello itself still exists, for the same reason mesh_observe_lobby
 // still does after presence started bundling it in: customizing
-// operator_name/message/model, or restarting after an explicit goodbye
+// operator_name/session_name/message/model, or restarting after an explicit goodbye
 // (see explicitlyLeft below -- ensurePresence() deliberately does NOT
 // undo a real mesh_goodbye on the very next mesh tool call; only an
 // explicit mesh_hello does).
@@ -261,6 +261,7 @@ function stopLegSync(leg: Leg): void {
 interface PresenceState {
   nodeId: string;
   operatorName?: string;
+  sessionName?: string;
   message?: string;
   model?: string;
   connectedVia?: string;
@@ -316,6 +317,7 @@ export function ensurePresence(server: McpServer): void {
   if (state || explicitlyLeft || starting) return;
   void start({
     operatorName: process.env.MACULA_MCP_OPERATOR_NAME,
+    sessionName: process.env.MACULA_MCP_SESSION_NAME,
     message: process.env.MACULA_MCP_HELLO_MESSAGE,
     model: process.env.MACULA_MCP_MODEL,
     connectedVia: connectedViaLabel(server),
@@ -327,6 +329,7 @@ export function ensurePresence(server: McpServer): void {
 export interface StartArgs {
   host?: string;
   operatorName?: string;
+  sessionName?: string;
   message?: string;
   model?: string;
   /** Auto-detected from the MCP handshake (getClientVersion()) -- not caller-overridable, see mesh_hello.ts. */
@@ -358,8 +361,8 @@ export function currentNodeId(): string | undefined {
 }
 
 /**
- * Idempotent: a second call just updates operatorName/message/model/
- * connectedVia for future heartbeats. Also clears explicitlyLeft --
+ * Idempotent: a second call just updates operatorName/sessionName/message/
+ * model/connectedVia for future heartbeats. Also clears explicitlyLeft --
  * any successful start, auto or explicit, means "not explicitly left"
  * going forward.
  *
@@ -392,6 +395,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
 
   if (state) {
     state.operatorName = args.operatorName ?? state.operatorName;
+    state.sessionName = args.sessionName ?? state.sessionName;
     state.message = args.message ?? state.message;
     state.model = args.model ?? state.model;
     state.connectedVia = args.connectedVia ?? state.connectedVia;
@@ -454,6 +458,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
     upsertAgent({
       node_id: seenNodeId,
       operator_name: typeof payload.operator_name === "string" ? payload.operator_name : undefined,
+      session_name: typeof payload.session_name === "string" ? payload.session_name : undefined,
       message: typeof payload.message === "string" ? payload.message : undefined,
       model: typeof payload.model === "string" ? payload.model : undefined,
       connected_via: typeof payload.connected_via === "string" ? payload.connected_via : undefined,
@@ -493,6 +498,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   const newState: PresenceState = {
     nodeId,
     operatorName: args.operatorName,
+    sessionName: args.sessionName,
     message: args.message,
     model: args.model,
     connectedVia: args.connectedVia,
@@ -563,6 +569,7 @@ async function beat(): Promise<void> {
         // heard this hello can look the agent up there without guessing.
         citizen_did: state.nodeId,
         ...(state.operatorName ? { operator_name: state.operatorName } : {}),
+        ...(state.sessionName ? { session_name: state.sessionName } : {}),
         ...(state.message ? { message: state.message } : {}),
         ...(state.model ? { model: state.model } : {}),
         ...(state.connectedVia ? { connected_via: state.connectedVia } : {}),

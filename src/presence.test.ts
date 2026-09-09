@@ -161,16 +161,42 @@ describe("start()", () => {
     expect(realm.status).toHaveBeenCalledWith(NODE_ID, { redactPending: true });
   });
 
+  // The already-active branch (doStart's `if (state)` path) updates
+  // sessionName the same way it already updates operatorName -- a second
+  // mesh_hello call (e.g. after a Claude Code /rename) must actually take
+  // effect on the NEXT heartbeat, not just the first one.
+  it("a second, already-active start() call updates sessionName for future heartbeats", async () => {
+    vi.useFakeTimers();
+    await presence.start({ sessionName: "Jupiter", intervalSeconds: 10 });
+    await presence.start({ sessionName: "Renamed" });
+    vi.mocked(publish).mockClear();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ fact: expect.objectContaining({ session_name: "Renamed" }) }));
+  });
+
   it("announces immediately: publish() is called once before start() resolves, under the DEFAULT identity (not either subscribe leg's)", async () => {
-    await presence.start({ operatorName: "raf", message: "hi" });
+    await presence.start({ operatorName: "raf", sessionName: "Jupiter", message: "hi" });
 
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
         topic: presence.HELLO_TOPIC,
         identityPath: DEFAULT_IDENTITY_PATH,
-        fact: expect.objectContaining({ node_id: NODE_ID, citizen_did: NODE_ID, operator_name: "raf", message: "hi", interval_seconds: presence.DEFAULT_INTERVAL_SECONDS }),
+        fact: expect.objectContaining({ node_id: NODE_ID, citizen_did: NODE_ID, operator_name: "raf", session_name: "Jupiter", message: "hi", interval_seconds: presence.DEFAULT_INTERVAL_SECONDS }),
       }),
+    );
+  });
+
+  // session_name (2026-09-09): distinguishes two of the SAME operator's
+  // own concurrent sessions -- must be genuinely optional, unlike
+  // operator_name/message which the test above already covers set.
+  it("omits session_name from the hello fact entirely when not set, rather than publishing an empty string", async () => {
+    await presence.start({ operatorName: "raf" });
+
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ fact: expect.not.objectContaining({ session_name: expect.anything() }) }),
     );
   });
 
@@ -188,8 +214,8 @@ describe("start()", () => {
     const goodbyeHandler = createdSessions[1]!.subscribeCalls[0]!.handler;
     const PEER = "b".repeat(64);
 
-    helloHandler(fakeEvent({ node_id: PEER, operator_name: "Bob", model: "sonnet", interval_seconds: 30 }));
-    expect(listAgents(1, 10).agents).toEqual([expect.objectContaining({ node_id: PEER, operator_name: "Bob", model: "sonnet", interval_seconds: "30" })]);
+    helloHandler(fakeEvent({ node_id: PEER, operator_name: "Bob", session_name: "Vega", model: "sonnet", interval_seconds: 30 }));
+    expect(listAgents(1, 10).agents).toEqual([expect.objectContaining({ node_id: PEER, operator_name: "Bob", session_name: "Vega", model: "sonnet", interval_seconds: "30" })]);
 
     goodbyeHandler(fakeEvent({ node_id: PEER }));
     expect(listAgents(1, 10).agents).toEqual([]);
