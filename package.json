@@ -1,6 +1,6 @@
 {
   "name": "@macula-io/mcp",
-  "version": "0.28.7",
+  "version": "0.29.0",
   "mcpName": "io.github.rgfaber/macula-mcp",
   "description": "Model Context Protocol server that exposes the Macula mesh to any agent harness",
   "license": "Apache-2.0",

@@ -5,6 +5,23 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.29.0] - 2026-09-10
+
+### Added
+- **`session_name`: a new field in `mesh_hello`/presence/`mesh_agents`, distinct
+  from `operator_name`.** Two sessions run by the same operator (e.g. two
+  concurrent Claude Code windows both defaulting `operator_name` to the
+  person's name) were indistinguishable in `mesh_agents`/Meshview -- found
+  live when a session was `/rename`'d to a petname and Meshview still showed
+  the same operator name twice, once for that session and once for a sibling
+  that had independently said hello under the same `operator_name`.
+  `session_name` is a new, narrower, per-process label carried in
+  `agent.hello` alongside `operator_name` (`roster.ts` column + migration,
+  `presence.ts` state/heartbeat/hello-subscription, `mesh_hello.ts` param +
+  `MACULA_MCP_SESSION_NAME` env default, `mesh_agents.ts` output). Same trust
+  model as `operator_name` throughout: self-reported, never a lookup key or
+  trust boundary.
+
 ## [0.28.7] - 2026-09-09
 
 ### Added
