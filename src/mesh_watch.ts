@@ -43,12 +43,13 @@ const DESCRIPTION_FULL =
   "whichever is first) -- there is no standing/background subscription to poll later; " +
   `call this again to keep watching. Defaults to ${defaultStation()} if host isn't given. ` +
   `Presence heartbeats are ordinary facts on "${HELLO_TOPIC}"/"${GOODBYE_TOPIC}" -- watch ` +
-  "those directly to react to an arrival/departure yourself instead of polling mesh_agents.";
+  "those directly to react to an arrival/departure yourself instead of polling mesh_agents. " +
+  "Bytes in event payloads appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "blocks, no standing subscription" -- easy to assume otherwise. */
 const DESCRIPTION_TERSE =
   `Watch a mesh topic for up to duration_seconds, return what arrived. BLOCKS for the duration ` +
   `(or until count events) -- no standing subscription, call again to keep watching. Defaults to ` +
-  `${defaultStation()} if host isn't given.`;
+  `${defaultStation()} if host isn't given. Bytes appear as {"$bytes": "<base64>"}; pass them back in the same form.`;
 
 export function registerMeshWatch(server: McpServer): void {
   server.tool(
@@ -92,6 +93,7 @@ export function registerMeshWatch(server: McpServer): void {
           count,
           realm,
           identityPath: watchIdentityPath(),
+          bytes: "tagged",
         });
         return jsonContent({ topic, event_count: events.length, events });
       } catch (e) {

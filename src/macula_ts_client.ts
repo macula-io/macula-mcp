@@ -47,7 +47,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { Identity, MaculaCallError as TsCallError, Pool, Session, type JsonValue, type Seed } from "@macula-io/ts";
+import { Identity, MaculaCallError as TsCallError, Pool, Session, type BytesOutput, type JsonValue, type Seed } from "@macula-io/ts";
 import { MaculaCliError, defaultStations, stationArgs } from "./mesh_config.js";
 import { proofMessage } from "./ownership_proof.js";
 
@@ -307,20 +307,24 @@ export async function call(args: {
    * UCAN-attaching equivalent, so setting this always uses the one-shot
    * path below regardless of `host`. */
   ucanPath?: string;
+  /** How bytes in the result come back, "hex" when omitted. mesh_call asks
+   * for "tagged", so an agent sees {"$bytes": "<base64>"} and can pass an id
+   * straight back; internal callers that read results themselves keep hex. */
+  bytes?: BytesOutput;
 }): Promise<TsCallResult> {
   const start = Date.now();
   const jsonArgs = toJsonValue(args.callArgs ?? {});
   if (args.host === undefined && !args.direct && !args.ucanPath) {
     try {
       const pool = await sharedPool(args.identityPath);
-      const payload = await pool.call(args.realm, args.procedure, jsonArgs, { deadlineMs: args.timeoutMs });
+      const payload = await pool.call(args.realm, args.procedure, jsonArgs, { deadlineMs: args.timeoutMs, bytes: args.bytes });
       return { procedure: args.procedure, payload, duration_ms: Date.now() - start };
     } catch (e) {
       throw toCliError(e);
     }
   }
   return withSession(args.host, args.identityPath, async (session) => {
-    const opts = { deadlineMs: args.timeoutMs, realm: args.realm };
+    const opts = { deadlineMs: args.timeoutMs, realm: args.realm, bytes: args.bytes };
     const payload = args.ucanPath
       ? args.direct
         ? await session.callDirectWithUcan(args.procedure, jsonArgs, readUcanToken(args.ucanPath), opts)
@@ -499,6 +503,9 @@ export async function watch(args: {
   count?: number;
   realm?: string;
   identityPath: string;
+  /** How bytes in event payloads come back, "hex" when omitted; mesh_watch
+   * asks for "tagged" (see call()'s own `bytes`). */
+  bytes?: BytesOutput;
 }): Promise<TsWatchEvent[]> {
   if (args.host === undefined) {
     try {
@@ -525,7 +532,7 @@ export async function watch(args: {
           if (timer) clearTimeout(timer);
           resolveWait?.();
         }
-      });
+      }, undefined, { bytes: args.bytes });
       try {
         await new Promise<void>((resolve) => {
           resolveWait = resolve;
@@ -559,7 +566,7 @@ export async function watch(args: {
               resolve();
             }
           },
-          { onClosed: () => resolve(), realm: args.realm },
+          { onClosed: () => resolve(), realm: args.realm, bytes: args.bytes },
         )
         .then((s) => {
           stop = s;

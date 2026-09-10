@@ -31,14 +31,15 @@ const DESCRIPTION_FULL =
   "serve-daemon on first use. THIS IS A STANDING INBOUND SURFACE, not a one-shot action: once " +
   "registered, any mesh caller can trigger the command repeatedly until mesh_unserve is called or " +
   "this process exits. Never register a command you would not want a stranger able to run " +
-  "repeatedly on this machine. Pair with mesh_unserve to stop serving deliberately.";
+  "repeatedly on this machine. Pair with mesh_unserve to stop serving deliberately. " +
+  "Bytes in the caller's payload appear on stdin as {\"$bytes\": \"<base64>\"}; write bytes to stdout in the same form.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The standing-inbound-surface warning is the single most safety-critical caveat this whole server has -- kept in full force, not shortened away. */
 const DESCRIPTION_TERSE =
   "Advertise a procedure, answered by a local shell command run once per inbound call (stdin = " +
   "caller's JSON, stdout = reply). THIS IS A STANDING INBOUND SURFACE: any mesh caller can trigger it " +
   "repeatedly until mesh_unserve or process exit. Never register a command you wouldn't want a " +
-  "stranger running repeatedly on this machine.";
+  "stranger running repeatedly on this machine. Bytes appear as {\"$bytes\": \"<base64>\"} on stdin; reply with bytes in the same form.";
 
 export function registerMeshServe(server: McpServer): void {
   server.tool(
@@ -51,7 +52,8 @@ export function registerMeshServe(server: McpServer): void {
         .min(1)
         .describe(
           "Shell command to run once per inbound call. Receives the call's JSON payload on stdin; " +
-            "its entire stdout is parsed as the JSON reply (empty stdout replies null).",
+            "its entire stdout is parsed as the JSON reply (empty stdout replies null). Bytes appear as " +
+            "{\"$bytes\": \"<base64>\"} both ways.",
         ),
       exec_timeout_seconds: z
         .number()
@@ -67,7 +69,7 @@ export function registerMeshServe(server: McpServer): void {
     async ({ procedure, exec, exec_timeout_seconds, host }) => {
       try {
         const execTimeoutSeconds = Math.min(MAX_TIMEOUT_SECONDS, exec_timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS);
-        const result = await serveModule.serve({ procedure, exec, execTimeoutSeconds, host });
+        const result = await serveModule.serve({ procedure, exec, execTimeoutSeconds, host, bytes: "tagged" });
         return jsonContent(result);
       } catch (e) {
         return errorContent(describeCliError("mesh_serve failed", e));

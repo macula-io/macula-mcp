@@ -207,6 +207,18 @@ describe("call() routing", () => {
     expect(session.callWithUcan).toHaveBeenCalled();
   });
 
+  it("passes a bytes choice through to the pool and to a one-shot session", async () => {
+    const pool = fakePool();
+    poolConnect.mockResolvedValue(pool);
+    await call({ procedure: "p", identityPath: freshIdentityPath(), bytes: "tagged" });
+    expect(pool.call).toHaveBeenCalledWith(undefined, "p", {}, { deadlineMs: undefined, bytes: "tagged" });
+
+    const session = fakeSession();
+    sessionConnect.mockResolvedValue(session);
+    await call({ procedure: "p", identityPath: freshIdentityPath(), host: "custom-station.example:1234", bytes: "tagged" });
+    expect(session.call).toHaveBeenCalledWith("p", {}, expect.objectContaining({ bytes: "tagged" }));
+  });
+
   it("wraps a pool failure the same way withSession wraps a one-shot failure", async () => {
     poolConnect.mockResolvedValue(fakePool({ call: vi.fn().mockRejectedValue(new Error("boom")) }));
     const identityPath = freshIdentityPath();
@@ -331,6 +343,18 @@ describe("watch() routing", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("passes a bytes choice through to the pool and to a one-shot session", async () => {
+    const pool = fakePool({ subscribe: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)) });
+    poolConnect.mockResolvedValue(pool);
+    await watch({ topic: "t", durationSeconds: 0.01, identityPath: freshIdentityPath(), bytes: "tagged" });
+    expect(pool.subscribe).toHaveBeenCalledWith(undefined, "t", expect.any(Function), undefined, { bytes: "tagged" });
+
+    const session = fakeSession({ subscribe: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)) });
+    sessionConnect.mockResolvedValue(session);
+    await watch({ topic: "t", durationSeconds: 0.01, identityPath: freshIdentityPath(), host: "custom-station.example:1234", bytes: "tagged" });
+    expect(session.subscribe).toHaveBeenCalledWith("t", expect.any(Function), expect.objectContaining({ bytes: "tagged" }));
   });
 
   it("with an explicit host, bypasses the pool", async () => {

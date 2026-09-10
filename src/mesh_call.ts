@@ -29,10 +29,13 @@ const DESCRIPTION_FULL =
   "Macula RPC is procedure-addressed: the target station routes to a peer that advertises it. " +
   `Returns the peer's result plus duration_ms. Defaults to ${defaultStation()} if host isn't given. ` +
   "If this server's own MACULA_MCP_UCAN is set, its token is attached to every call automatically " +
-  "(harmless against a procedure that isn't UCAN-gated).";
+  "(harmless against a procedure that isn't UCAN-gated). " +
+  "Bytes: send a byte string in args as {\"$bytes\": \"<standard base64>\"}, e.g. " +
+  "{\"channel_id\": {\"$bytes\": \"AQID\"}}; a plain string is always text. Bytes in the result " +
+  "appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh (procedure-addressed RPC). Returns the peer's result. Defaults to ${defaultStation()} if host isn't given.`;
+const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh (procedure-addressed RPC). Returns the peer's result. Defaults to ${defaultStation()} if host isn't given. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form.`;
 
 export function registerMeshCall(server: McpServer): void {
   server.tool(
@@ -49,7 +52,7 @@ export function registerMeshCall(server: McpServer): void {
       args: z
         .record(z.string(), z.unknown())
         .optional()
-        .describe("Structured arguments for the procedure (plain JSON; this server encodes the wire)."),
+        .describe("Structured arguments for the procedure (plain JSON; this server encodes the wire). Bytes as {\"$bytes\": \"<base64>\"}."),
       timeout_ms: z
         .number()
         .int()
@@ -118,6 +121,7 @@ export function registerMeshCall(server: McpServer): void {
           direct,
           identityPath: defaultIdentityPath(),
           ucanPath: ucanPath(),
+          bytes: "tagged",
         });
         return jsonContent({ result: res.payload, duration_ms: res.duration_ms });
       } catch (e) {

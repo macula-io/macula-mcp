@@ -120,9 +120,18 @@ describe("serve: one Session per registered procedure (regression)", () => {
 
     // Each Session actually served its OWN procedure, exactly once.
     expect(session1!.serve).toHaveBeenCalledTimes(1);
-    expect(session1!.serve).toHaveBeenCalledWith("agent.some-node.ring", expect.any(Function));
+    expect(session1!.serve).toHaveBeenCalledWith("agent.some-node.ring", expect.any(Function), { bytes: undefined });
     expect(session2!.serve).toHaveBeenCalledTimes(1);
-    expect(session2!.serve).toHaveBeenCalledWith("my_agent.summarize", expect.any(Function));
+    expect(session2!.serve).toHaveBeenCalledWith("my_agent.summarize", expect.any(Function), { bytes: undefined });
+  });
+
+  it("a bytes choice reaches Session.serve, so mesh_serve's commands can receive tagged bytes", async () => {
+    const { servingSessionFor } = wireSessions();
+    const { serve } = await import("./serve.js");
+
+    await serve({ procedure: "my_agent.echo", exec: "cat", bytes: "tagged" });
+
+    expect(servingSessionFor("my_agent.echo")!.serve).toHaveBeenCalledWith("my_agent.echo", expect.any(Function), { bytes: "tagged" });
   });
 
   it("unserving one procedure does not touch another procedure's own Session", async () => {

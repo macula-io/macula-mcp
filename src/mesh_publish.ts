@@ -21,9 +21,10 @@ import { toolDescription } from "./tool_description.js";
 const DESCRIPTION_FULL =
   "Publish an integration fact to a mesh topic so other parties' agents can react. " +
   "Use a business verb for the fact type (e.g. 'module_generated', 'capability_announced'), " +
-  `never CRUD. Returns the topic and duration_ms. Defaults to ${defaultStation()} if host isn't given.`;
+  `never CRUD. Returns the topic and duration_ms. Defaults to ${defaultStation()} if host isn't given. ` +
+  "Bytes in the fact: {\"$bytes\": \"<standard base64>\"}, e.g. {\"id\": {\"$bytes\": \"AQID\"}}; a plain string is always text.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the business-verb-not-CRUD naming rule. */
-const DESCRIPTION_TERSE = `Publish a fact to a mesh topic. Use a business verb for the fact type (e.g. 'module_generated'), never CRUD. Defaults to ${defaultStation()} if host isn't given.`;
+const DESCRIPTION_TERSE = `Publish a fact to a mesh topic. Use a business verb for the fact type (e.g. 'module_generated'), never CRUD. Defaults to ${defaultStation()} if host isn't given. Bytes as {"$bytes": "<base64>"}.`;
 
 export function registerMeshPublish(server: McpServer): void {
   server.tool(
@@ -31,7 +32,7 @@ export function registerMeshPublish(server: McpServer): void {
     toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
       topic: z.string().describe("Topic name (e.g. 'agents.module_generated')."),
-      fact: z.record(z.string(), z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire)."),
+      fact: z.record(z.string(), z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire). Bytes as {\"$bytes\": \"<base64>\"}."),
       host: z
         .string()
         .optional()

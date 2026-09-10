@@ -68,6 +68,7 @@ import { spawn } from "node:child_process";
 import type { Session, Identity, JsonValue } from "@macula-io/ts";
 import { onShutdown, serveAdvertiseIdentityPath, serveProcedureIdentityPath } from "./mesh_config.js";
 import { connectWithFallback, loadOrGenerateIdentity, toCliError } from "./macula_ts_client.js";
+import type { BytesOutput } from "@macula-io/ts";
 import { findLikelySecret } from "./secret_scan.js";
 
 interface Registration {
@@ -229,6 +230,10 @@ export interface ServeArgs {
   direct?: boolean;
   /** TTL for that DHT advertisement, if `direct`; renews on re-registration. */
   ttlSeconds?: number;
+  /** How bytes in each inbound payload reach the command's stdin, "hex" when
+   * omitted. mesh_serve asks for "tagged" ({"$bytes": "<base64>"}), the same
+   * form a command's stdout reply may use to send bytes back. */
+  bytes?: BytesOutput;
 }
 
 export interface ServeResult {
@@ -275,7 +280,7 @@ export async function serve(args: ServeArgs): Promise<ServeResult> {
     }
     let stop: () => Promise<void>;
     try {
-      stop = await session.serve(args.procedure, (payload) => runExec(args.exec, execTimeoutMs, payload));
+      stop = await session.serve(args.procedure, (payload) => runExec(args.exec, execTimeoutMs, payload), { bytes: args.bytes });
     } catch (e) {
       await session.close(identity).catch(() => {});
       identity.dispose();

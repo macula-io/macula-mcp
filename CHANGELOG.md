@@ -5,6 +5,29 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Changed
+- **Bytes reach agents as `{"$bytes": "<base64>"}` instead of `"0x"` hex**, in
+  `mesh_call` results, `mesh_watch` event payloads and the payload a
+  `mesh_serve` command reads on stdin. An agent, prompt or command that
+  parsed `"0x..."` strings out of those must read the tagged object instead.
+  The point is that an id can be passed straight back: the same object in
+  `mesh_call` args, a `mesh_publish` fact or a `mesh_serve` command's stdout
+  goes on the wire as real bytes. Other callers of `call()` (the station and
+  memory tools) and `callThenDirect()` (citizenship, device membership) read
+  results themselves and still get hex. There is no opt-out parameter for
+  now. Needs the `@macula-io/ts` release with bytes support; the dependency
+  bump lands with it.
+
+### Added
+- `{"$bytes": "<standard padded base64>"}` in `mesh_call` args, `mesh_publish`
+  facts and `mesh_serve` replies becomes a CBOR byte string, e.g.
+  `{"channel_id": {"$bytes": "AQID"}}` for hecate-tube's `tube.lookup_channel`,
+  which matches channel ids as bytes. A plain string is always text. The
+  `mesh_call`, `mesh_publish`, `mesh_watch` and `mesh_serve` descriptions say
+  how bytes look.
+
 ## [0.29.0] - 2026-09-10
 
 ### Added
