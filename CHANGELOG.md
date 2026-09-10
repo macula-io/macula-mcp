@@ -5,7 +5,7 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.30.0] - 2026-09-10
 
 ### Changed
 - **Bytes reach agents as `{"$bytes": "<base64>"}` instead of `"0x"` hex**, in
@@ -17,8 +17,8 @@ fires on a `v*` tag push, not on every commit to `main`).
   goes on the wire as real bytes. Other callers of `call()` (the station and
   memory tools) and `callThenDirect()` (citizenship, device membership) read
   results themselves and still get hex. There is no opt-out parameter for
-  now. Needs the `@macula-io/ts` release with bytes support; the dependency
-  bump lands with it.
+  now. Requires `@macula-io/ts` ^0.15.0, the release that added bytes
+  support.
 
 ### Added
 - `{"$bytes": "<standard padded base64>"}` in `mesh_call` args, `mesh_publish`
