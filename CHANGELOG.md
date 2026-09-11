@@ -5,7 +5,7 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.31.0] - 2026-09-11
 
 ### Changed
 - Requires `@macula-io/ts` ^0.16.0 (macula-go v0.8.2). A provider gated with a
