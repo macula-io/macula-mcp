@@ -59,7 +59,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@macula-io/ts": "^0.15.0",
+    "@macula-io/ts": "^0.16.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "qrcode": "^1.5.4",
     "yaml": "^2.9.0",

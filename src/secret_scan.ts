@@ -64,8 +64,7 @@ const SECRET_PATTERNS: SecretPattern[] = [
   { name: "OpenAI API key", re: /sk-(proj-)?[A-Za-z0-9]{20,}/ },
   { name: "Anthropic API key", re: /sk-ant-[A-Za-z0-9-]{20,}/ },
   // The literal header SHAPE ("Authorization: Bearer <token>"), not any
-  // bearer-token-looking string alone -- Macula UCANs are bearer tokens
-  // by design (see reference_macula_ucan_bearer_not_audience_bound) and
+  // bearer-token-looking string alone -- Macula UCANs are JWT-shaped and
   // get returned raw (ucan: <jwt>) from issue_membership_ucan_v1 replies
   // as normal, expected, constant mesh traffic. A bare JWT string with no
   // "Authorization:" prefix around it must never match this.

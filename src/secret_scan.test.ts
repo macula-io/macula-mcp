@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { assertNoLikelySecret, findLikelySecret } from "./secret_scan.js";
 
 // A genuine UCAN issued live 2026-09-04 (device auto-join verification
-// against io.macula) -- not a fabricated example. Bearer tokens by design
-// (see reference_macula_ucan_bearer_not_audience_bound), returned raw
+// against io.macula) -- not a fabricated example. JWT-shaped tokens,
+// returned raw
 // (ucan: <jwt>) from issue_membership_ucan_v1 replies constantly; must
 // never trip the scanner on its own.
 const REAL_UCAN =

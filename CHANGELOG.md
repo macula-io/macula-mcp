@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Changed
+- Requires `@macula-io/ts` ^0.16.0 (macula-go v0.8.2). A provider gated with a
+  UCAN policy accepts a token only from the caller its `aud` names, the
+  calling identity's node id in lowercase hex, so the token in
+  `MACULA_MCP_UCAN` must be minted for `MACULA_MCP_IDENTITY`; the realm's
+  membership UCANs already are. A procedure served with `mesh_serve` answers
+  only CALLs signed by the caller they name. Direct calls try every
+  advertisement that verifies, within their deadline.
+
 ## [0.30.0] - 2026-09-10
 
 ### Changed

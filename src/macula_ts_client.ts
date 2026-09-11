@@ -224,22 +224,12 @@ export function closeInBackground(session: Session | undefined, identity: Identi
 }
 
 /** Reads a UCAN token from `path` (MACULA_MCP_UCAN, same file-path convention
- * mesh_config.ts's ucanPath() already established). Deliberately just an
- * existence/non-empty sanity check -- NOT an identity-pairing check. An
- * earlier draft of this feature (an assertUcanUsableWithIdentity that once
- * lived alongside the now-deleted subprocess client, never wired up here)
- * required MACULA_MCP_IDENTITY
- * to point at the token's own <audience> on the premise that presenting a UCAN
- * from any other identity "would never verify" -- a Fable review of this exact
- * codebase traced the real verify chain (Erlang's authorize_policy +
- * macula_ucan_nif:verify/2, identical across every SDK port) and found it
- * checks ONLY the token's signature and expiry against its own issuer, never
- * the caller's identity against `aud`. That check both rejected configurations
- * that work fine on the wire and implied a security property the mesh doesn't
- * enforce -- @macula-io/ts's own Session.callWithUcan is deliberately built
- * without it (see its own module doc), and this function follows the same
- * discipline: confirm the file is there and has something in it, attach
- * whatever token it holds, nothing more. */
+ * mesh_config.ts's ucanPath() already established): confirms the file is
+ * there and has something in it, and returns the token. A gated provider
+ * accepts a token only from the caller its `aud` names -- the calling
+ * identity's node id as lowercase hex, which is what the realm's membership
+ * UCANs carry -- so the token must be minted for MACULA_MCP_IDENTITY. The
+ * provider makes that check; this function doesn't repeat it. */
 function readUcanToken(path: string): string {
   if (!existsSync(path)) {
     throw new MaculaCliError(

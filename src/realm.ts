@@ -374,7 +374,7 @@ export interface RealmStatus {
   credential_path?: string;
   /** This device's own public key, hex -- see RealmCredential.citizen_did's own doc. */
   citizen_did?: string;
-  /** Whether a membership UCAN was issued -- never the token itself here, that's a bearer credential and stays in the credential file only. */
+  /** Whether a membership UCAN was issued -- never the token itself here, that's a credential and stays in the credential file only. */
   has_ucan?: boolean;
   /** "device" (silent, DeviceKeyOwnershipProof-only auto-join) or "citizen" (Hanko-bound human) -- see RealmCredential.tier. Undefined when not joined at all. */
   tier?: RealmTier;
