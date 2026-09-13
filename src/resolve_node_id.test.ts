@@ -46,10 +46,11 @@ describe("resolveNodeId", () => {
   });
 
   it("never silently picks one on a collision -- refuses and lists every real candidate node_id", () => {
-    // A REAL sha256 collision under petname()'s 64,000-bucket space (brute-forced
-    // offline, not simulated): both of these genuinely produce "gentle_silver_falcon".
-    const COLLIDER_1 = "0".repeat(62) + "e5";
-    const COLLIDER_2 = "0".repeat(60) + "0122";
+    // A REAL sha256 collision under petname()'s full 640,000,000-label
+    // space (brute-forced offline, not simulated): both of these
+    // genuinely produce "tranquil_crimson_ibex_5095".
+    const COLLIDER_1 = "0".repeat(60) + "1db3";
+    const COLLIDER_2 = "0".repeat(60) + "5143";
     expect(petname(COLLIDER_1)).toBe(petname(COLLIDER_2)); // sanity: this IS a real collision, not a typo
     upsertAgent({ node_id: COLLIDER_1, at: NOW() });
     upsertAgent({ node_id: COLLIDER_2, at: NOW() });

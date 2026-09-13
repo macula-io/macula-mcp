@@ -10,8 +10,8 @@ describe("petname", () => {
     expect(petname(NODE_A)).toBe(petname(NODE_A.toUpperCase()));
   });
 
-  it("matches the adjective_adjective_noun shape", () => {
-    expect(petname(NODE_A)).toMatch(/^[a-z]+_[a-z]+_[a-z]+$/);
+  it("matches the adjective_color_animal_suffix shape", () => {
+    expect(petname(NODE_A)).toMatch(/^[a-z]+_[a-z]+_[a-z]+_[0-9]{4}$/);
   });
 
   it("gives different node ids different petnames, in general", () => {

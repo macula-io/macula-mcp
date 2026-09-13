@@ -162,8 +162,8 @@ describe("placeRing", () => {
 
     it("refuses on a genuine collision rather than silently picking one candidate to ring", async () => {
       // Same real sha256 collision as resolve_node_id.test.ts's own coverage.
-      const COLLIDER_1 = "0".repeat(62) + "e5";
-      const COLLIDER_2 = "0".repeat(60) + "0122";
+      const COLLIDER_1 = "0".repeat(60) + "1db3";
+      const COLLIDER_2 = "0".repeat(60) + "5143";
       upsertAgent({ node_id: COLLIDER_1, at: new Date().toISOString() });
       upsertAgent({ node_id: COLLIDER_2, at: new Date().toISOString() });
       const { placeRing } = await import("./mesh_ring.js");

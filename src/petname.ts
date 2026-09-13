@@ -1,5 +1,6 @@
 // Petnames: a deterministic, human-readable label for a mesh node id --
-// Docker's adjective_adjective_noun convention (e.g. "happy_green_rabbit")
+// Docker's adjective_color_animal convention with a four-digit suffix
+// (e.g. "happy_green_rabbit_4831")
 // -- so a person skimming a roster, transcript, or room listing can
 // recognize and remember a specific identity without reading 64 hex
 // characters. A pure function of the node id itself, not random per
@@ -10,12 +11,14 @@
 // keeps the real node_id right alongside it, since only the real id is
 // addressable.
 //
-// No collision guarantee, and none is needed: 40 x 40 x 40 = 64,000
-// combinations is plenty for "which of the dozen agents on this mesh
-// is that," not a uniqueness proof for a global namespace. Two
-// different identities landing on the same petname is a cosmetic
-// coincidence a reader resolves by checking the node_id itself, the
-// same way two people can share a name.
+// The suffix exists because the mesh is expected to host THOUSANDS of
+// agents: the word trio alone (64,000 combinations) collides visibly
+// under the birthday problem at a few hundred identities; the trio
+// plus a 4-digit hash group (640,000,000 combinations) stays
+// effectively collision-free at fleet scale. Two different identities
+// landing on the same petname would still be a cosmetic coincidence a
+// reader resolves by checking the node_id itself, the same way two
+// people can share a name.
 
 import { createHash } from "node:crypto";
 
@@ -59,5 +62,6 @@ export function petname(nodeId: string): string {
   const a = ADJECTIVES_A[digest.readUInt16BE(0) % ADJECTIVES_A.length];
   const b = ADJECTIVES_B[digest.readUInt16BE(2) % ADJECTIVES_B.length];
   const n = NOUNS[digest.readUInt16BE(4) % NOUNS.length];
-  return `${a}_${b}_${n}`;
+  const suffix = String(digest.readUInt16BE(6) % 10_000).padStart(4, "0");
+  return `${a}_${b}_${n}_${suffix}`;
 }
