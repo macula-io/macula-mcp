@@ -5,6 +5,27 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Breaking
+- A command served with `mesh_serve` whose call payload is a map reads the
+  caller the provider's session verified under `"caller"`, as
+  `{"$bytes": "<base64>"}`, in place of any `"caller"` the sender put there
+  (@macula-io/ts 0.17.0, macula-go v0.10.0).
+
+### Security
+This release fixes these defects in 0.31.0 and earlier releases, through
+@macula-io/ts 0.17.0.
+- `mesh_get` used a fetched manifest before it was checked against the MCID
+  asked for, and took its size, chunk count and chunk size as given, which
+  could stop or stall the process.
+- A RESULT or ERROR counted without a check that it was signed by the key its
+  `responded_by` or `reported_by` names.
+- CBOR decoding had no limit on how deeply lists and maps nest.
+
+### Changed
+- Requires `@macula-io/ts` ^0.17.0 (macula-go v0.10.0).
+
 ## [0.31.0] - 2026-09-11
 
 ### Changed

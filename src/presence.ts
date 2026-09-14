@@ -54,9 +54,9 @@
 // to let separate one-shot subprocess invocations share one
 // connection, a reason that disappears once macula-ts is called
 // in-process). TWO Sessions, not one: a Session allows only one active
-// subscribe() at a time (confirmed against macula-go's own
-// connection.Session -- concurrent RunSubscriber calls sharing one
-// session corrupt the shared control stream's read loop), so
+// subscribe() at a time (@macula-io/ts's one-role rule, which dates from
+// macula-go's RunSubscriber, whose concurrent calls on one session
+// corrupted the control stream's read loop), so
 // HELLO_TOPIC and GOODBYE_TOPIC each get their own Session. And two
 // DIFFERENT identities, not the same presence identity twice: a
 // second connection under the same node ID gets the FIRST one closed

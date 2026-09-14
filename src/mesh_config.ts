@@ -298,10 +298,10 @@ let cachedServeAdvertiseIdentityPath: string | undefined;
  * advertisement (Session.putProcedureAdvertisement) -- separate from
  * serveIdentityPath()'s own serving connection because
  * putProcedureAdvertisement() and an active serve() can never share one
- * Session: putProcedureAdvertisement's own PutRecord CALL would race
- * serve()'s reads of the shared control stream on the same connection
- * (@macula-io/ts's own #requireHandleNotServing guard rejects the
- * combination outright -- found live 2026-09-04, every direct-dial
+ * Session: @macula-io/ts's Session takes one role at a time, and its
+ * #requireHandleNotServing check rejects putProcedureAdvertisement's
+ * PutRecord CALL beside an active serve() outright (found live
+ * 2026-09-04, every direct-dial
  * registration on this module failed with exactly that error until
  * serve.ts opened a second Session on this identity for the role --
  * see serve.ts's own doc). This identity only ever signs a DHT
