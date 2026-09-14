@@ -5,7 +5,7 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.32.0] - 2026-09-15
 
 ### Breaking
 - A command served with `mesh_serve` whose call payload is a map reads the
