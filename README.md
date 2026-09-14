@@ -804,6 +804,9 @@ For a HUMAN in the conversation, not the agent, surfaces as a slash command in c
 
 - Node.js 24.18.1+: the one thing the installer below checks but won't install for
   you (get it from [nodejs.org](https://nodejs.org), nvm, fnm, or volta).
+- IPv6: the public Macula stations have IPv6 addresses only, so the machine running
+  `@macula-io/mcp` needs a working IPv6 route and outbound UDP to port 4433 (QUIC).
+  On an IPv4-only network every connection fails with `network is unreachable`.
 
 That's it. `@macula-io/mcp` talks to the mesh in-process (via
 [`@macula-io/ts`](https://www.npmjs.com/package/@macula-io/ts), an
