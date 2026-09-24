@@ -8,9 +8,9 @@
 // layers on top of this when a person actually confirms one, not
 // instead of it -- see realm.ts's RealmCredential.tier.
 //
-// Distinct from citizenship.ts's hecate_citizens registration: that's
-// mesh-wide presence/directory, no realm concept at all, gated on
-// hecate-citizens' own ownership proof. This is realm MEMBERSHIP --
+// Distinct from citizenship.ts's mcl-citizens registration: that's
+// mesh-wide presence/directory, registering the CALL's verified caller.
+// This is realm MEMBERSHIP --
 // macula-realm's MembershipUcanRpcHandlers (issue_membership_ucan),
 // gated on MaculaRealm.Identity.DeviceKeyOwnershipProof specifically
 // because minting membership is, by definition, for a device that is
@@ -38,7 +38,7 @@
 // Realm targeting is NOT discovery-based like citizenship.ts's
 // discoverProcedureRealm: that helper assumes exactly one live
 // advertiser of a given procedure name mesh-wide, true for
-// hecate_citizens.register_presence but false here by design --
+// mcl-citizens/register_presence but false here by design --
 // issue_membership_ucan is meant to run identically across MULTIPLE
 // realms (net.beam-campus during build-out, io.macula once proven; see
 // MACULA_MCP_AUTOJOIN_REALM below), so a name-only DHT scan could match
@@ -47,8 +47,8 @@
 // realmId() below, confirmed byte-for-byte against macula_realm:id/1
 // (crypto:hash(sha256, RealmName), macula/src/macula_realm.erl) and
 // against the exact hex string @macula-io/ts's Session.call already
-// proved live for io.macula (ABB81B5A...FCD1, hecate_citizens
-// verification 2026-09-04) -- so this never needs to find or trust
+// proved live for io.macula (ABB81B5A...FCD1, verified against the
+// citizens directory 2026-09-04) -- so this never needs to find or trust
 // somebody else's advertisement to know which realm to call.
 //
 // Opt-in, not opt-out: MACULA_MCP_AUTOJOIN_REALM names the realm to

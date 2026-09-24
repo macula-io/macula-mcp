@@ -1,40 +1,28 @@
 // Tool: mesh_list_stations — a convenience composition of two existing
-// primitives (mesh_find_records_by_type + mesh_call), not a new
-// macula-cli subcommand or wire capability. Closes a real ergonomics
-// gap: "which stations can you connect to?" was technically answerable
-// via mesh_find_records_by_type(station_endpoint), or by discovering
-// hecate_stations.list_stations's realm and calling it directly, but
-// neither was a single obvious tool call for an agent to reach for.
+// primitives (mesh_find_records_by_type + mesh_call), not a new wire
+// capability. "Which stations can you connect to?" is answerable via
+// mesh_find_records_by_type(station_endpoint), or by discovering
+// mcl-stations/list_stations's realm and calling it directly, but neither
+// is a single obvious tool call for an agent to reach for.
 //
-// hecate_stations.list_stations (hecate-services/hecate-stations) is
-// the one canonical, intended station-directory service in this
-// ecosystem -- see its own README: "so clients never hand-maintain a
-// station list." This tool hardcodes awareness of that ONE specific
-// service on purpose, unlike mesh_find_records_by_type (which stays
-// app-agnostic); if a second, different station-directory service ever
-// exists, this tool would need to pick one or learn to merge them, not
-// today's problem.
+// mcl-stations/list_stations (macula-services/mcl-stations) is the mesh's
+// station directory, so clients never hand-maintain a station list. This
+// tool hardcodes awareness of that ONE service on purpose, unlike
+// mesh_find_records_by_type, which stays app-agnostic.
 //
-// Two real calls happen here, not one: the DHT lookup finds which
-// realm hecate_stations is currently advertised under (never the
-// default all-zero realm -- there is no way to know its realm without
-// asking the DHT first), then the actual list_stations call uses it.
-// If hecate_stations isn't advertised at all right now, this fails
-// with a clear, specific error rather than macula-cli's own opaque
-// unknown_next_peer -- found live 2026-08-31 diagnosing exactly that
-// failure mode end to end (see CHANGELOG).
+// Two calls happen here, not one: the DHT lookup finds which realm
+// mcl-stations is currently advertised under (never the default all-zero
+// realm; there is no way to know it without asking the DHT first), then
+// list_stations is called in it. The advertisement's `procedure' is the
+// org-namespaced name the provider advertised, `mcl-stations/list_stations'
+// (mcl_om advertises `Org/Name'). If nothing advertises it, this fails with
+// a clear, specific error rather than an opaque unknown_next_peer.
 //
-// station_endpoint/node_record fields meant to be human-readable text
-// (city/continent/country/hostname/kind/version, and each entry in
-// host_advertised) arrive over the wire as CBOR byte strings, not CBOR
-// text -- a wire-encoding characteristic of how a service's own ad hoc
-// RPC reply payload gets built, upstream of this server and not this
-// server's concern to fix. macula-cli's --json renders any CBOR bytes
-// as a "0x"-prefixed hex string (its own documented, deliberate
-// convention, unambiguous against a real text value). Decoded back to
-// plain UTF-8 here, by field name, for exactly the fields known to
-// actually be text -- never node_id/id/_rev, which are genuinely
-// opaque identifiers and stay hex on purpose.
+// The reply is `{stations: [Row]}`. mcl-stations sends every text field as
+// CBOR text, so they arrive as plain strings and are passed through as-is.
+// `node_id' is the station's 32-byte key id, CBOR bytes, which @macula-io/ts
+// renders as "0x"-prefixed hex; it is given back as the plain 64-hex every
+// other tool here takes.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -48,39 +36,25 @@ import { describeCliError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { toolDescription } from "./tool_description.js";
 
-const LIST_STATIONS_PROCEDURE = "hecate_stations.list_stations";
-const TEXT_FIELDS = ["city", "continent", "country", "hostname", "kind", "version"];
+const LIST_STATIONS_PROCEDURE = "mcl-stations/list_stations";
 
-function hexDecode(value: unknown): unknown {
-  if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) {
-    try {
-      return Buffer.from(value.slice(2), "hex").toString("utf8");
-    } catch {
-      return value;
-    }
+/** A station row with its node_id as plain 64-hex; every other field passes through. */
+function withPlainNodeId(station: Record<string, unknown>): Record<string, unknown> {
+  const nodeId = station.node_id;
+  if (typeof nodeId === "string" && /^0x[0-9a-fA-F]{64}$/.test(nodeId)) {
+    return { ...station, node_id: nodeId.slice(2).toLowerCase() };
   }
-  return value;
-}
-
-function decodeStation(station: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...station };
-  for (const field of TEXT_FIELDS) {
-    if (field in out) out[field] = hexDecode(out[field]);
-  }
-  if (Array.isArray(out.host_advertised)) {
-    out.host_advertised = out.host_advertised.map(hexDecode);
-  }
-  return out;
+  return station;
 }
 
 const DESCRIPTION_FULL =
-  "List macula stations via hecate_stations.list_stations, the mesh's canonical station directory -- " +
-  "so an agent never has to hand-maintain a station list. Auto-discovers which realm hecate_stations " +
+  "List macula stations via mcl-stations/list_stations, the mesh's canonical station directory -- " +
+  "so an agent never has to hand-maintain a station list. Auto-discovers which realm mcl-stations " +
   "is currently advertised under (never the default all-zero realm) via a DHT lookup, then calls it. " +
   "Optional near (nearest-first by great-circle distance) or continent/country/city filters, matching " +
   `the service's own filter API -- omit all filters to list every known station. Defaults to ${defaultStation()} if host isn't given.`;
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const DESCRIPTION_TERSE = `List macula stations via hecate_stations.list_stations (auto-discovers its realm via DHT). Optional near/continent/country/city filters -- omit all to list everything. Defaults to ${defaultStation()} if host isn't given.`;
+const DESCRIPTION_TERSE = `List macula stations via mcl-stations/list_stations (auto-discovers its realm via DHT). Optional near/continent/country/city filters -- omit all to list everything. Defaults to ${defaultStation()} if host isn't given.`;
 
 export function registerMeshListStations(server: McpServer): void {
   server.tool(
@@ -119,7 +93,7 @@ export function registerMeshListStations(server: McpServer): void {
         if (!match?.procedure_advertisement?.realm) {
           return errorContent(
             `${LIST_STATIONS_PROCEDURE} is not currently advertised on the mesh (checked ${discovered.count} ` +
-              `procedure_advertisement record(s) visible from ${host ?? defaultStation()}) -- hecate_stations ` +
+              `procedure_advertisement record(s) visible from ${host ?? defaultStation()}) -- mcl-stations ` +
               "may be down or unreachable from this station right now.",
           );
         }
@@ -131,7 +105,7 @@ export function registerMeshListStations(server: McpServer): void {
           identityPath: defaultIdentityPath(),
         });
         const payload = res.payload as { stations?: Record<string, unknown>[] } | undefined;
-        const stations = (payload?.stations ?? []).map(decodeStation);
+        const stations = (payload?.stations ?? []).map(withPlainNodeId);
         return jsonContent({ realm: match.procedure_advertisement.realm, count: stations.length, stations });
       } catch (e) {
         return errorContent(describeCliError("mesh_list_stations failed", e));

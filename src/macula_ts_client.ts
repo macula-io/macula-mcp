@@ -339,8 +339,8 @@ export interface TsIdentitySignResult {
  * `identityPath`: {node_id, timestamp, procedure} exactly as
  * ownership_proof.ts's proofMessage lays the bytes out -- the SAME
  * helper its own verifyOwnershipProof() uses, so a proof signed here
- * verifies identically wherever it lands (hecate-citizens,
- * hecate-mail, another macula-mcp's ring_service.ts) and this is not a
+ * verifies identically wherever it lands (another macula-mcp's
+ * ring_service.ts, any verifier of this byte layout) and this is not a
  * second, independently-drifting reimplementation of that byte layout.
  * Matches the old macula-cli `identity sign --procedure <string>` output
  * shape this once replaced (see citizenship.ts/ring_service.ts/
@@ -680,8 +680,8 @@ export async function findRecordsByType(args: {
 /**
  * The realm `procedure` is currently advertised under, from the DHT
  * visible at `host` -- the discover-then-call step citizenship.ts's
- * register() needs, since hecate_citizens.register_presence (like every
- * hecate service) is never served under the all-zero realm and there is
+ * register() needs, since mcl-citizens/register_presence (like every
+ * mcl service) is never served under the all-zero realm and there is
  * no other way to learn its realm than from its own advertisement. Same
  * composition mesh_stations.ts/mesh_memory.ts already do inline for
  * their own single call site; factored out here because citizenship.ts's

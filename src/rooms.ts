@@ -85,7 +85,7 @@ export interface RoomState {
 
 const rooms = new Map<string, RoomState>();
 
-/** The node id every envelope from this agent carries: presence's, which is the default identity's, so mesh_agents and hecate-citizens know it by the same string. tsIdentity() only reads/mints a seed file -- no connection -- so this stays synchronous. */
+/** The node id every envelope from this agent carries: presence's, which is the default identity's, so mesh_agents and mcl-citizens know it by the same string. tsIdentity() only reads/mints a seed file -- no connection -- so this stays synchronous. */
 function selfNodeId(): string {
   return presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
 }

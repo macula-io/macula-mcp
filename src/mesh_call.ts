@@ -45,7 +45,7 @@ export function registerMeshCall(server: McpServer): void {
       procedure: z
         .string()
         .describe(
-          "Procedure name as advertised, e.g. hecate-rag.search_chunks_semantic, with the realm in `realm`. " +
+          "Procedure name as advertised, e.g. mcl-rag/search_chunks_semantic, with the realm in `realm`. " +
             "The realm-prefixed form a DHT procedure_advertisement prints (`<64 hex>/<procedure>`) is " +
             "accepted too and split into procedure + realm for you.",
         ),
@@ -98,9 +98,9 @@ export function registerMeshCall(server: McpServer): void {
         .describe(
           "Sign a {citizen_did, timestamp, procedure} ownership proof with this server's own identity and " +
             "merge citizen_did + proof into args, for capabilities gated by an ownership proof " +
-            "(hecate_mail.open_mailbox, hecate_graph.learn_link, hecate_citizens.register_presence). The proof " +
+            "(mcl-mail/open_mailbox, mcl-graph/learn_link). The proof " +
             "is bound to this procedure and to this identity, so it overrides any citizen_did/proof you passed. " +
-            "Presence already registers this identity in hecate-citizens; this is for calling the gated " +
+            "Presence already registers this identity in mcl-citizens; this is for calling the gated " +
             "capabilities as that citizen.",
         ),
     },

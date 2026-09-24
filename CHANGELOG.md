@@ -5,6 +5,29 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Breaking
+- The mesh services this server calls are the `mcl-*` services on macula 12;
+  the `hecate-*` ones are gone from the fleet. `mesh_list_stations` calls
+  `mcl-stations/list_stations`, `mesh_recall`/`mesh_remember`/
+  `mesh_remember_directory` call `mcl-rag/answer_query`, `/add_knowledge` and
+  `/upload_knowledge`, and citizenship registers with
+  `mcl-citizens/register_presence`. Each is found by its org-namespaced
+  procedure name in the DHT, as the provider advertised it.
+- Citizenship sends no ownership proof and no `citizen_did`:
+  mcl-citizens registers the call's verified caller.
+- `mesh_list_stations` passes text fields through unchanged (mcl-stations
+  sends them as text) and returns `node_id` as plain 64-hex. The hex
+  decoding of text fields is gone.
+
+### Known limits
+- None of this reaches the macula 12 fleet yet: `@macula-io/ts` runs on
+  macula-go, which does not speak the macula 12 handshake. It works once
+  the SDK moves to 12.
+- `mesh_call`'s `prove_identity` proof carries no public key, which the
+  mcl-* services on macula 12 require; it arrives with the same SDK move.
+
 ## [0.32.0] - 2026-09-15
 
 ### Breaking

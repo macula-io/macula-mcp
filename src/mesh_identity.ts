@@ -37,7 +37,7 @@ export function registerIdentity(server: McpServer): void {
       description:
         "This macula-mcp server process's own Ed25519 identity (node ID), persisted per session -- " +
         "not mesh_watch's identity, presence's, or serving's own separate ones. " +
-        "Its node_id is also this agent's citizen_did in hecate-citizens; citizenship says whether it is " +
+        "Its node_id is also this agent's citizen_did in mcl-citizens; citizenship says whether it is " +
         "registered there right now (presence registers it, and renews it, automatically). ring says " +
         "whether this agent is currently serving its ring endpoint (agent.<node_id>.ring) and under which " +
         "contact policy.",

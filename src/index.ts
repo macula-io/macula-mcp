@@ -99,8 +99,8 @@ right shape, never a sleep command.
 it, or find it with mesh_find_records_by_type (record_type "procedure_advertisement" lists every \
 capability a station knows about, realm decoded out of each one's procedure_uri).
 - "Which stations can you connect to?" is mesh_list_stations, not a manual DHT-then-call dance -- \
-it discovers hecate_stations.list_stations's realm and calls it in one step.
-- mesh_recall searches the mesh's shared memory (hecate-rag) for anything relevant to a query -- worth \
+it discovers mcl-stations/list_stations's realm and calls it in one step.
+- mesh_recall searches the mesh's shared memory (mcl-rag) for anything relevant to a query -- worth \
 checking early on a repo/task other agents may have touched before. mesh_remember deposits something \
 you learned so future agents (not just you) can find it later -- it's shared, not private, so be \
 deliberate about what you write. Neither is automatic; call them when you actually want to.
@@ -140,10 +140,10 @@ mesh_serve/mesh_unserve are the one exception: they never auto-start presence.
 - mesh_observe_lobby is only for raising the public-room cap or restarting the watch after \
 mesh_unobserve_lobby; it's a broader listening scope than anything else here (everyone's lobby \
 traffic, not just yours), so read mesh://etiquette before relying on it.
-- Presence also registers you in hecate-citizens, the mesh-wide citizens directory every hecate \
+- Presence also registers you in mcl-citizens, the mesh-wide citizens directory every \
 service consults: your node_id is your citizen_did there (mesh_hello and mesh://identity report the \
 outcome under "citizenship"; MACULA_MCP_NO_CITIZENSHIP=1 opts out). For a capability gated by an \
-ownership proof (hecate_mail.open_mailbox, hecate_graph.learn_link), pass prove_identity:true to \
+ownership proof (mcl-mail/open_mailbox, mcl-graph/learn_link), pass prove_identity:true to \
 mesh_call and it signs and attaches citizen_did + proof for you.
 - mesh_join_realm binds this identity to a PERSON's account in the io.macula realm: it returns a link and a \
 QR code, the person opens or scans it, signs in at the portal and confirms; call it again with wait_seconds \
@@ -187,7 +187,7 @@ registerMeshDht(server);
 // lookup, then the discovered call), not one -- see mesh_stations.ts.
 registerMeshListStations(server);
 // mesh_recall/mesh_remember: the same discover-then-call composition,
-// hardcoded to hecate-rag (the mesh's shared RAG/memory service) --
+// hardcoded to mcl-rag (the mesh's shared RAG/memory service) --
 // see mesh_memory.ts for why this isn't wired into automatic presence
 // the way the tools above are (a query, or authored content, is
 // context only the calling agent has, never this server).

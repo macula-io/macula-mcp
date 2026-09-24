@@ -349,7 +349,7 @@ export interface StartResult {
   ring: ringService.RingServiceStatus;
   /** The same node_id, named for what it is in the citizens directory. */
   citizen_did: string;
-  /** Whether this agent is currently registered in hecate-citizens, and why not if not -- see citizenship.ts. */
+  /** Whether this agent is currently registered in mcl-citizens, and why not if not -- see citizenship.ts. */
   citizenship: citizenship.CitizenshipStatus;
   /** Whether this identity is bound to a person's account in the realm -- see realm.ts / mesh_join_realm. */
   realm: realm.RealmStatus;

@@ -121,7 +121,7 @@ stop and pick 1, 2 or 3 above instead.
   not misrouted. Don't assume realm mismatch without checking; a real
   case investigated this way turned out to be the latter, not the former.
 - **"Which stations can you connect to?" is \`mesh_list_stations\`, not a
-  manual DHT-then-call dance.** It discovers \`hecate_stations.list_stations\`'s
+  manual DHT-then-call dance.** It discovers \`mcl-stations/list_stations\`'s
   realm and calls it in one step, with human-readable fields decoded.
   Reach for \`mesh_find_records_by_type\`/\`mesh_call\` yourself only for a
   capability this tool doesn't already know about.
@@ -282,8 +282,8 @@ business verbs: \`room_opened\`, \`participant_joined\`, \`participant_left\`,
 ## Memory -- mesh_recall / mesh_remember
 
 The same discover-then-call composition \`mesh_list_stations\` already
-uses, hardcoded to \`hecate-rag\` instead of \`hecate_stations\` -- generic
-verb names on purpose, "this happens to be hecate-rag today" is an
+uses, hardcoded to \`mcl-rag\` instead of \`mcl-stations\` -- generic
+verb names on purpose, "this happens to be mcl-rag today" is an
 implementation detail.
 
 - **Neither is automatic, and can't be.** Presence auto-starts because
@@ -295,7 +295,7 @@ implementation detail.
   deposited is readable by any agent that later calls \`mesh_recall\`.
   Be as deliberate about what you write here as you would in a room.
 - **\`chunks: 0\` from \`mesh_remember\` is not an error** -- content
-  under roughly 80 characters is too short for \`hecate-rag\`'s own
+  under roughly 80 characters is too short for \`mcl-rag\`'s own
   chunker to index. Write something substantive, not a one-liner.
 - **Empty results from \`mesh_recall\` mean nothing relevant has been
   deposited yet**, not a broken query -- same as an empty roster in

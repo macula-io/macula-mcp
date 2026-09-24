@@ -35,19 +35,21 @@ afterEach(() => {
 });
 
 describe("mesh_list_stations", () => {
-  it("discovers hecate_stations' current realm via the DHT, then calls list_stations under it", async () => {
+  it("discovers mcl-stations' current realm via the DHT, then calls list_stations under it", async () => {
     mocks.findRecordsByType.mockResolvedValue({
       host: "demo.macula.io:4433",
       type: 0x06,
       count: 2,
       records: [
         { procedure_advertisement: { procedure: "other.thing", realm: "0".repeat(64) } },
-        { procedure_advertisement: { procedure: "hecate_stations.list_stations", realm: REALM } },
+        { procedure_advertisement: { procedure: "mcl-stations/list_stations", realm: REALM } },
       ],
     });
     mocks.call.mockResolvedValue({
-      procedure: "hecate_stations.list_stations",
-      payload: { stations: [{ node_id: "abc", city: "0x" + Buffer.from("Paris").toString("hex") }] },
+      procedure: "mcl-stations/list_stations",
+      // The reply as @macula-io/ts renders mcl-stations' wire: text fields are
+      // CBOR text (plain strings), node_id is 32 raw bytes ("0x" + lowercase hex).
+      payload: { stations: [{ node_id: "0x" + "ab".repeat(32), city: "Paris", hostname: "0xdeadbeef" }] },
       duration_ms: 12,
     });
 
@@ -58,15 +60,17 @@ describe("mesh_list_stations", () => {
     const body = JSON.parse(res.content[0]!.text);
 
     expect(mocks.ensurePresence).toHaveBeenCalledWith(server);
-    // The call must be scoped to the realm hecate_stations was actually found under, not the default.
+    // The call must be scoped to the realm mcl-stations was actually found under, not the default.
     expect(mocks.call).toHaveBeenCalledWith(
-      expect.objectContaining({ procedure: "hecate_stations.list_stations", realm: REALM }),
+      expect.objectContaining({ procedure: "mcl-stations/list_stations", realm: REALM }),
     );
     expect(body.realm).toBe(REALM);
-    expect(body.stations).toEqual([{ node_id: "abc", city: "Paris" }]); // hex-decoded text field
+    // node_id as the plain 64-hex every other tool takes; text is never
+    // hex-decoded, even a value that happens to look like hex.
+    expect(body.stations).toEqual([{ node_id: "ab".repeat(32), city: "Paris", hostname: "0xdeadbeef" }]);
   });
 
-  it("errors clearly, without ever calling list_stations, when hecate_stations isn't advertised", async () => {
+  it("errors clearly, without ever calling list_stations, when mcl-stations isn't advertised", async () => {
     mocks.findRecordsByType.mockResolvedValue({ host: "demo.macula.io:4433", type: 0x06, count: 0, records: [] });
 
     const { registerMeshListStations } = await import("./mesh_stations.js");

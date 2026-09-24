@@ -1,7 +1,7 @@
 // Tools: mesh_recall / mesh_remember — a convenience composition over
-// hecate-rag (hecate-services/hecate-rag), the mesh's realm-bound RAG
+// mcl-rag (macula-services/mcl-rag), the mesh's realm-bound RAG
 // service, on the exact same template mesh_stations.ts already
-// established for hecate_stations: discover which realm the service
+// established for mcl-stations: discover which realm the service
 // is CURRENTLY advertised under (a DHT lookup -- never assume the
 // all-zero default), then call it. This tool hardcodes awareness of
 // that ONE specific service on purpose, unlike mesh_find_records_by_type
@@ -9,9 +9,9 @@
 // service ever exists, this tool would need to pick one or learn to
 // merge them, not today's problem. Generic verb names on purpose too
 // (mesh_recall/mesh_remember, not mesh_rag_search/mesh_rag_ingest) --
-// "this happens to be hecate-rag today" is an implementation detail,
+// "this happens to be mcl-rag today" is an implementation detail,
 // the same way mesh_list_stations hides "this happens to be
-// hecate_stations today" behind its own name.
+// mcl-stations today" behind its own name.
 //
 // This module calls ensurePresence(server) at its own entry point too
 // (2026-08-31, same as every other genuinely mesh-touching tool -- see
@@ -27,15 +27,15 @@
 // reason: this server sees tool args/results, never the model's own
 // reasoning or the human's messages, so it cannot generate "what's
 // worth remembering" itself). Both stay tools an agent calls
-// deliberately -- these two just remove the "which realm is hecate-rag
+// deliberately -- these two just remove the "which realm is mcl-rag
 // on" step, the same ergonomics gap mesh_list_stations already closed
 // for stations.
 //
-// mesh_remember calls hecate-rag's add_knowledge -- one mesh RPC, not
+// mesh_remember calls mcl-rag's add_knowledge -- one mesh RPC, not
 // two. It used to sequence ingest_document then embed_document by hand
 // (the "two steps become one" bar mesh_say's own
 // wait_reply_seconds already established), but add_knowledge (added to
-// hecate-rag the same day this file was first written) does that
+// mcl-rag the same day this file was first written) does that
 // server-side AND fixes the short-text gap the old path had: content
 // under ~80 chars used to produce `chunks: 0` because the chunker skips
 // anything that short; add_knowledge falls back to a single raw chunk
@@ -54,7 +54,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-// Same as mesh_stations.ts and for the identical reason: hecate-rag is
+// Same as mesh_stations.ts and for the identical reason: mcl-rag is
 // ALWAYS called under a discovered non-zero realm. Both the DHT discovery
 // half and the actual realm-scoped call now go through @macula-io/ts --
 // realm support on Session.call (landed in @macula-io/ts 0.12.0) closed
@@ -66,12 +66,12 @@ import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret, findLikelySecret, isExcludedPath } from "./secret_scan.js";
 import { toolDescription } from "./tool_description.js";
 
-const SEARCH_PROCEDURE = "hecate-rag.answer_query";
-const ADD_KNOWLEDGE_PROCEDURE = "hecate-rag.add_knowledge";
-const UPLOAD_KNOWLEDGE_PROCEDURE = "hecate-rag.upload_knowledge";
+const SEARCH_PROCEDURE = "mcl-rag/answer_query";
+const ADD_KNOWLEDGE_PROCEDURE = "mcl-rag/add_knowledge";
+const UPLOAD_KNOWLEDGE_PROCEDURE = "mcl-rag/upload_knowledge";
 
-/** Discovers which realm hecate-rag is CURRENTLY advertised under -- never the all-zero default, matching mesh_list_stations's own reasoning. */
-async function discoverHecateRagRealm(host: string | undefined): Promise<{ realm: string } | { error: string }> {
+/** Discovers which realm mcl-rag is CURRENTLY advertised under -- never the all-zero default, matching mesh_list_stations's own reasoning. */
+async function discoverRagRealm(host: string | undefined): Promise<{ realm: string } | { error: string }> {
   const discovered = await findRecordsByType({
     host,
     recordType: "procedure_advertisement",
@@ -83,7 +83,7 @@ async function discoverHecateRagRealm(host: string | undefined): Promise<{ realm
   if (!match?.procedure_advertisement?.realm) {
     return {
       error:
-        `hecate-rag is not currently advertised on the mesh (checked ${discovered.count} ` +
+        `mcl-rag is not currently advertised on the mesh (checked ${discovered.count} ` +
         `procedure_advertisement record(s) visible from ${host ?? defaultStation()}) -- it may not be ` +
         "deployed, or is unreachable from this station right now.",
     };
@@ -124,8 +124,8 @@ function isDirectoryError(e: unknown): boolean {
 }
 
 const RECALL_DESCRIPTION_FULL =
-  "Query the mesh's shared memory (hecate-rag, a realm-bound RAG service) for anything relevant to " +
-  "query_text -- semantic retrieval, not keyword match. Auto-discovers which realm hecate-rag is " +
+  "Query the mesh's shared memory (mcl-rag, a realm-bound RAG service) for anything relevant to " +
+  "query_text -- semantic retrieval, not keyword match. Auto-discovers which realm mcl-rag is " +
   "currently advertised under, then calls its answer_query capability. Returns whatever chunks other " +
   "agents (or you, earlier) deposited via mesh_remember that are semantically close to the query, " +
   "each with a similarity score, source_path, and chunk metadata. Empty results mean nothing relevant " +
@@ -133,12 +133,12 @@ const RECALL_DESCRIPTION_FULL =
   "want to check shared memory, e.g. early in a session working on a repo others may have touched.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "empty is not an error" and "not automatic". */
 const RECALL_DESCRIPTION_TERSE =
-  "Query the mesh's shared memory (hecate-rag) for anything relevant to query_text -- semantic, not " +
+  "Query the mesh's shared memory (mcl-rag) for anything relevant to query_text -- semantic, not " +
   "keyword match. Returns chunks anyone deposited via mesh_remember, scored. Empty means nothing " +
   "relevant yet, not an error. Not automatic -- call deliberately, e.g. early in a session on a shared repo.";
 
 const REMEMBER_DESCRIPTION_FULL =
-  "Deposit something worth remembering into the mesh's shared memory (hecate-rag) -- one mesh RPC " +
+  "Deposit something worth remembering into the mesh's shared memory (mcl-rag) -- one mesh RPC " +
   "(add_knowledge), so it becomes searchable via mesh_recall for any agent, not just you, in future " +
   "sessions. Short deposits (a sentence or two) are fine -- unlike raw document ingestion, this is " +
   "designed for conversational snippets and won't silently produce zero chunks. Be deliberate about " +
@@ -147,16 +147,16 @@ const REMEMBER_DESCRIPTION_FULL =
   "you wouldn't want another agent or operator reading.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The shared/unencrypted privacy warning is safety-relevant, kept at full force. */
 const REMEMBER_DESCRIPTION_TERSE =
-  "Deposit something worth remembering into shared mesh memory (hecate-rag), searchable via mesh_recall " +
+  "Deposit something worth remembering into shared mesh memory (mcl-rag), searchable via mesh_recall " +
   "by any agent, not just you. Short snippets are fine. SHARED, NOT PRIVATE, and unencrypted -- same " +
   "caveat as mesh_say. Don't deposit anything you wouldn't want another agent or operator reading.";
 
 const REMEMBER_DIRECTORY_DESCRIPTION_FULL =
   "Recursively ingest every matching file under a LOCAL directory into the mesh's shared memory " +
-  "(hecate-rag), one hecate-rag.upload_knowledge call per file -- for real documents (a corpus, a " +
+  "(mcl-rag), one mcl-rag/upload_knowledge call per file -- for real documents (a corpus, a " +
   "set of notes), not conversational snippets (use mesh_remember for those). Each file's content " +
-  "travels in its own mesh call, so this works regardless of where hecate-rag is physically running " +
-  "-- it does NOT ask hecate-rag to read from its own filesystem (hecate-rag's seed_corpus does that, " +
+  "travels in its own mesh call, so this works regardless of where mcl-rag is physically running " +
+  "-- it does NOT ask mcl-rag to read from its own filesystem (mcl-rag's seed_corpus does that, " +
   "and isn't reachable over the mesh at all). document_id is derived deterministically from each " +
   "file's relative path, so re-running this on the same directory updates existing documents instead " +
   "of duplicating them. Binary or undecodable files are skipped, not treated as errors. Processes " +
@@ -164,7 +164,7 @@ const REMEMBER_DIRECTORY_DESCRIPTION_FULL =
   "is a summary (counts + any per-file failures), not a per-file log.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "re-running updates, doesn't duplicate" and the sequential/slow-for-large-directories caveat. */
 const REMEMBER_DIRECTORY_DESCRIPTION_TERSE =
-  "Recursively ingest matching files under a LOCAL directory into shared mesh memory (hecate-rag), one " +
+  "Recursively ingest matching files under a LOCAL directory into shared mesh memory (mcl-rag), one " +
   "call per file -- for real documents/corpora, not conversational snippets (use mesh_remember for " +
   "those). Re-running the same directory updates existing documents, doesn't duplicate. Sequential, " +
   "one file at a time -- a large directory takes a while; response is a summary, not a per-file log.";
@@ -184,7 +184,7 @@ export function registerMeshMemory(server: McpServer): void {
     async ({ query_text, top_k, host }) => {
       ensurePresence(server);
       try {
-        const discovery = await discoverHecateRagRealm(host);
+        const discovery = await discoverRagRealm(host);
         if ("error" in discovery) return errorContent(discovery.error);
         const res = await call({
           host,
@@ -218,7 +218,7 @@ export function registerMeshMemory(server: McpServer): void {
       try {
         assertNoLikelySecret(content, "content");
         if (topics !== undefined) assertNoLikelySecret(topics, "topics");
-        const discovery = await discoverHecateRagRealm(host);
+        const discovery = await discoverRagRealm(host);
         if ("error" in discovery) return errorContent(discovery.error);
 
         const res = await call({
@@ -271,7 +271,7 @@ export function registerMeshMemory(server: McpServer): void {
         return errorContent(`could not read directory ${directory}: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      const discovery = await discoverHecateRagRealm(host);
+      const discovery = await discoverRagRealm(host);
       if ("error" in discovery) return errorContent(discovery.error);
 
       const ingested: { path: string; document_id: string; chunks: number }[] = [];

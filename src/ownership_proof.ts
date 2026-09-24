@@ -1,8 +1,7 @@
 // Ownership proof, verifier side: the same {node_id, timestamp, procedure}
-// signature macula-cli's `identity sign` produces and hecate-citizens'
-// citizen_ownership_proof / hecate-mail's mailbox_ownership_proof verify
-// -- reimplemented here so an agent can verify a ring (rings.ts) from
-// another agent without a hecate service in the loop. The signed
+// signature macula-cli's `identity sign` produces, reimplemented here so an
+// agent can verify a ring (rings.ts) from another agent with no service in
+// the loop. The signed
 // message MUST match those verifiers byte for byte: node_id (32 raw
 // bytes) ++ timestamp (8 bytes, big-endian) ++ procedure (raw UTF-8),
 // no delimiters, no length prefixes. A Macula node id IS the raw

@@ -421,7 +421,7 @@ const REALM_PREFIXED_PROCEDURE = /^([0-9a-fA-F]{64})\/(.+)$/;
  * the realm passed separately. An agent that copies the printed form
  * straight into `procedure` gets `unknown_next_peer` for a service that
  * is up and answers the bare name -- seen live 2026-09-02 from a fresh
- * opencode install, every hand-written call to hecate-rag failing while
+ * opencode install, every hand-written call to mcl-rag failing while
  * `mesh_recall` (which builds the name itself) got through. So the
  * prefix is split off here and becomes the realm; a `realm` passed
  * alongside must agree with it, or the call is refused before it goes

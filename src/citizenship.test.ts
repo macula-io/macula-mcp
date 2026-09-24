@@ -82,47 +82,43 @@ describe("register", () => {
     vi.resetAllMocks();
   });
 
-  it("signs with this identity, discovers the realm, calls register_presence with the proof merged in, and reports the outcome", async () => {
-    mocks.signOwnershipProof.mockReturnValue({ node_id: NODE, timestamp: 1_756_857_600_000, signature: SIG });
+  // mcl-citizens registers the CALL's verified caller: macula signs every CALL
+  // with the caller's identity key and the provider verifies it, so nothing is
+  // signed here and neither a proof nor a citizen_did travels in the payload.
+  it("discovers the realm, calls register_presence with no proof and no citizen_did, and reports the outcome", async () => {
     mocks.discoverProcedureRealm.mockResolvedValue(REALM);
     mocks.callThenDirect.mockResolvedValue({ procedure: REGISTER_PROCEDURE, payload: { ok: 1, expires_at: 999 }, duration_ms: 10 });
     const { register } = await import("./citizenship.js");
-    const res = await register({ nodeId: NODE, displayName: "raf" });
+    const res = await register({ displayName: "raf" });
     expect(res).toEqual({ realm: REALM, expires_at: 999 });
     expect(mocks.callThenDirect).toHaveBeenCalledWith(
       expect.objectContaining({
         procedure: REGISTER_PROCEDURE,
         realm: REALM,
         identityPath: IDENTITY_PATH,
-        callArgs: expect.objectContaining({ citizen_did: NODE, proof: { timestamp: 1_756_857_600_000, signature: SIG }, display_name: "raf" }),
+        callArgs: { citizen_kind: CITIZEN_KIND, display_name: "raf", offers: OFFERS },
       }),
     );
+    expect(mocks.signOwnershipProof).not.toHaveBeenCalled();
   });
 
-  it("refuses when the signed proof names a different node id than presence announced (a stale or overridden identity)", async () => {
-    mocks.signOwnershipProof.mockReturnValue({ node_id: "e".repeat(64), timestamp: 1, signature: SIG });
+  it("reports the directory's text refusal", async () => {
     mocks.discoverProcedureRealm.mockResolvedValue(REALM);
+    mocks.callThenDirect.mockResolvedValue({ procedure: REGISTER_PROCEDURE, payload: { ok: 0, error: "invalid_ttl_ms" }, duration_ms: 3 });
     const { register } = await import("./citizenship.js");
-    await expect(register({ nodeId: NODE, displayName: "raf" })).rejects.toThrow(/identity sign returned node_id/);
-    expect(mocks.callThenDirect).not.toHaveBeenCalled();
+    await expect(register({ nodeId: NODE, displayName: "raf" })).rejects.toThrow(/mcl-citizens\/register_presence refused: invalid_ttl_ms/);
   });
 });
 
 describe("registerArgs", () => {
-  it("is the hecate_citizens.register_presence payload: hex did, signed timestamp, hex signature, agent kind, offers", () => {
-    const args = registerArgs({ nodeId: NODE, timestamp: 1788352709318, signature: SIG, displayName: "raf" });
-    expect(args).toEqual({
-      citizen_did: NODE,
-      proof: { timestamp: 1788352709318, signature: SIG },
-      citizen_kind: CITIZEN_KIND,
-      display_name: "raf",
-      offers: OFFERS,
-    });
-    expect(REGISTER_PROCEDURE).toBe("hecate_citizens.register_presence");
+  it("is the mcl-citizens/register_presence payload: kind, name and offers, and no proof or citizen_did", () => {
+    const args = registerArgs({ displayName: "raf" });
+    expect(args).toEqual({ citizen_kind: CITIZEN_KIND, display_name: "raf", offers: OFFERS });
+    expect(REGISTER_PROCEDURE).toBe("mcl-citizens/register_presence");
   });
 
   it("puts no boolean anywhere on the wire", () => {
-    const args = registerArgs({ nodeId: NODE, timestamp: 1, signature: SIG, displayName: "x" });
+    const args = registerArgs({ displayName: "x" });
     const values = (v: unknown): unknown[] =>
       v && typeof v === "object" ? Object.values(v as object).flatMap(values) : [v];
     expect(values(args).some((v) => typeof v === "boolean")).toBe(false);

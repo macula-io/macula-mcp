@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 // Boundary mock, same pattern as mesh_stations.test.ts/rooms.test.ts: replace
 // the module mesh_memory.ts talks to the mesh THROUGH (macula_ts_client.js)
-// -- both the DHT discovery half and the actual hecate-rag call go through
+// -- both the DHT discovery half and the actual mcl-rag call go through
 // it now that realm support landed, so this is the one seam to mock.
 vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, findRecordsByType: mocks.findRecordsByType }));
 vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
@@ -78,7 +78,7 @@ describe("documentIdFor", () => {
 describe("isExcluded", () => {
   it("excludes a path with a matching directory segment anywhere in the tree", async () => {
     const { isExcluded, DEFAULT_EXCLUDE_DIRS } = await import("./mesh_memory.js");
-    expect(isExcluded("apps/hecate_rag/_build/lib/rag.md", DEFAULT_EXCLUDE_DIRS)).toBe(true);
+    expect(isExcluded("apps/mcl_rag/_build/lib/rag.md", DEFAULT_EXCLUDE_DIRS)).toBe(true);
     expect(isExcluded("_build/rag.md", DEFAULT_EXCLUDE_DIRS)).toBe(true);
     expect(isExcluded("deeply/nested/node_modules/pkg/readme.md", DEFAULT_EXCLUDE_DIRS)).toBe(true);
   });
@@ -97,14 +97,14 @@ describe("isExcluded", () => {
 });
 
 describe("mesh_recall", () => {
-  it("discovers hecate-rag's current realm via the DHT, then calls answer_query under it", async () => {
+  it("discovers mcl-rag's current realm via the DHT, then calls answer_query under it", async () => {
     mocks.findRecordsByType.mockResolvedValue({
       host: "demo.macula.io:4433",
       type: 0x06,
       count: 1,
-      records: [adFor("hecate-rag.add_knowledge", REALM)],
+      records: [adFor("mcl-rag/add_knowledge", REALM)],
     });
-    mocks.call.mockResolvedValue({ procedure: "hecate-rag.answer_query", payload: { hits: [{ score: 0.9 }] }, duration_ms: 5 });
+    mocks.call.mockResolvedValue({ procedure: "mcl-rag/answer_query", payload: { hits: [{ score: 0.9 }] }, duration_ms: 5 });
 
     const { registerMeshMemory } = await import("./mesh_memory.js");
     const { server, getHandler } = fakeServer();
@@ -114,12 +114,12 @@ describe("mesh_recall", () => {
 
     expect(mocks.ensurePresence).toHaveBeenCalledWith(server);
     expect(mocks.call).toHaveBeenCalledWith(
-      expect.objectContaining({ procedure: "hecate-rag.answer_query", realm: REALM, callArgs: { query_text: "vertical slicing", top_k: undefined } }),
+      expect.objectContaining({ procedure: "mcl-rag/answer_query", realm: REALM, callArgs: { query_text: "vertical slicing", top_k: undefined } }),
     );
     expect(body).toEqual({ realm: REALM, hits: [{ score: 0.9 }] });
   });
 
-  it("errors clearly, without ever calling answer_query, when hecate-rag isn't advertised", async () => {
+  it("errors clearly, without ever calling answer_query, when mcl-rag isn't advertised", async () => {
     mocks.findRecordsByType.mockResolvedValue({ host: "demo.macula.io:4433", type: 0x06, count: 0, records: [] });
 
     const { registerMeshMemory } = await import("./mesh_memory.js");
@@ -134,14 +134,14 @@ describe("mesh_recall", () => {
 });
 
 describe("mesh_remember", () => {
-  it("discovers hecate-rag's current realm, then calls add_knowledge under it with the deposited content", async () => {
+  it("discovers mcl-rag's current realm, then calls add_knowledge under it with the deposited content", async () => {
     mocks.findRecordsByType.mockResolvedValue({
       host: "demo.macula.io:4433",
       type: 0x06,
       count: 1,
-      records: [adFor("hecate-rag.add_knowledge", REALM)],
+      records: [adFor("mcl-rag/add_knowledge", REALM)],
     });
-    mocks.call.mockResolvedValue({ procedure: "hecate-rag.add_knowledge", payload: { chunks: 1 }, duration_ms: 8 });
+    mocks.call.mockResolvedValue({ procedure: "mcl-rag/add_knowledge", payload: { chunks: 1 }, duration_ms: 8 });
 
     const { registerMeshMemory } = await import("./mesh_memory.js");
     const { server, getHandler } = fakeServer();
@@ -153,7 +153,7 @@ describe("mesh_remember", () => {
 
     expect(mocks.call).toHaveBeenCalledWith(
       expect.objectContaining({
-        procedure: "hecate-rag.add_knowledge",
+        procedure: "mcl-rag/add_knowledge",
         realm: REALM,
         callArgs: { text: "vertical slices co-locate command, event, handler", source_label: "notes", topics: undefined },
       }),
@@ -163,7 +163,7 @@ describe("mesh_remember", () => {
 });
 
 describe("mesh_remember_directory", () => {
-  it("discovers hecate-rag's realm once, then calls upload_knowledge under it for each matching file", async () => {
+  it("discovers mcl-rag's realm once, then calls upload_knowledge under it for each matching file", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mesh-memory-test-"));
     writeFileSync(join(dir, "a.md"), "# hello");
     writeFileSync(join(dir, "skip.bin"), "not included");
@@ -172,9 +172,9 @@ describe("mesh_remember_directory", () => {
         host: "demo.macula.io:4433",
         type: 0x06,
         count: 1,
-        records: [adFor("hecate-rag.add_knowledge", REALM)],
+        records: [adFor("mcl-rag/add_knowledge", REALM)],
       });
-      mocks.call.mockResolvedValue({ procedure: "hecate-rag.upload_knowledge", payload: { chunks: 2 }, duration_ms: 9 });
+      mocks.call.mockResolvedValue({ procedure: "mcl-rag/upload_knowledge", payload: { chunks: 2 }, duration_ms: 9 });
 
       const { registerMeshMemory } = await import("./mesh_memory.js");
       const { server, getHandler } = fakeServer();
@@ -183,7 +183,7 @@ describe("mesh_remember_directory", () => {
       const body = JSON.parse(res.content[0]!.text);
 
       expect(mocks.call).toHaveBeenCalledTimes(1); // only a.md matches the default include_extensions
-      expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ procedure: "hecate-rag.upload_knowledge", realm: REALM }));
+      expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ procedure: "mcl-rag/upload_knowledge", realm: REALM }));
       expect(body).toMatchObject({ realm: REALM, ingested_count: 1, failed_count: 0, total_chunks: 2 });
     } finally {
       rmSync(dir, { recursive: true, force: true });

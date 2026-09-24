@@ -23,10 +23,9 @@
 //
 // Proof of possession: the session is created with a signature over
 // {node_id, timestamp, "macula_realm.join_session"} from the same
-// identity, built with ownership_proof.ts's proofMessage() (the exact
-// byte layout hecate-citizens'/hecate-mail's *_ownership_proof verifiers
-// require: node_id 32 raw bytes ++ timestamp 8 bytes big-endian ++
-// procedure raw UTF-8, no delimiters) and signed in-process with
+// identity, built with ownership_proof.ts's proofMessage() (node_id 32
+// raw bytes ++ timestamp 8 bytes big-endian ++ procedure raw UTF-8, no
+// delimiters) and signed in-process with
 // @macula-io/ts's Identity.sign() -- no macula-cli subprocess -- so
 // nobody can create a session for a key they do not hold and talk a
 // person into confirming it. The procedure string is part of the signed

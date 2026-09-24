@@ -1,33 +1,26 @@
 // Citizenship: this agent's entry in the mesh-wide citizens directory
-// (hecate-citizens), so it is addressable there the same way a spartan
-// mind or a human via macula-passport is.
+// (mcl-citizens), so other agents and services can find it by its node id.
 //
 // Presence (presence.ts) makes an agent VISIBLE to other agents: an
 // agent.hello heartbeat any other macula-mcp roster picks up. It does not
-// make it a citizen. hecate-citizens is the directory every hecate service
-// queries -- hecate-mail delegates to a citizen_did it finds there, a
-// spartan mind is registered there (hecate-spartan's citizen_registration)
-// -- and an agent that never registers simply does not exist to any of
-// them. Found 2026-09-02 on a fresh opencode install: presence worked,
-// the agent was on every roster, and it still "could not do much on the
-// mesh" because nothing had ever created a citizen_did for it.
+// make it a citizen. mcl-citizens is the directory services consult to find
+// who exists, and an agent that never registers does not exist to them.
+// Found 2026-09-02 on a fresh opencode install: presence worked, the agent
+// was on every roster, and it still "could not do much on the mesh" because
+// nothing had ever registered it.
 //
-// The citizen_did IS the default identity's node_id (raw 32-byte Ed25519
-// pubkey, hex) -- the same one mesh_call/mesh_publish act as and the one
-// agent.hello announces. No new key: the whole point of the ownership
-// proof hecate_citizens.register_presence demands is that only the holder
-// of that key can register it, and signIdentity() below (Identity.sign()
-// via @macula-io/ts, no subprocess -- see macula_ts_client.ts's
-// signOwnershipProof) produces exactly that proof from the default
-// identity file. register()'s realm discovery (macula_ts_client.ts's
-// discoverProcedureRealm) is in-process too, the same DHT
-// find-records-by-type + filter mesh_stations.ts/mesh_memory.ts do
-// inline for their own single call sites.
+// The citizen is the default identity, the one mesh_call/mesh_publish act
+// as and agent.hello announces. mcl-citizens/register_presence registers
+// the CALL's caller, which macula signs end to end with that identity's key
+// and the provider verifies, so no proof travels in the payload and nothing
+// is signed here. register()'s realm discovery (macula_ts_client.ts's
+// discoverProcedureRealm) is in-process, the same DHT find-records-by-type
+// + filter mesh_stations.ts/mesh_memory.ts do inline for their own calls.
 //
-// Registration is presence, not identity: entries expire (hecate-citizens'
-// own TTL is ~20 min), so this re-registers every DEFAULT_RENEW_SECONDS,
-// the same ~4x margin hecate-spartan's minds keep. Stops with presence
-// (mesh_goodbye), and the entry ages out on its own after that.
+// Registration is presence, not identity: entries expire (mcl-citizens
+// keeps one at most twenty minutes), so this re-registers every
+// DEFAULT_RENEW_SECONDS, a ~4x margin. Stops with presence (mesh_goodbye),
+// and the entry ages out on its own after that.
 //
 // Fire-and-forget at the mesh level, bounded at the call level: presence
 // start awaits the first registration up to FIRST_ATTEMPT_TIMEOUT_MS so
@@ -41,7 +34,7 @@
 import { defaultIdentityPath } from "./mesh_config.js";
 import { callThenDirect as callThenDirectTs, discoverProcedureRealm, signOwnershipProof, type TsCallResult, type TsIdentitySignResult } from "./macula_ts_client.js";
 
-export const REGISTER_PROCEDURE = "hecate_citizens.register_presence";
+export const REGISTER_PROCEDURE = "mcl-citizens/register_presence";
 export const CITIZEN_KIND = "agent";
 export const OFFERS = ["conversation"];
 export const DEFAULT_RENEW_SECONDS = 300;
@@ -101,19 +94,13 @@ export function displayName(operatorName: string | undefined, connectedVia: stri
 
 /**
  * The register_presence payload. Pure, so the wire shape is testable
- * without a mesh: citizen_did and the signature are hex text (what
- * hecate-citizens' citizen_ownership_proof decodes), the timestamp is the
- * one that was signed, and nothing here is a boolean.
+ * without a mesh. No proof and no citizen_did: mcl-citizens registers the
+ * CALL's caller, which macula signs end to end with this identity's key and
+ * the provider verifies, so the payload carries only what the directory
+ * shows. Nothing here is a boolean.
  */
-export function registerArgs(input: {
-  nodeId: string;
-  timestamp: number;
-  signature: string;
-  displayName: string;
-}): Record<string, unknown> {
+export function registerArgs(input: { displayName: string }): Record<string, unknown> {
   return {
-    citizen_did: input.nodeId,
-    proof: { timestamp: input.timestamp, signature: input.signature },
     citizen_kind: CITIZEN_KIND,
     display_name: input.displayName,
     offers: OFFERS,
@@ -151,7 +138,7 @@ function readOk(payload: unknown): { ok: boolean; expires_at?: number; error?: s
 /**
  * A plain (gossip-routed) call, then the same call direct-dialled if the
  * plain one fails. The plain route depends on inter-station gossip
- * having carried a route to hecate-citizens' own station; during a
+ * having carried a route to mcl-citizens' own station; during a
  * fleet rollout that route is exactly what is missing for a minute or
  * two (seen live 2026-09-02 as temporary_relay_failure on the very first
  * registration of a fresh install), while the service's own direct-dial
@@ -182,13 +169,9 @@ export function signIdentity(procedure: string): TsIdentitySignResult {
 }
 
 /** One registration attempt against the directory. Throws on any failure; callers record, never propagate. */
-export async function register(input: { host?: string; nodeId: string; displayName: string }): Promise<{ realm: string; expires_at?: number }> {
+export async function register(input: { host?: string; displayName: string }): Promise<{ realm: string; expires_at?: number }> {
   const realm = await discoverProcedureRealm({ host: input.host, procedure: REGISTER_PROCEDURE, identityPath: defaultIdentityPath() });
-  const signed = signIdentity(REGISTER_PROCEDURE);
-  if (signed.node_id !== input.nodeId) {
-    throw new Error(`identity sign returned node_id ${signed.node_id}, presence announced ${input.nodeId}`);
-  }
-  const callArgs = registerArgs({ nodeId: signed.node_id, timestamp: signed.timestamp, signature: signed.signature, displayName: input.displayName });
+  const callArgs = registerArgs({ displayName: input.displayName });
   const res = await callThenDirect({ host: input.host, procedure: REGISTER_PROCEDURE, realm, timeoutMs: CALL_TIMEOUT_MS, callArgs });
   const outcome = readOk(res.payload);
   if (!outcome.ok) throw new Error(`${REGISTER_PROCEDURE} refused: ${outcome.error ?? "no reason given"}`);
@@ -201,7 +184,7 @@ async function attempt(): Promise<void> {
   if (s.inFlight) return; // a renewal must never stack on a slow first attempt
   s.inFlight = true;
   try {
-    const { realm, expires_at } = await register({ host: s.host, nodeId: s.nodeId, displayName: s.displayName });
+    const { realm, expires_at } = await register({ host: s.host, displayName: s.displayName });
     s.realm = realm;
     s.expiresAt = expires_at;
     s.registeredAt = new Date().toISOString();
