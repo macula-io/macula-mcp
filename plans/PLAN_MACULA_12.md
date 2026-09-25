@@ -81,5 +81,10 @@ A 12 pool pins every station by node_id and trusts a realm only by its key.
   advertised on the fleet).
 - [x] Depend on `@macula-io/ts` ^0.18.0 (published 2026-09-25 with
   provenance, tag v0.18.0 at 494c4a9); package-lock.json refreshed.
-- [ ] Once stations run 0.6.4: the live check's ring and serve steps pass,
-  then the release.
+- [x] Ring and serve checked on a station that admits a node's own namespace
+  (lab station, macula-station main e3f1eb4, 2026-09-25): `mesh_ring` accepted
+  with `joined: 1` in 70 ms, `mesh_call ~<callee>/echo` (served by
+  `mesh_serve`) in 43 ms. mcl-echo and mcl-stations are not on the isolated
+  lab station, so those two steps fail there by construction.
+- [ ] Once the fleet runs 0.6.4: the fleet live check's ring and serve steps
+  pass, then the release.
