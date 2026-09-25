@@ -13,7 +13,7 @@
 BUILD. The move onto @macula-io/ts 0.18 (macula-go's pool on the 12 wire).
 **The release is held until self-named serving (`~<node id>/<name>`) is live
 on the fleet, SDK and stations (Raf, 2026-09-24).** SDK: done, macula-go
-v0.11.0 (tagged 9753be2) and macula-ts main 46fbf3d; ts 0.18.0 tag pending.
+v0.11.0 (tagged 9753be2) and @macula-io/ts 0.18.0 (tagged 494c4a9, on npm).
 Stations: 0.6.4 (own-namespace admission) not released; the fleet runs 0.6.2.
 
 ## Decisions (Raf, via the Supervisor, 2026-09-24)
@@ -79,8 +79,7 @@ A 12 pool pins every station by node_id and trusts a realm only by its key.
   `~callee/echo` (stations refuse own-namespace advertisements before 0.6.4),
   citizenship and `mesh_list_stations` (mcl-citizens and mcl-stations are not
   advertised on the fleet).
-- [ ] Depend on `@macula-io/ts` ^0.18.0 (and refresh package-lock.json) once
-  0.18.0 is published; until then the branch is tested against a local pack
-  of macula-ts main.
+- [x] Depend on `@macula-io/ts` ^0.18.0 (published 2026-09-25 with
+  provenance, tag v0.18.0 at 494c4a9); package-lock.json refreshed.
 - [ ] Once stations run 0.6.4: the live check's ring and serve steps pass,
   then the release.
