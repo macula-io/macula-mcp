@@ -146,8 +146,9 @@ export function isAllowlisted(policy: ContactPolicy, nodeId: string): boolean {
 // roster.ts stores whatever the last hello claimed. Trusting a self-asserted
 // label would let any stranger type "Raf's fleet" into operator_name and be
 // auto-accepted. node_id is the one thing here that is actually a
-// cryptographic identity (every ring is signed over it, verified by
-// ownership_proof.ts) -- it is the only fit for a security boundary.
+// cryptographic identity (every ring is a CALL signed by the caller's key,
+// verified before the handler sees its node_id) -- it is the only fit for
+// a security boundary.
 // petname.ts is used the other way around: mesh_trust_agent.ts echoes
 // petname(node_id) back so a human/model can eyeball "is this the peer I
 // meant" the same way mesh_ring/mesh_answer_ring already do, but it is

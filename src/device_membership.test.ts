@@ -2,20 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
 const SIG = "ab".repeat(64);
-const IDENTITY_PATH = "/tmp/macula-mcp-test-identity.seed";
+const CARRIED = Buffer.alloc(3118, 7).toString("base64");
+const PROOF = { public_key: CARRIED, timestamp: 1_756_857_600_000, signature: SIG };
 
-// Same boundary-mock pattern as citizenship.test.ts: replace the module
-// device_membership.ts talks to the mesh THROUGH, not the mesh client
-// library itself.
+// Boundary mock: the client layer device_membership proves and calls through.
 const mocks = vi.hoisted(() => ({
-  signOwnershipProof: vi.fn(),
-  callThenDirect: vi.fn(),
+  proveKeyPossession: vi.fn(),
+  call: vi.fn(),
+  selfNodeId: vi.fn(),
   loadCredential: vi.fn(),
   storeCredential: vi.fn(),
 }));
 vi.mock("./macula_ts_client.js", () => ({
-  signOwnershipProof: mocks.signOwnershipProof,
-  callThenDirect: mocks.callThenDirect,
+  proveKeyPossession: mocks.proveKeyPossession,
+  call: mocks.call,
+  selfNodeId: mocks.selfNodeId,
 }));
 vi.mock("./realm.js", () => ({
   loadCredential: mocks.loadCredential,
@@ -23,19 +24,12 @@ vi.mock("./realm.js", () => ({
 }));
 
 beforeEach(() => {
-  process.env.MACULA_MCP_IDENTITY = IDENTITY_PATH;
+  mocks.selfNodeId.mockResolvedValue(NODE);
+  mocks.proveKeyPossession.mockResolvedValue(PROOF);
 });
 afterEach(() => {
-  delete process.env.MACULA_MCP_IDENTITY;
   delete process.env.MACULA_MCP_AUTOJOIN_REALM;
   vi.resetAllMocks();
-});
-
-describe("realmId", () => {
-  it("is sha256(name), hex, uppercase -- matches macula_realm:id/1 and the live-proven io.macula id", async () => {
-    const { realmId } = await import("./device_membership.js");
-    expect(realmId("io.macula")).toBe("ABB81B5A614B63551B400B810648C0C8A78EFAD845442630C94B46CC95D2FCD1");
-  });
 });
 
 describe("membershipUcanProcedure", () => {
@@ -63,26 +57,16 @@ describe("autoJoinRealmName", () => {
 });
 
 describe("deviceJoinArgs", () => {
-  it("base64-encodes the pubkey (DeviceKeyOwnershipProof.decode_pubkey expects Base.decode64), keeps the hex-signed proof, omits ttl_seconds when not given", async () => {
+  it("carries the key as carried (base64) and the proof over it, omitting ttl_seconds when not given", async () => {
     const { deviceJoinArgs } = await import("./device_membership.js");
-    const args = deviceJoinArgs({ nodeId: NODE, timestamp: 1788352709318, signature: SIG });
-    expect(args).toEqual({
-      public_key: Buffer.from(NODE, "hex").toString("base64"),
-      proof: { timestamp: 1788352709318, signature: SIG },
-    });
-  });
-
-  it("includes ttl_seconds when given", async () => {
-    const { deviceJoinArgs } = await import("./device_membership.js");
-    const args = deviceJoinArgs({ nodeId: NODE, timestamp: 1, signature: SIG, ttlSeconds: 3600 });
-    expect(args).toMatchObject({ ttl_seconds: 3600 });
+    expect(deviceJoinArgs(PROOF)).toEqual({ public_key: CARRIED, proof: { timestamp: PROOF.timestamp, signature: SIG } });
+    expect(deviceJoinArgs(PROOF, 3600)).toMatchObject({ ttl_seconds: 3600 });
   });
 
   it("puts no boolean anywhere on the wire", async () => {
     const { deviceJoinArgs } = await import("./device_membership.js");
-    const args = deviceJoinArgs({ nodeId: NODE, timestamp: 1, signature: SIG, ttlSeconds: 60 });
     const values = (v: unknown): unknown[] => (v && typeof v === "object" ? Object.values(v as object).flatMap(values) : [v]);
-    expect(values(args).some((v) => typeof v === "boolean")).toBe(false);
+    expect(values(deviceJoinArgs(PROOF, 60)).some((v) => typeof v === "boolean")).toBe(false);
   });
 });
 
@@ -112,28 +96,32 @@ describe("parseMembershipUcanResult", () => {
 });
 
 describe("joinDevice", () => {
-  it("signs a DeviceKeyOwnershipProof bound to MEMBERSHIP_UCAN_PROOF_PROCEDURE (never the citizen-directory's proof procedure), calls issue_membership_ucan plain-then-direct-dial at the target realm's own id, and returns a device-tier credential", async () => {
-    mocks.signOwnershipProof.mockReturnValue({ node_id: NODE, timestamp: 1_756_857_600_000, signature: SIG });
-    mocks.callThenDirect.mockResolvedValue({ procedure: "io.macula/_realm/_realm/identity/issue_membership_ucan_v1", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 10 });
-    const { joinDevice, membershipUcanProcedure, MEMBERSHIP_UCAN_PROOF_PROCEDURE, realmId } = await import("./device_membership.js");
+  it("proves possession of this node's key for MEMBERSHIP_UCAN_PROOF_PROCEDURE, calls issue_membership_ucan in the realm named, and returns a device-tier credential", async () => {
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 10 });
+    const { joinDevice, membershipUcanProcedure, MEMBERSHIP_UCAN_PROOF_PROCEDURE } = await import("./device_membership.js");
+    const { realmIdOf } = await import("./mesh_config.js");
 
     const cred = await joinDevice({ realmName: "io.macula" });
 
-    expect(mocks.signOwnershipProof).toHaveBeenCalledWith(IDENTITY_PATH, MEMBERSHIP_UCAN_PROOF_PROCEDURE);
-    expect(mocks.callThenDirect).toHaveBeenCalledWith(
+    expect(mocks.proveKeyPossession).toHaveBeenCalledWith(MEMBERSHIP_UCAN_PROOF_PROCEDURE);
+    expect(mocks.call).toHaveBeenCalledWith(
       expect.objectContaining({
         procedure: membershipUcanProcedure("io.macula"),
-        realm: realmId("io.macula"),
-        identityPath: IDENTITY_PATH,
-        callArgs: expect.objectContaining({ proof: { timestamp: 1_756_857_600_000, signature: SIG } }),
+        realm: realmIdOf("io.macula"),
+        callArgs: { public_key: CARRIED, proof: { timestamp: PROOF.timestamp, signature: SIG } },
       }),
     );
     expect(cred).toMatchObject({ node_id: NODE, citizen_did: NODE, ucan: "eyJ.fake.token", tier: "device", portal: "io.macula" });
   });
 
+  it("refuses a reply naming another node than this one", async () => {
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: "ff".repeat(32), ucan: "eyJ.fake.token" }, duration_ms: 10 });
+    const { joinDevice } = await import("./device_membership.js");
+    await expect(joinDevice({ realmName: "io.macula" })).rejects.toThrow(/names ff/);
+  });
+
   it("propagates a call failure as-is", async () => {
-    mocks.signOwnershipProof.mockReturnValue({ node_id: NODE, timestamp: 1, signature: SIG });
-    mocks.callThenDirect.mockRejectedValue(new Error("unknown_next_peer"));
+    mocks.call.mockRejectedValue(new Error("unknown_next_peer"));
     const { joinDevice } = await import("./device_membership.js");
     await expect(joinDevice({ realmName: "io.macula" })).rejects.toThrow(/unknown_next_peer/);
   });
@@ -144,7 +132,7 @@ describe("ensureAutoJoin", () => {
     const { ensureAutoJoin } = await import("./device_membership.js");
     await ensureAutoJoin({ nodeId: NODE });
     expect(mocks.loadCredential).not.toHaveBeenCalled();
-    expect(mocks.callThenDirect).not.toHaveBeenCalled();
+    expect(mocks.call).not.toHaveBeenCalled();
   });
 
   it("does nothing when this identity already has ANY credential -- never downgrades or duplicates an existing membership", async () => {
@@ -152,15 +140,14 @@ describe("ensureAutoJoin", () => {
     mocks.loadCredential.mockReturnValue({ node_id: NODE, tier: "citizen" });
     const { ensureAutoJoin } = await import("./device_membership.js");
     await ensureAutoJoin({ nodeId: NODE });
-    expect(mocks.callThenDirect).not.toHaveBeenCalled();
+    expect(mocks.call).not.toHaveBeenCalled();
     expect(mocks.storeCredential).not.toHaveBeenCalled();
   });
 
   it("joins and stores a device-tier credential when the feature is on and nothing exists yet", async () => {
     process.env.MACULA_MCP_AUTOJOIN_REALM = "io.macula";
     mocks.loadCredential.mockReturnValue(undefined);
-    mocks.signOwnershipProof.mockReturnValue({ node_id: NODE, timestamp: 1, signature: SIG });
-    mocks.callThenDirect.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 1 });
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 1 });
     const { ensureAutoJoin } = await import("./device_membership.js");
     await ensureAutoJoin({ nodeId: NODE });
     expect(mocks.storeCredential).toHaveBeenCalledWith(expect.objectContaining({ node_id: NODE, tier: "device", ucan: "eyJ.fake.token" }));
@@ -169,8 +156,7 @@ describe("ensureAutoJoin", () => {
   it("never throws -- a directory/realm being unreachable must never take presence down with it", async () => {
     process.env.MACULA_MCP_AUTOJOIN_REALM = "io.macula";
     mocks.loadCredential.mockReturnValue(undefined);
-    mocks.signOwnershipProof.mockReturnValue({ node_id: NODE, timestamp: 1, signature: SIG });
-    mocks.callThenDirect.mockRejectedValue(new Error("unknown_next_peer"));
+    mocks.call.mockRejectedValue(new Error("unknown_next_peer"));
     const { ensureAutoJoin } = await import("./device_membership.js");
     await expect(ensureAutoJoin({ nodeId: NODE })).resolves.toBeUndefined();
     expect(mocks.storeCredential).not.toHaveBeenCalled();

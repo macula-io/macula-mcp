@@ -8,14 +8,14 @@ const REALM = "abb81b5a614b63551b400b810648c0c8a78efad845442630c94b46cc95d2fcd1"
 
 const mocks = vi.hoisted(() => ({
   call: vi.fn(),
-  findRecordsByType: vi.fn(),
+  discoverProcedureRealm: vi.fn(),
   ensurePresence: vi.fn(),
 }));
 // Boundary mock, same pattern as mesh_stations.test.ts/rooms.test.ts: replace
 // the module mesh_memory.ts talks to the mesh THROUGH (macula_ts_client.js)
 // -- both the DHT discovery half and the actual mcl-rag call go through
 // it now that realm support landed, so this is the one seam to mock.
-vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, findRecordsByType: mocks.findRecordsByType }));
+vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, discoverProcedureRealm: mocks.discoverProcedureRealm }));
 vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<unknown>;
@@ -98,12 +98,7 @@ describe("isExcluded", () => {
 
 describe("mesh_recall", () => {
   it("discovers mcl-rag's current realm via the DHT, then calls answer_query under it", async () => {
-    mocks.findRecordsByType.mockResolvedValue({
-      host: "demo.macula.io:4433",
-      type: 0x06,
-      count: 1,
-      records: [adFor("mcl-rag/add_knowledge", REALM)],
-    });
+    mocks.discoverProcedureRealm.mockResolvedValue(REALM);
     mocks.call.mockResolvedValue({ procedure: "mcl-rag/answer_query", payload: { hits: [{ score: 0.9 }] }, duration_ms: 5 });
 
     const { registerMeshMemory } = await import("./mesh_memory.js");
@@ -120,27 +115,7 @@ describe("mesh_recall", () => {
   });
 
   it("errors clearly, without ever calling answer_query, when mcl-rag isn't advertised", async () => {
-    mocks.findRecordsByType.mockResolvedValue({ host: "demo.macula.io:4433", type: 0x06, count: 0, records: [] });
-
-    const { registerMeshMemory } = await import("./mesh_memory.js");
-    const { server, getHandler } = fakeServer();
-    registerMeshMemory(server);
-    const res = (await getHandler("mesh_recall")({ query_text: "anything" })) as { isError?: boolean; content: { text: string }[] };
-
-    expect(res.isError).toBe(true);
-    expect(res.content[0]!.text).toMatch(/not currently advertised/);
-    expect(mocks.call).not.toHaveBeenCalled();
-  });
-});
-
-describe("mesh_remember", () => {
-  it("discovers mcl-rag's current realm, then calls add_knowledge under it with the deposited content", async () => {
-    mocks.findRecordsByType.mockResolvedValue({
-      host: "demo.macula.io:4433",
-      type: 0x06,
-      count: 1,
-      records: [adFor("mcl-rag/add_knowledge", REALM)],
-    });
+    mocks.discoverProcedureRealm.mockResolvedValue(REALM);
     mocks.call.mockResolvedValue({ procedure: "mcl-rag/add_knowledge", payload: { chunks: 1 }, duration_ms: 8 });
 
     const { registerMeshMemory } = await import("./mesh_memory.js");
@@ -168,12 +143,7 @@ describe("mesh_remember_directory", () => {
     writeFileSync(join(dir, "a.md"), "# hello");
     writeFileSync(join(dir, "skip.bin"), "not included");
     try {
-      mocks.findRecordsByType.mockResolvedValue({
-        host: "demo.macula.io:4433",
-        type: 0x06,
-        count: 1,
-        records: [adFor("mcl-rag/add_knowledge", REALM)],
-      });
+      mocks.discoverProcedureRealm.mockResolvedValue(REALM);
       mocks.call.mockResolvedValue({ procedure: "mcl-rag/upload_knowledge", payload: { chunks: 2 }, duration_ms: 9 });
 
       const { registerMeshMemory } = await import("./mesh_memory.js");

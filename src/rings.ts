@@ -1,7 +1,11 @@
 // Rings: the addressed invite. A ring travels as a mesh CALL to the
-// callee's own served procedure (ring_service.ts) with an ownership
-// proof, so it is acknowledged, verified, answered, or explicitly
-// unreachable -- what a publish into a topic could never be. The
+// callee's own served procedure, ~<node_id>/ring (ring_service.ts), so it
+// is acknowledged, answered, or explicitly unreachable -- what a publish
+// into a topic could never be. macula 12 signs the CALL with the caller's
+// key and the RESULT with the callee's, and only the node a ~<node_id>
+// namespace names can serve in it, so neither side needs a proof of its
+// own: the callee reads the verified caller, and the caller knows the
+// answer came from the node it rang. The
 // conversation itself then happens in the room the ring carries
 // (rooms.ts). See plans/PLAN_AGENT_CONVERSATIONS.md sections 2 to 4.
 //
@@ -20,82 +24,17 @@ import { dirname, join } from "node:path";
 import { isRoomTopic } from "./envelope.js";
 
 const HEX32 = /^[0-9a-f]{32}$/;
-const HEX64 = /^[0-9a-fA-F]{64}$/;
-const RING_PROCEDURE = /^agent\.([0-9a-fA-F]{64})\.ring$/;
+const HEX64 = /^[0-9a-f]{64}$/;
+const RING_PROCEDURE = /^~([0-9a-f]{64})\/ring$/;
 export const MAX_PURPOSE_CHARS = 280;
 
-/** The procedure a present agent serves to be rung: its presence node id is in the name because a call is addressed by procedure, not by node. */
+/** The procedure a present agent serves to be rung: `ring` in its own namespace, `~<node_id>/ring`, which only it can serve. */
 export function ringProcedure(nodeId: string): string {
-  return `agent.${nodeId}.ring`;
+  return `~${nodeId.toLowerCase()}/ring`;
 }
 
 export function nodeIdFromRingProcedure(procedure: string): string | undefined {
   return RING_PROCEDURE.exec(procedure)?.[1];
-}
-
-// ---- what each proof is bound to
-//
-// macula-cli's `identity sign --procedure <string>` signs {node_id,
-// timestamp, <string>}; the string is opaque to it. Both ends of a ring
-// are this package, so the string can carry the KIND and the RING ID
-// (and the answer, where there is one) -- a proof for one ring is then
-// useless for any other ring, for a ring_answer, or for a reply, and a
-// reply is useless for any other answer. Found by the release review
-// 2026-09-03: with the bare procedure name, one proof verified for any
-// body within the 60 s window, and nothing proved who ANSWERED at all.
-
-/** Signed by the caller, verified by the callee: this ring, to this endpoint. */
-export function ringProofProcedure(callee: string, ringId: string): string {
-  return `${ringProcedure(callee)}#ring:${ringId}`;
-}
-/** Signed by the callee, verified by the caller: this answer to this ring, from the endpoint the caller rang. */
-export function ringReplyProofProcedure(callee: string, ringId: string, answer: Answer): string {
-  return `${ringProcedure(callee)}#reply:${ringId}:${answer}`;
-}
-/**
- * Signed by the callee answering later, verified by the original
- * caller: this answer to this ring, delivered to the caller's own
- * endpoint. The acknowledgement the caller returns is NOT separately
- * proven -- by the time it is sent, the callee's own answer is already
- * recorded locally (answerPendingRing records before it calls out), so
- * a forged ack can mislead this one telemetry field (caller_notified)
- * but cannot make an unanswered ring look answered or vice versa.
- */
-export function ringAnswerProofProcedure(caller: string, ringId: string, answer: 1 | 2): string {
-  return `${ringProcedure(caller)}#ring_answer:${ringId}:${answer}`;
-}
-
-export interface Proof {
-  timestamp: number;
-  signature: string;
-}
-
-/** The {citizen_did, proof} pair every ring-endpoint REPLY carries, nested under its own `proven` key (distinct from a ring/ring_answer's own top-level citizen_did/proof, which handleRing/handleRingAnswer check directly against ringProblems/ringAnswerProblems -- see ring_service.ts). */
-export interface Proven {
-  citizen_did: string;
-  proof: Proof;
-}
-
-/**
- * Parses a `proven` value: `{citizen_did, proof: {timestamp, signature}}`.
- * Takes the VALUE of a `proven` field, not the reply object it lives on --
- * pass `payload.proven`, not `payload` itself. (Fixed 2026-09-04: this used
- * to be called with the whole reply object and read `payload.citizen_did`/
- * `payload.proof` directly, which never matched provenReply's actual wire
- * shape -- ring_service.ts nests those under `proven`, so every real
- * accepted/declined reply's proof was silently dropped and mesh_ring.ts's
- * placeRing treated every genuine acceptance as unproven-and-unreachable.
- * Caught live while adding real (unmocked) parseRingReply coverage for the
- * @macula-io/ts cutover -- pre-existing, unrelated to that cutover itself.)
- */
-export function parseProven(proven: unknown): Proven | undefined {
-  if (typeof proven !== "object" || proven === null) return undefined;
-  const payload = proven as Record<string, unknown>;
-  const p = payload.proof;
-  if (typeof payload.citizen_did !== "string" || typeof p !== "object" || p === null) return undefined;
-  const pp = p as Record<string, unknown>;
-  if (!Number.isInteger(pp.timestamp) || typeof pp.signature !== "string") return undefined;
-  return { citizen_did: payload.citizen_did, proof: { timestamp: pp.timestamp as number, signature: pp.signature } };
 }
 
 /** No booleans on the wire: the answer is one of these integers. */
@@ -105,7 +44,7 @@ export function answerLabel(a: Answer): keyof typeof ANSWER {
   return a === 1 ? "accepted" : a === 2 ? "declined" : "deferred";
 }
 
-/** What travels to agent.<node_id>.ring: a ring (the invite) or, later, the answer to a deferred one. */
+/** What travels to ~<node_id>/ring: a ring (the invite) or, later, the answer to a deferred one. */
 export type RingKind = "ring" | "ring_answer";
 
 export interface RingArgs {
@@ -135,7 +74,7 @@ export function buildRingArgs(input: { from: string; to: string; purpose: string
   return args;
 }
 
-/** Every way a payload fails to be ring args (the proof fields ride alongside and are checked by ownership_proof.ts, not here). Empty means valid. */
+/** Every way a payload fails to be ring args. Empty means valid. `from` must also be the verified caller, which only the callee can check (ring_service.ts). */
 export function ringProblems(payload: unknown): string[] {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return ["not an object"];
   const p = payload as Record<string, unknown>;
@@ -171,9 +110,9 @@ export function parseRingArgs(payload: unknown): RingArgs | undefined {
 
 /**
  * The answer to a DEFERRED ring, travelling back the same way the ring
- * came: a call to the original caller's own agent.<node_id>.ring with
- * the callee's ownership proof. Only 1 accepted and 2 declined make
- * sense here -- deferring a deferral is not an answer.
+ * came: a call to the original caller's own ~<node_id>/ring. Only 1
+ * accepted and 2 declined make sense here -- deferring a deferral is not
+ * an answer.
  */
 export interface RingAnswerArgs {
   kind: "ring_answer";
@@ -244,16 +183,13 @@ export interface RingAnswerReply {
   received: 1;
   /** 1 when the caller had already recorded an answer for this ring; the first answer stands. */
   already_answered?: 1;
-  /** Not signed -- see ringAnswerProofProcedure's own doc comment for why. Reserved for a future release if that changes. */
-  proven?: Proven;
 }
 
 export function parseRingAnswerReply(payload: unknown): RingAnswerReply | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
   const p = payload as Record<string, unknown>;
   if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id) || p.received !== 1) return undefined;
-  const proven = parseProven(p.proven);
-  return { ring_id: p.ring_id, received: 1, ...(p.already_answered === 1 ? { already_answered: 1 as const } : {}), ...(proven ? { proven } : {}) };
+  return { ring_id: p.ring_id, received: 1, ...(p.already_answered === 1 ? { already_answered: 1 as const } : {}) };
 }
 
 export interface RingReply {
@@ -262,8 +198,6 @@ export interface RingReply {
   answer: Answer;
   room_topic?: string;
   reason?: string;
-  /** The callee's proof over ringReplyProofProcedure; absent on the pre-validation declines above. */
-  proven?: Proven;
 }
 
 export function parseRingReply(payload: unknown): RingReply | undefined {
@@ -275,8 +209,6 @@ export function parseRingReply(payload: unknown): RingReply | undefined {
   if (typeof p.ring_id === "string") reply.ring_id = p.ring_id;
   if (typeof p.room_topic === "string") reply.room_topic = p.room_topic;
   if (typeof p.reason === "string") reply.reason = p.reason;
-  const proven = parseProven(p.proven);
-  if (proven) reply.proven = proven;
   return reply;
 }
 

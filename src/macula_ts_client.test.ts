@@ -1,425 +1,195 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+// The client layer against a fake @macula-io/ts: Pool.connect and
+// NodeKey.loadOrCreate are the two boundaries that would touch the network
+// or the key file; everything this module does on top of them (one pool
+// shared by every caller, the io.macula default realm, errors as
+// MeshError, DHT records decoded) is exercised for real.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Identity, Session } from "@macula-io/ts";
 
-const { poolConnect, sessionConnect } = vi.hoisted(() => ({
-  poolConnect: vi.fn(),
-  sessionConnect: vi.fn(),
-}));
+const { poolConnect, loadOrCreate } = vi.hoisted(() => ({ poolConnect: vi.fn(), loadOrCreate: vi.fn() }));
 
-// Boundary mock for the tests below that exercise call()/publish()/watch()/
-// callThenDirect()'s NEW pool-vs-one-shot routing (added when macula-mcp
-// migrated onto @macula-io/ts 0.14.0's Pool, see this file's own header
-// doc): Session.connect/Pool.connect are the two entry points that would
-// otherwise open a REAL network connection, so those two are replaced;
-// Identity and MaculaCallError stay real (Identity.generate()/
-// fromSeedBytes() are pure local ed25519 operations, no network, and
-// toCliError's `instanceof TsCallError` check needs the real class).
 vi.mock("@macula-io/ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@macula-io/ts")>();
-  return {
-    ...actual,
-    Session: { connect: sessionConnect },
-    Pool: { connect: poolConnect },
-  };
+  return { ...actual, Pool: { connect: poolConnect }, NodeKey: { loadOrCreate } };
 });
 
-import { call, callThenDirect, closeInBackground, publish, watch } from "./macula_ts_client.js";
-import { defaultStations } from "./mesh_config.js";
+import { ProviderError, RelayError, RecordType } from "@macula-io/ts";
+import {
+  call,
+  ownProcedure,
+  serve,
+  decodeRecord,
+  discoverProcedureRealm,
+  findRecordsByType,
+  publish,
+  resetForTests,
+  selfNodeId,
+  watch,
+} from "./macula_ts_client.js";
+import { DEFAULT_SEEDS, IO_MACULA_REALM_ID, IO_MACULA_REALM_KEY, MeshError } from "./mesh_config.js";
 
-// closeInBackground is the fix for the ~250ms drain sleep (macula-go's own
-// connection teardown, see macula_ts_client.ts's own doc comment) that used
-// to sit on every one-shot call's hot path -- withSession's finally block
-// now fires it without awaiting, so a caller gets its result the moment
-// it's ready, not after teardown too. These fakes only need the two methods
-// this function actually calls; structural typing does the rest.
-function fakeIdentityForClose(closeImpl: () => Promise<void>): { close: ReturnType<typeof vi.fn> } {
-  return { close: vi.fn(closeImpl) };
-}
-function fakeIdentity(): Identity & { dispose: ReturnType<typeof vi.fn> } {
-  return { dispose: vi.fn() } as unknown as Identity & { dispose: ReturnType<typeof vi.fn> };
-}
+const SELF = "00".repeat(31) + "01";
 
-describe("closeInBackground", () => {
-  it("does not block the caller -- returns before close() resolves", async () => {
-    let closeResolved = false;
-    let resolveClose!: () => void;
-    const closePromise = new Promise<void>((r) => {
-      resolveClose = () => {
-        closeResolved = true;
-        r();
-      };
-    });
-    const session = fakeIdentityForClose(() => closePromise) as unknown as Session;
-    const identity = fakeIdentity();
-
-    closeInBackground(session, identity);
-    // closeInBackground itself is synchronous (fire-and-forget); at this
-    // point close() has been called but not yet awaited to completion.
-    expect(session.close).toHaveBeenCalledWith(identity);
-    expect(closeResolved).toBe(false);
-
-    resolveClose();
-    await closePromise;
-  });
-
-  it("disposes the identity only after close() settles, not before", async () => {
-    let resolveClose!: () => void;
-    const closePromise = new Promise<void>((r) => {
-      resolveClose = r;
-    });
-    const session = fakeIdentityForClose(() => closePromise) as unknown as Session;
-    const identity = fakeIdentity();
-
-    closeInBackground(session, identity);
-    await Promise.resolve(); // let the fire-and-forget chain start
-    expect(identity.dispose).not.toHaveBeenCalled();
-
-    resolveClose();
-    await closePromise;
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(identity.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it("swallows a close() failure -- best-effort teardown, never throws into the caller", async () => {
-    const session = fakeIdentityForClose(() => Promise.reject(new Error("connection already gone"))) as unknown as Session;
-    const identity = fakeIdentity();
-
-    expect(() => closeInBackground(session, identity)).not.toThrow();
-    await new Promise((r) => setTimeout(r, 0));
-    await new Promise((r) => setTimeout(r, 0));
-    expect(identity.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it("disposes immediately when there is no session to close (connect itself failed)", () => {
-    const identity = fakeIdentity();
-    closeInBackground(undefined, identity);
-    expect(identity.dispose).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ---- pool-vs-one-shot routing (@macula-io/ts 0.14.0 migration) -----------
-//
-// call()/publish()/watch() hold 3 simultaneous seed connections via a
-// shared, lazily-created Pool (per identityPath) instead of
-// connectWithFallback()'s dial-one-then-fallback -- but ONLY when the
-// caller doesn't need something Pool has no equivalent for (an explicit
-// `host` override, `direct`, or `ucanPath`). These tests are the actual
-// proof of that routing decision, not just that the functions still work.
-
-function fakeSession(overrides: Partial<Record<string, unknown>> = {}) {
+function fakePool() {
   return {
-    call: vi.fn().mockResolvedValue("session-call-result"),
-    callDirect: vi.fn().mockResolvedValue("session-call-direct-result"),
-    callWithUcan: vi.fn().mockResolvedValue("session-call-ucan-result"),
-    callDirectWithUcan: vi.fn().mockResolvedValue("session-call-direct-ucan-result"),
-    publish: vi.fn().mockResolvedValue(undefined),
-    subscribe: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)),
-    close: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
+    call: vi.fn(async () => ({ ok: 1 })),
+    publish: vi.fn(async () => {}),
+    subscribe: vi.fn(),
+    findRecordsByType: vi.fn(async () => ({ records: [], dropped: 0 })),
+    serve: vi.fn(async () => ({ stop: vi.fn() })),
+    close: vi.fn(async () => {}),
   };
 }
 
-function fakePool(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    call: vi.fn().mockResolvedValue("pool-call-result"),
-    publish: vi.fn().mockResolvedValue(undefined),
-    subscribe: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)),
-    close: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
-let tmpDir: string;
-let identityCounter = 0;
-// A fresh identityPath per test -- sharedPool()'s cache is module-level
-// state that outlives any one test (there is no exported way to clear it),
-// so two tests sharing one identityPath would see each other's cached
-// pool instead of the one this test's own poolConnect mock just set up.
-function freshIdentityPath(): string {
-  identityCounter += 1;
-  return join(tmpDir, `identity-${identityCounter}.seed`);
-}
+let pool: ReturnType<typeof fakePool>;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "macula-ts-client-pool-test-"));
-  poolConnect.mockReset().mockImplementation(async () => fakePool());
-  sessionConnect.mockReset().mockImplementation(async () => fakeSession());
+  pool = fakePool();
+  poolConnect.mockReset().mockResolvedValue(pool);
+  loadOrCreate.mockReset().mockResolvedValue({ nodeIdHex: () => SELF });
 });
 
-afterEach(() => {
-  vi.clearAllMocks();
+afterEach(async () => {
+  await resetForTests();
 });
 
-describe("call() routing", () => {
-  it("with no host/direct/ucanPath, uses the shared pool and never opens a one-shot session", async () => {
-    const pool = fakePool({ call: vi.fn().mockResolvedValue({ ok: 1 }) });
-    poolConnect.mockResolvedValue(pool);
-    const identityPath = freshIdentityPath();
-
-    const result = await call({ procedure: "some.procedure", identityPath, realm: "R", timeoutMs: 5000 });
-
-    expect(result.payload).toEqual({ ok: 1 });
-    expect(pool.call).toHaveBeenCalledWith("R", "some.procedure", {}, { deadlineMs: 5000 });
-    expect(sessionConnect).not.toHaveBeenCalled();
-    const [seeds] = poolConnect.mock.calls[0];
-    expect(seeds).toEqual(defaultStations().map((s: string) => expect.objectContaining({ host: expect.any(String), port: expect.any(Number) })));
-    expect(seeds.length).toBe(defaultStations().length);
-  });
-
-  it("with an explicit host, bypasses the pool and uses a one-shot session against that host", async () => {
-    const session = fakeSession({ call: vi.fn().mockResolvedValue("direct-host-result") });
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
-
-    const result = await call({ procedure: "some.procedure", identityPath, host: "custom-station.example:9999" });
-
-    expect(result.payload).toBe("direct-host-result");
-    expect(poolConnect).not.toHaveBeenCalled();
-    expect(sessionConnect).toHaveBeenCalledWith("custom-station.example", 9999, expect.anything());
-  });
-
-  it("with direct=true, bypasses the pool even without a host override", async () => {
-    const session = fakeSession();
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
-
-    await call({ procedure: "some.procedure", identityPath, direct: true });
-
-    expect(poolConnect).not.toHaveBeenCalled();
-    expect(session.callDirect).toHaveBeenCalled();
-    expect(session.call).not.toHaveBeenCalled();
-  });
-
-  it("with ucanPath set, bypasses the pool even without a host override", async () => {
-    const session = fakeSession();
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
-    const ucanPath = join(tmpDir, "token.ucan");
-    writeFileSync(ucanPath, "fake-ucan-token");
-
-    await call({ procedure: "some.procedure", identityPath, ucanPath });
-
-    expect(poolConnect).not.toHaveBeenCalled();
-    expect(session.callWithUcan).toHaveBeenCalled();
-  });
-
-  it("passes a bytes choice through to the pool and to a one-shot session", async () => {
-    const pool = fakePool();
-    poolConnect.mockResolvedValue(pool);
-    await call({ procedure: "p", identityPath: freshIdentityPath(), bytes: "tagged" });
-    expect(pool.call).toHaveBeenCalledWith(undefined, "p", {}, { deadlineMs: undefined, bytes: "tagged" });
-
-    const session = fakeSession();
-    sessionConnect.mockResolvedValue(session);
-    await call({ procedure: "p", identityPath: freshIdentityPath(), host: "custom-station.example:1234", bytes: "tagged" });
-    expect(session.call).toHaveBeenCalledWith("p", {}, expect.objectContaining({ bytes: "tagged" }));
-  });
-
-  it("wraps a pool failure the same way withSession wraps a one-shot failure", async () => {
-    poolConnect.mockResolvedValue(fakePool({ call: vi.fn().mockRejectedValue(new Error("boom")) }));
-    const identityPath = freshIdentityPath();
-
-    await expect(call({ procedure: "some.procedure", identityPath })).rejects.toThrow("boom");
-  });
-});
-
-describe("publish() routing", () => {
-  it("with no host, uses the shared pool", async () => {
-    const pool = fakePool();
-    poolConnect.mockResolvedValue(pool);
-    const identityPath = freshIdentityPath();
-
-    await publish({ topic: "some.topic", fact: { a: 1 }, identityPath, realm: "R" });
-
-    expect(pool.publish).toHaveBeenCalledWith("R", "some.topic", { a: 1 });
-    expect(sessionConnect).not.toHaveBeenCalled();
-  });
-
-  it("with an explicit host, bypasses the pool", async () => {
-    const session = fakeSession();
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
-
-    await publish({ topic: "some.topic", fact: {}, identityPath, host: "custom-station.example:1234" });
-
-    expect(poolConnect).not.toHaveBeenCalled();
-    expect(session.publish).toHaveBeenCalled();
-  });
-});
-
-describe("shared pool caching", () => {
-  it("reuses ONE pool across call() and publish() for the same identityPath", async () => {
-    const pool = fakePool();
-    poolConnect.mockResolvedValue(pool);
-    const identityPath = freshIdentityPath();
-
-    await call({ procedure: "p1", identityPath });
-    await publish({ topic: "t1", fact: {}, identityPath });
-    await call({ procedure: "p2", identityPath });
-
+describe("the shared pool", () => {
+  it("is connected once, under the one key, to every seed with io.macula trusted, however many callers race", async () => {
+    await Promise.all([call({ procedure: "mcl-echo/echo" }), publish({ topic: "t.said_v1", fact: {} }), selfNodeId()]);
     expect(poolConnect).toHaveBeenCalledTimes(1);
+    expect(loadOrCreate).toHaveBeenCalledTimes(1);
+    const [key, seeds, opts] = poolConnect.mock.calls[0]!;
+    expect(key.nodeIdHex()).toBe(SELF);
+    expect(seeds).toEqual(DEFAULT_SEEDS);
+    expect(opts.realmTrust).toEqual([{ realm: IO_MACULA_REALM_ID, key: IO_MACULA_REALM_KEY }]);
+    expect(loadOrCreate.mock.calls[0]![1]).toBe("pq_hybrid");
   });
 
-  it("creates a DISTINCT pool for a distinct identityPath", async () => {
-    poolConnect.mockImplementation(async () => fakePool());
-    const identityPathA = freshIdentityPath();
-    const identityPathB = freshIdentityPath();
-
-    await call({ procedure: "p", identityPath: identityPathA });
-    await call({ procedure: "p", identityPath: identityPathB });
-
-    expect(poolConnect).toHaveBeenCalledTimes(2);
-    const identityA = poolConnect.mock.calls[0][1];
-    const identityB = poolConnect.mock.calls[1][1];
-    expect(Buffer.from(identityA.nodeId).toString("hex")).not.toBe(Buffer.from(identityB.nodeId).toString("hex"));
-  });
-
-  it("evicts the cache on a genuine connect failure, so a later call retries instead of staying stuck", async () => {
-    poolConnect.mockRejectedValueOnce(new Error("all seeds refused")).mockResolvedValueOnce(fakePool());
-    const identityPath = freshIdentityPath();
-
-    await expect(call({ procedure: "p", identityPath })).rejects.toThrow("all seeds refused");
-    await expect(call({ procedure: "p", identityPath })).resolves.toBeDefined();
-
+  it("is connected again after a failed connect, not stuck with the rejection", async () => {
+    poolConnect.mockRejectedValueOnce(new Error("no station answered"));
+    await expect(call({ procedure: "mcl-echo/echo" })).rejects.toThrow(/no station answered/);
+    await expect(call({ procedure: "mcl-echo/echo" })).resolves.toMatchObject({ payload: { ok: 1 } });
     expect(poolConnect).toHaveBeenCalledTimes(2);
   });
 });
 
-describe("watch() routing", () => {
-  it("with no host, subscribes via the pool, collects events, and unsubscribes once the duration elapses", async () => {
-    vi.useFakeTimers();
-    try {
-      let capturedHandler: ((evt: { publisher: Uint8Array; seq: number; payload: unknown }) => void) | undefined;
-      const unsubscribe = vi.fn().mockResolvedValue(undefined);
-      const pool = fakePool({
-        subscribe: vi.fn(async (_realm: string | undefined, _topic: string, handler: typeof capturedHandler) => {
-          capturedHandler = handler;
-          return unsubscribe;
-        }),
-      });
-      poolConnect.mockResolvedValue(pool);
-      const identityPath = freshIdentityPath();
-
-      const watchPromise = watch({ topic: "some.topic", durationSeconds: 5, identityPath });
-      await vi.waitFor(() => expect(capturedHandler).toBeDefined());
-      capturedHandler!({ publisher: new Uint8Array([1, 2, 3]), seq: 7, payload: { hello: "world" } });
-
-      await vi.advanceTimersByTimeAsync(5000);
-      const events = await watchPromise;
-
-      expect(events).toEqual([{ topic: "some.topic", publisher: "010203", seq: 7, payload: { hello: "world" } }]);
-      expect(unsubscribe).toHaveBeenCalledTimes(1);
-      expect(sessionConnect).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+describe("call", () => {
+  it("defaults to io.macula, passes the realm given, and reports the result with its duration", async () => {
+    const res = await call({ procedure: "mcl-echo/echo", callArgs: { text: "hi" } });
+    expect(res.payload).toEqual({ ok: 1 });
+    expect(pool.call).toHaveBeenCalledWith(IO_MACULA_REALM_ID, "mcl-echo/echo", { text: "hi" }, expect.any(Object));
+    await call({ procedure: "x/y", realm: "AB".repeat(32), timeoutMs: 900, bytes: "tagged" });
+    expect(pool.call).toHaveBeenLastCalledWith("ab".repeat(32), "x/y", {}, { timeoutMs: 900, bytes: "tagged" });
   });
 
-  it("resolves early once `count` events have arrived, without waiting out the full duration", async () => {
-    vi.useFakeTimers();
-    try {
-      let capturedHandler: ((evt: { publisher: Uint8Array; seq: number; payload: unknown }) => void) | undefined;
-      const unsubscribe = vi.fn().mockResolvedValue(undefined);
-      const pool = fakePool({
-        subscribe: vi.fn(async (_realm: string | undefined, _topic: string, handler: typeof capturedHandler) => {
-          capturedHandler = handler;
-          return unsubscribe;
-        }),
-      });
-      poolConnect.mockResolvedValue(pool);
-      const identityPath = freshIdentityPath();
-
-      const watchPromise = watch({ topic: "some.topic", durationSeconds: 60, count: 1, identityPath });
-      await vi.waitFor(() => expect(capturedHandler).toBeDefined());
-      capturedHandler!({ publisher: new Uint8Array([9]), seq: 1, payload: null });
-
-      const events = await watchPromise; // must resolve without advancing timers at all
-      expect(events).toHaveLength(1);
-      expect(unsubscribe).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("refuses a boolean argument by name before anything reaches the wire", async () => {
+    await expect(call({ procedure: "x/y", callArgs: { urgent: true } })).rejects.toThrow(/"urgent" is a boolean/);
+    expect(pool.call).not.toHaveBeenCalled();
   });
 
-  it("passes a bytes choice through to the pool and to a one-shot session", async () => {
-    const pool = fakePool({ subscribe: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)) });
-    poolConnect.mockResolvedValue(pool);
-    await watch({ topic: "t", durationSeconds: 0.01, identityPath: freshIdentityPath(), bytes: "tagged" });
-    expect(pool.subscribe).toHaveBeenCalledWith(undefined, "t", expect.any(Function), undefined, { bytes: "tagged" });
-
-    const session = fakeSession({ subscribe: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)) });
-    sessionConnect.mockResolvedValue(session);
-    await watch({ topic: "t", durationSeconds: 0.01, identityPath: freshIdentityPath(), host: "custom-station.example:1234", bytes: "tagged" });
-    expect(session.subscribe).toHaveBeenCalledWith("t", expect.any(Function), expect.objectContaining({ bytes: "tagged" }));
+  it("brings a provider's error back as a MeshError with its code", async () => {
+    pool.call.mockRejectedValueOnce(new ProviderError("handler_error", "no such mailbox"));
+    const e = await call({ procedure: "x/y" }).catch((err) => err);
+    expect(e).toBeInstanceOf(MeshError);
+    expect(e).toMatchObject({ code: "handler_error", from: "provider" });
+    expect(e.message).toMatch(/no such mailbox/);
   });
 
-  it("with an explicit host, bypasses the pool", async () => {
-    const stop = vi.fn().mockResolvedValue(undefined);
-    const session = fakeSession({ subscribe: vi.fn().mockResolvedValue(stop) });
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
-
-    const events = await watch({ topic: "t", durationSeconds: 0.01, identityPath, host: "custom-station.example:1234" });
-
-    expect(events).toEqual([]);
-    expect(poolConnect).not.toHaveBeenCalled();
-    expect(session.subscribe).toHaveBeenCalled();
+  it("brings a station's relay error back as a MeshError with its code", async () => {
+    pool.call.mockRejectedValueOnce(new RelayError("unknown_next_peer"));
+    await expect(call({ procedure: "x/y" })).rejects.toMatchObject({ code: "unknown_next_peer", from: "station" });
   });
 });
 
-describe("callThenDirect() routing", () => {
-  it("with no host, tries the pool first and never opens a session when the pool succeeds", async () => {
-    const pool = fakePool({ call: vi.fn().mockResolvedValue("pool-result") });
-    poolConnect.mockResolvedValue(pool);
-    const identityPath = freshIdentityPath();
-
-    const result = await callThenDirect({ procedure: "p", identityPath });
-
-    expect(result.payload).toBe("pool-result");
-    expect(sessionConnect).not.toHaveBeenCalled();
+describe("publish and watch", () => {
+  it("publishes in io.macula unless told otherwise", async () => {
+    await publish({ topic: "agents.lobby", fact: { kind: "remark_made" } });
+    expect(pool.publish).toHaveBeenCalledWith(IO_MACULA_REALM_ID, "agents.lobby", { kind: "remark_made" });
   });
 
-  it("with no host, falls back to a one-shot session's callDirect() when the pool's plain call fails", async () => {
-    poolConnect.mockResolvedValue(fakePool({ call: vi.fn().mockRejectedValue(new Error("temporary_relay_failure")) }));
-    const session = fakeSession({ callDirect: vi.fn().mockResolvedValue("direct-result") });
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
-
-    const result = await callThenDirect({ procedure: "p", identityPath });
-
-    expect(result.payload).toBe("direct-result");
-    expect(session.callDirect).toHaveBeenCalled();
-  });
-
-  it("combines both error messages when the pool call AND the direct-dial fallback both fail", async () => {
-    poolConnect.mockResolvedValue(fakePool({ call: vi.fn().mockRejectedValue(new Error("temporary_relay_failure")) }));
-    const session = fakeSession({ callDirect: vi.fn().mockRejectedValue(new Error("no direct-dial advertisement")) });
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
-
-    await expect(callThenDirect({ procedure: "p", identityPath })).rejects.toThrow(
-      /temporary_relay_failure; direct-dial retry: no direct-dial advertisement/,
-    );
-  });
-
-  it("with an explicit host, bypasses the pool and shares ONE session for both legs", async () => {
-    const session = fakeSession({
-      call: vi.fn().mockRejectedValue(new Error("plain failed")),
-      callDirect: vi.fn().mockResolvedValue("direct-result"),
+  it("returns what arrived once count events are in, and ends its subscription", async () => {
+    const stop = vi.fn(async () => {});
+    pool.subscribe.mockImplementation(async (_realm: string, _topic: string, onEvent: (e: unknown) => void) => {
+      setTimeout(() => {
+        for (const seq of [1, 2, 3]) onEvent({ publisher: "aa".repeat(32), topic: "t.x", seq, payload: { n: seq } });
+      }, 5);
+      return { stop, closed: new Promise(() => {}) };
     });
-    sessionConnect.mockResolvedValue(session);
-    const identityPath = freshIdentityPath();
+    const events = await watch({ topic: "t.x", durationSeconds: 5, count: 2 });
+    expect(events.map((e) => e.seq)).toEqual([1, 2]);
+    expect(events[0]).toEqual({ topic: "t.x", publisher: "aa".repeat(32), seq: 1, payload: { n: 1 } });
+    expect(stop).toHaveBeenCalled();
+  });
+});
 
-    const result = await callThenDirect({ procedure: "p", identityPath, host: "custom-station.example:1234" });
+describe("DHT records", () => {
+  const ad = {
+    type: RecordType.ProcedureAdvertisement,
+    keyId: "cc".repeat(32),
+    createdAt: 1,
+    expiresAt: 2,
+    payload: {
+      realm_id: "0x" + IO_MACULA_REALM_ID,
+      procedure: "mcl-citizens/register_presence",
+      advertiser_node: "0x" + "dd".repeat(32),
+      serving_station: "0x" + "ee".repeat(32),
+    },
+    wire: { $bytes: "AA==" },
+  };
 
-    expect(result.payload).toBe("direct-result");
-    expect(poolConnect).not.toHaveBeenCalled();
-    expect(session.call).toHaveBeenCalledTimes(1);
-    expect(session.callDirect).toHaveBeenCalledTimes(1);
-    expect(sessionConnect).toHaveBeenCalledTimes(1); // ONE session, not two
+  it("decode a procedure advertisement's realm, procedure and nodes as plain hex", () => {
+    expect(decodeRecord(ad).procedure_advertisement).toEqual({
+      realm: IO_MACULA_REALM_ID,
+      procedure: "mcl-citizens/register_presence",
+      advertiser_node: "dd".repeat(32),
+      serving_station: "ee".repeat(32),
+    });
+  });
+
+  it("find by a type name, and report how many records did not verify", async () => {
+    pool.findRecordsByType.mockResolvedValueOnce({ records: [ad], dropped: 2 });
+    const res = await findRecordsByType({ recordType: "procedure_advertisement" });
+    expect(pool.findRecordsByType).toHaveBeenCalledWith(RecordType.ProcedureAdvertisement);
+    expect(res).toMatchObject({ type: 6, count: 1, dropped: 2 });
+  });
+
+  it("refuse an unknown type name", async () => {
+    await expect(findRecordsByType({ recordType: "nonsense" })).rejects.toThrow(MeshError);
+  });
+
+  it("discover the realm a procedure is advertised in, or say it is advertised nowhere", async () => {
+    pool.findRecordsByType.mockResolvedValue({ records: [ad], dropped: 0 });
+    await expect(discoverProcedureRealm("mcl-citizens/register_presence")).resolves.toBe(IO_MACULA_REALM_ID);
+    await expect(discoverProcedureRealm("mcl-nothing/at_all")).rejects.toThrow(/mcl-nothing\/at_all is not advertised/);
+  });
+});
+
+describe("proveKeyPossession", () => {
+  it("signs carried key ++ timestamp (8 bytes, big-endian) ++ procedure, exactly macula-realm's DeviceKeyOwnershipProof.message/3", async () => {
+    const carried = new Uint8Array(Buffer.alloc(3118, 9));
+    const sign = vi.fn(async () => new Uint8Array([0xde, 0xad]));
+    loadOrCreate.mockResolvedValue({ nodeIdHex: () => SELF, publicKey: () => carried, sign });
+    const { proveKeyPossession } = await import("./macula_ts_client.js");
+    const before = Date.now();
+    const proof = await proveKeyPossession("macula_realm.join_session");
+    const signed = Buffer.from(sign.mock.calls[0]![0] as Uint8Array);
+    const ts = Buffer.alloc(8);
+    ts.writeBigUInt64BE(BigInt(proof.timestamp));
+    expect(signed).toEqual(Buffer.concat([Buffer.from(carried), ts, Buffer.from("macula_realm.join_session")]));
+    expect(proof.timestamp).toBeGreaterThanOrEqual(before);
+    expect(proof).toMatchObject({ public_key: Buffer.from(carried).toString("base64"), signature: "dead" });
+  });
+});
+
+describe("serving in this node's own namespace", () => {
+  it("names ~<node_id>/<name>, and serves it in io.macula with the handler given", async () => {
+    expect(await ownProcedure("ring")).toBe(`~${SELF}/ring`);
+    const handler = vi.fn();
+    await serve({ procedure: `~${SELF}/ring`, handler });
+    expect(pool.serve).toHaveBeenCalledWith(IO_MACULA_REALM_ID, `~${SELF}/ring`, handler, { bytes: undefined });
+  });
+
+  it("refuses a name that is not one segment", async () => {
+    await expect(ownProcedure("a/b")).rejects.toThrow(MeshError);
+    await expect(ownProcedure("")).rejects.toThrow(MeshError);
   });
 });

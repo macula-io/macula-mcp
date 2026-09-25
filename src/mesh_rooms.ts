@@ -1,22 +1,21 @@
 // Tools: mesh_open_room / mesh_join_room / mesh_leave_room / mesh_rooms /
 // mesh_say -- rooms, central and their bookkeeping. Reaching a SPECIFIC
 // agent is mesh_ring.ts (mesh_ring), an addressed invite delivered as a
-// mesh_call with an identity proof, answered by the callee's contact
-// policy (see policy.ts). A room can still be announced publicly on
+// mesh_call to the callee's ~<node_id>/ring, answered by the callee's
+// contact policy (see policy.ts). A room can still be announced publicly on
 // central (public: 1) or its topic passed along out of band, for
 // whoever shows up rather than one named agent.
 //
-// Every one of these is a composition of ordinary calls (identity, then
+// Every one of these is a composition of ordinary calls (node id, then
 // publish) plus rooms.ts's own bookkeeping over lobby_observer.ts's
-// standing taps -- not a new exception to one-shot subprocess. The
+// standing taps. The
 // envelope on the wire is envelope.ts's, validated before anything is
 // published, so a malformed message fails HERE, not on a reader.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
-import { tsIdentity } from "./macula_ts_client.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { selfNodeId } from "./macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
@@ -34,30 +33,17 @@ const DEFAULT_INVITE_PURPOSE = "Join this room";
 type InviteOutcome = PlaceRingResult | { to: string; room_topic: string; failed: 1; reason: string };
 
 /**
- * Rings every participant with the room already open, ONE AT A TIME --
- * mesh_ring's own placeRing, reused as-is (proof, policy, the
+ * Rings every participant with the room already open, all at once --
+ * mesh_ring's own placeRing, reused as-is (policy, the
  * accepted/declined/deferred/unreachable answer, the join wait), not
- * reimplemented. NOT Promise.allSettled/parallel: @macula-io/ts's own
- * Session serializes every call onto one shared control stream
- * (session.js's #enqueue -- "only one is ever in flight at a time",
- * added after concurrent calls corrupted the stream) and, when `host`
- * is set (or the plain leg falls through to a direct-dial retry),
- * callThenDirect opens a FRESH Session per call under this agent's own
- * SAME identity -- two or more of those at once make the station kick
- * the older one, a live-documented "perpetual ping-pong" (pool.js).
- * Concurrent placeRing calls also each sign their own proof (a fixed
- * timestamp) BEFORE queueing, so a participant queued behind others
- * could have its already-stale-by-then proof rejected as stale_proof --
- * a real, non-hypothetical failure this composition must not produce.
- * Sequential means latency is additive, not shared -- see the tool
- * description below, which says exactly that rather than the false
- * "runs in parallel" claim an earlier version of this code made.
+ * reimplemented. Each ring is its own direct-dialed call on the shared
+ * pool, so they run side by side and the whole invite takes as long as
+ * the slowest participant. Outcomes come back in the order given.
  */
 async function inviteParticipants(args: {
   roomTopic: string;
   purpose?: string;
   participants: string[];
-  host?: string;
   waitJoinSeconds: number;
 }): Promise<InviteOutcome[]> {
   const purpose = args.purpose && args.purpose.trim().length > 0 ? args.purpose : DEFAULT_INVITE_PURPOSE;
@@ -72,19 +58,17 @@ async function inviteParticipants(args: {
     seen.add(key);
     return true;
   });
-  const outcomes: InviteOutcome[] = [];
-  for (const to of deduped) {
-    try {
-      outcomes.push(await placeRing({ to, purpose, room_topic: args.roomTopic, waitJoinSeconds: args.waitJoinSeconds, host: args.host }));
-    } catch (e) {
-      // Should not normally happen once the room is open and `to` is
-      // never the opener, but a network exception is always possible;
-      // one participant's ring throwing must not cost every OTHER
-      // participant their result.
-      outcomes.push({ to, room_topic: args.roomTopic, failed: 1, reason: e instanceof Error ? e.message : String(e) });
-    }
-  }
-  return outcomes;
+  // One participant's ring throwing must not cost every OTHER participant
+  // their result.
+  return Promise.all(
+    deduped.map(async (to): Promise<InviteOutcome> => {
+      try {
+        return await placeRing({ to, purpose, room_topic: args.roomTopic, waitJoinSeconds: args.waitJoinSeconds });
+      } catch (e) {
+        return { to, room_topic: args.roomTopic, failed: 1, reason: e instanceof Error ? e.message : String(e) };
+      }
+    }),
+  );
 }
 
 /** The room's own next_step, given how the invites actually landed -- replaces the old "tell them the topic yourself" text now that they're actually rung. */
@@ -110,7 +94,6 @@ function summarizeInvites(invited: InviteOutcome[], announcedOnCentral: 0 | 1): 
 }
 
 export interface OpenRoomAndInviteArgs {
-  host?: string;
   purpose?: string;
   public?: 0 | 1;
   participants?: string[];
@@ -140,27 +123,21 @@ export async function openRoomAndInvite(args: OpenRoomAndInviteArgs): Promise<Op
     if (!resolved.ok) throw new RingError(resolved.error);
     return resolved.node_id;
   });
-  const res = await rooms.openRoom({ host: args.host, purpose: args.purpose, public: args.public, participants });
+  const res = await rooms.openRoom({ purpose: args.purpose, public: args.public, participants });
   const toRing = participants.filter((id) => id.toLowerCase() !== res.opened.from.toLowerCase());
   const invited = await inviteParticipants({
     roomTopic: res.room_topic,
     purpose: args.purpose,
     participants: toRing,
-    host: args.host,
     waitJoinSeconds: args.waitJoinSeconds ?? DEFAULT_WAIT_JOIN_SECONDS,
   });
   return { ...res, invited, next_step: summarizeInvites(invited, res.announced_on_central) };
 }
 const messageIdSchema = z.string().length(32).regex(/^[0-9a-f]+$/, "must be lowercase hex");
 const zeroOne = z.number().int().min(0).max(1);
-const hostSchema = z
-  .string()
-  .optional()
-  .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`);
-
 function failed(prefix: string, e: unknown) {
   if (e instanceof rooms.RoomError) return errorContent(`${prefix}: ${e.message}`);
-  return errorContent(describeCliError(prefix, e));
+  return errorContent(describeMeshError(prefix, e));
 }
 
 const OPEN_ROOM_DESCRIPTION_FULL =
@@ -168,21 +145,19 @@ const OPEN_ROOM_DESCRIPTION_FULL =
   "background for as long as you stay, and publishes the room_opened envelope on it. Pass public: 1 to " +
   "also announce that envelope on central (agents.lobby) so whoever is around can mesh_join_room it. " +
   "Pass participants (node ids from mesh_agents) to actually notify them: each one is rung the same way " +
-  "mesh_ring would (an addressed, proven call carrying this room's topic), so you get back who joined, " +
-  "who deferred to their own model, who declined, and who was unreachable -- not just a recorded " +
-  "intent. This still succeeds with whichever participants were reachable; an unreachable or declining " +
-  "participant does not fail the room. Rings go out ONE AT A TIME, not in parallel (the underlying " +
-  "session serializes calls; concurrent ones risk a stale or colliding proof), so wall-clock time DOES " +
-  "grow with team size -- each unreachable participant alone can cost up to ~40s, and a slow-to-accept " +
-  "one up to ~30s more. Expect a multi-participant call to take a while; it is not instant. A direct " +
+  "mesh_ring would (an addressed call to their ~<node_id>/ring carrying this room's topic), so you get " +
+  "back who joined, who deferred to their own model, who declined, and who was unreachable -- not just a " +
+  "recorded intent. This still succeeds with whichever participants were reachable; an unreachable or " +
+  "declining participant does not fail the room. Rings go out all at once, so the call takes as long as " +
+  "the slowest participant: up to ~40s for an unreachable one, plus the join wait for an accepting one. A direct " +
   "message is a two-party room (one participant). Unguessable, not encrypted: anyone who learns the " +
   "topic reads it.";
-/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the serialized-rings timing caveat (a multi-participant call genuinely isn't instant) and the unguessable-not-encrypted fact. */
+/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the timing caveat (the call waits for the slowest participant) and the unguessable-not-encrypted fact. */
 const OPEN_ROOM_DESCRIPTION_TERSE =
   "Open a room (unguessable topic, watched in the background). public: 1 also announces it on central. " +
-  "participants get rung one at a time (not parallel) -- a multi-participant call takes real wall-clock " +
-  "time (up to ~40s per unreachable peer), not instant; unreachable/declining participants don't fail " +
-  "the room. Unguessable, not encrypted -- anyone who learns the topic reads it.";
+  "participants are all rung at once; the call waits for the slowest (up to ~40s for an unreachable " +
+  "peer); unreachable/declining participants don't fail the room. Unguessable, not encrypted -- anyone " +
+  "who learns the topic reads it.";
 
 const JOIN_ROOM_DESCRIPTION_FULL =
   "Join a room whose topic you learned from central (mesh_rooms lists public ones) or out of band: starts " +
@@ -245,19 +220,18 @@ export function registerMeshRooms(server: McpServer): void {
     {
       purpose: z.string().max(MAX_PURPOSE_CHARS).optional().describe("Why this room exists, one line. Shown on central when public, and sent to each participant as the ring's purpose."),
       public: zeroOne.optional().describe("1 to announce the room on central for anyone to join; 0 (default) to keep the topic to whoever you tell."),
-      participants: z.array(nodeIdOrPetnameSchema).max(32).optional().describe("Node ids or petnames (from mesh_agents) to actually ring and invite into this room, besides yourself. Rung one at a time, not in parallel."),
+      participants: z.array(nodeIdOrPetnameSchema).max(32).optional().describe("Node ids or petnames (from mesh_agents) to actually ring and invite into this room, besides yourself. All rung at once."),
       wait_join_seconds: z
         .number()
         .min(0)
         .max(MAX_WAIT_JOIN_SECONDS)
         .optional()
-        .describe(`Per accepting participant, how long to wait for their participant_joined before reporting them not-yet-joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait). Adds to each participant's own turn, one at a time -- not shared across them.`),
-      host: hostSchema,
+        .describe(`Per accepting participant, how long to wait for their participant_joined before reporting them not-yet-joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait). Participants wait side by side, so this is added once, not per participant.`),
     },
-    async ({ purpose, public: isPublic, participants, wait_join_seconds, host }) => {
+    async ({ purpose, public: isPublic, participants, wait_join_seconds }) => {
       ensurePresence(server);
       try {
-        const result = await openRoomAndInvite({ host, purpose, public: isPublic === 1 ? 1 : 0, participants, waitJoinSeconds: wait_join_seconds });
+        const result = await openRoomAndInvite({ purpose, public: isPublic === 1 ? 1 : 0, participants, waitJoinSeconds: wait_join_seconds });
         return jsonContent({ ...result, invited: result.invited.map((r) => ({ ...r, to_petname: petname(r.to) })) });
       } catch (e) {
         return failed("mesh_open_room failed", e);
@@ -270,12 +244,11 @@ export function registerMeshRooms(server: McpServer): void {
     toolDescription(JOIN_ROOM_DESCRIPTION_FULL, JOIN_ROOM_DESCRIPTION_TERSE),
     {
       room_topic: z.string().describe("The agents.room.<32 hex> topic."),
-      host: hostSchema,
     },
-    async ({ room_topic, host }) => {
+    async ({ room_topic }) => {
       ensurePresence(server);
       try {
-        return jsonContent(await rooms.joinRoom({ host, room_topic }));
+        return jsonContent(await rooms.joinRoom({ room_topic }));
       } catch (e) {
         return failed("mesh_join_room failed", e);
       }
@@ -288,12 +261,11 @@ export function registerMeshRooms(server: McpServer): void {
     {
       room_topic: z.string().describe("A room you are in (see mesh_rooms)."),
       close: zeroOne.optional().describe("1 to publish room_closed instead of participant_left."),
-      host: hostSchema,
     },
-    async ({ room_topic, close, host }) => {
+    async ({ room_topic, close }) => {
       ensurePresence(server);
       try {
-        return jsonContent(await rooms.leaveRoom({ host, room_topic, close: close === 1 ? 1 : 0 }));
+        return jsonContent(await rooms.leaveRoom({ room_topic, close: close === 1 ? 1 : 0 }));
       } catch (e) {
         return failed("mesh_leave_room failed", e);
       }
@@ -316,14 +288,10 @@ export function registerMeshRooms(server: McpServer): void {
       // to expect.
       ensurePresence(server);
       try {
-        // Same race as mesh_read_inbox.ts's `rings` key: currentNodeId() is
-        // undefined until the full async presence start() lands, which a
-        // fresh identity's very first call hasn't reached yet. The node id
-        // is knowable synchronously that whole time (tsIdentity() only
-        // reads/mints a local seed file -- see rooms.ts's own selfNodeId()),
-        // so fall back to it instead of silently reporting zero awaiting
-        // rings on that first call.
-        const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
+        // Same race as mesh_read_inbox.ts's `rings` key: fall back to the
+        // key's own node id rather than report zero awaiting rings on a
+        // fresh identity's first call.
+        const me = presence.currentNodeId() ?? (await selfNodeId());
         const awaiting = me
           ? listRings({ self: me, direction: "out", answer: ANSWER.deferred, limit: 50 }).map((r) => ({
               ring_id: r.ring_id,
@@ -369,9 +337,8 @@ export function registerMeshRooms(server: McpServer): void {
         .max(MAX_WAIT_SECONDS)
         .optional()
         .describe(`Also wait up to this long (max ${MAX_WAIT_SECONDS}) for the first envelope from another sender on this topic.`),
-      host: hostSchema,
     },
-    async ({ room_topic, text, kind, in_reply_to, refs, wait_reply_seconds, host }) => {
+    async ({ room_topic, text, kind, in_reply_to, refs, wait_reply_seconds }) => {
       ensurePresence(server);
       if (kind !== undefined && !(TALK_KINDS as readonly string[]).includes(kind)) {
         return errorContent(`mesh_say: ${kind} is a lifecycle kind, published by mesh_open_room/mesh_join_room/mesh_leave_room, not by mesh_say.`);
@@ -382,7 +349,7 @@ export function registerMeshRooms(server: McpServer): void {
         // its own documented shape -- found by adversarial review to be an
         // unscanned path on an otherwise-wired tool.
         assertNoLikelySecret({ text, refs }, "text/refs");
-        const res = await rooms.say({ host, room_topic, kind, text, in_reply_to, refs, waitReplySeconds: wait_reply_seconds });
+        const res = await rooms.say({ room_topic, kind, text, in_reply_to, refs, waitReplySeconds: wait_reply_seconds });
         return jsonContent(res);
       } catch (e) {
         return failed("mesh_say failed", e);

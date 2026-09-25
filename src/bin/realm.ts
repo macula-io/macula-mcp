@@ -26,17 +26,15 @@
 // scoped to the existing, unparameterized, single-io.macula
 // mesh_join_realm/device_membership.ts path, untouched by this file.
 // Reads MACULA_MCP_IDENTITY/MACULA_MCP_REALM_DIR the same way realm.ts
-// itself does (mesh_config.ts's defaultIdentityPath/this file's own
-// realmDir passthrough) -- a caller that inherits its environment (any
+// itself does (mesh_config.ts's nodeKeyPath/this file's own realmDir
+// passthrough) -- a caller that inherits its environment (any
 // normal child-process spawn, e.g. Go's os/exec, does this by default)
 // needs nothing special to keep this CLI operating on the same identity
 // and credential store as the long-running macula-mcp server process
 // alongside it.
 
 import { fileURLToPath } from "node:url";
-import { defaultIdentityPath } from "../mesh_config.js";
-import { loadOrGenerateIdentity } from "../macula_ts_client.js";
-import { proofMessage } from "../ownership_proof.js";
+import { proveKeyPossession, selfNodeId } from "../macula_ts_client.js";
 import { parseRealmName, realmBaseURL } from "../realm_name.js";
 import {
   JOIN_PROOF_PROCEDURE,
@@ -179,78 +177,71 @@ async function main(): Promise<void> {
   }
   const { canonical } = parsed;
 
-  const id = loadOrGenerateIdentity(defaultIdentityPath());
+  const nodeId = await selfNodeId();
+
+  const already = loadCredential(nodeId, canonical);
+  if (already) {
+    emit(args.json, { ...membershipEvent(canonical, already), event: "already_joined" });
+    return;
+  }
+
+  const baseURL = realmBaseURL(canonical);
+  let created;
   try {
-    const nodeId = Buffer.from(id.nodeId).toString("hex");
+    const proof = await proveKeyPossession(JOIN_PROOF_PROCEDURE);
+    created = await createSession(joinRequest({ nodeId, proof, connectedVia: "macula-mcp-realm CLI" }), fetch, baseURL);
+  } catch (e) {
+    emit(args.json, { event: "error", realm: canonical, message: e instanceof Error ? e.message : String(e) });
+    process.exitCode = 1;
+    return;
+  }
 
-    const already = loadCredential(nodeId, canonical);
-    if (already) {
-      emit(args.json, { ...membershipEvent(canonical, already), event: "already_joined" });
-      return;
-    }
+  emit(args.json, {
+    event: "session",
+    realm: canonical,
+    join_url: created.join_url,
+    expires_at: created.expires_at,
+    qr_terminal: await qrTerminal(created.join_url),
+    ...(args.json ? { qr_png_base64: await qrPngBase64(created.join_url) } : {}),
+  });
 
-    const baseURL = realmBaseURL(canonical);
-    const timestamp = Date.now();
-    const signature = Buffer.from(id.sign(proofMessage(nodeId, timestamp, JOIN_PROOF_PROCEDURE))).toString("hex");
-
-    let created;
-    try {
-      created = await createSession(joinRequest({ nodeId, proof: { timestamp, signature }, connectedVia: "macula-mcp-realm CLI" }), fetch, baseURL);
-    } catch (e) {
-      emit(args.json, { event: "error", realm: canonical, message: e instanceof Error ? e.message : String(e) });
+  const deadline = args.waitSeconds !== undefined ? Date.now() + args.waitSeconds * 1000 : undefined;
+  for (;;) {
+    if (deadline !== undefined && Date.now() >= deadline) {
+      emit(args.json, { event: "timeout", realm: canonical, waited_seconds: args.waitSeconds });
       process.exitCode = 1;
       return;
     }
-
-    emit(args.json, {
-      event: "session",
-      realm: canonical,
-      join_url: created.join_url,
-      expires_at: created.expires_at,
-      qr_terminal: await qrTerminal(created.join_url),
-      ...(args.json ? { qr_png_base64: await qrPngBase64(created.join_url) } : {}),
-    });
-
-    const deadline = args.waitSeconds !== undefined ? Date.now() + args.waitSeconds * 1000 : undefined;
-    for (;;) {
-      if (deadline !== undefined && Date.now() >= deadline) {
-        emit(args.json, { event: "timeout", realm: canonical, waited_seconds: args.waitSeconds });
-        process.exitCode = 1;
-        return;
-      }
-      const outcome = await pollSession(created.session_id, fetch, baseURL);
-      if (outcome.status === "confirmed") {
-        const cred: RealmCredential = {
-          node_id: nodeId,
-          portal: baseURL,
-          org_identity: outcome.org_identity,
-          account: outcome.oauth_account,
-          cert_pem: outcome.cert_pem,
-          refresh_token: outcome.refresh_token,
-          joined_at: new Date().toISOString(),
-          citizen_did: outcome.citizen_did,
-          ucan: outcome.ucan,
-          tier: "citizen",
-        };
-        storeCredential(cred, canonical);
-        emit(args.json, membershipEvent(canonical, cred));
-        return;
-      }
-      if (outcome.status === "expired") {
-        emit(args.json, { event: "expired", realm: canonical });
-        process.exitCode = 1;
-        return;
-      }
-      if (outcome.status === "error") {
-        emit(args.json, { event: "error", realm: canonical, message: outcome.message });
-        process.exitCode = 1;
-        return;
-      }
-      // pending -- wait and poll again.
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    const outcome = await pollSession(created.session_id, fetch, baseURL);
+    if (outcome.status === "confirmed") {
+      const cred: RealmCredential = {
+        node_id: nodeId,
+        portal: baseURL,
+        org_identity: outcome.org_identity,
+        account: outcome.oauth_account,
+        cert_pem: outcome.cert_pem,
+        refresh_token: outcome.refresh_token,
+        joined_at: new Date().toISOString(),
+        citizen_did: outcome.citizen_did,
+        ucan: outcome.ucan,
+        tier: "citizen",
+      };
+      storeCredential(cred, canonical);
+      emit(args.json, membershipEvent(canonical, cred));
+      return;
     }
-  } finally {
-    id.dispose();
+    if (outcome.status === "expired") {
+      emit(args.json, { event: "expired", realm: canonical });
+      process.exitCode = 1;
+      return;
+    }
+    if (outcome.status === "error") {
+      emit(args.json, { event: "error", realm: canonical, message: outcome.message });
+      process.exitCode = 1;
+      return;
+    }
+    // pending -- wait and poll again.
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 }
 

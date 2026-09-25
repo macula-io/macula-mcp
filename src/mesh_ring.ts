@@ -1,33 +1,28 @@
 // Tool: mesh_ring -- the addressed invite (PLAN_AGENT_CONVERSATIONS WP2).
 //
-// A ring is a mesh_call to the callee's own served procedure,
-// agent.<node_id>.ring (ring_service.ts on their side), carrying the
-// room to talk in and an ownership proof signed by this agent's default
-// identity. A call, not a publish, so the caller learns one of exactly
-// four things: accepted (they are joining the room), declined (with a
-// reason), deferred (their model will decide; the room stays open), or
-// unreachable (nobody is serving that procedure right now). Nothing
-// here writes into a topic the callee never agreed to watch.
+// A ring is a mesh_call to the callee's own served procedure, ~<node_id>/ring
+// (ring_service.ts on their side), carrying the room to talk in. A call,
+// not a publish, so the caller learns one of exactly four things: accepted
+// (they are joining the room), declined (with a reason), deferred (their
+// model will decide; the room stays open), or unreachable (nobody is
+// serving it right now). Nothing here writes into a topic the callee never
+// agreed to watch. The call is signed by this agent and the answer by the
+// callee, the only node that can serve in its own namespace.
 //
-// Composition of ordinary calls: open a room if none was given
-// (rooms.ts), sign (citizenship.ts's signIdentity), call (plain, then
-// direct-dial, citizenship.ts's own callThenDirect), then on acceptance
-// read the transcript for the callee's participant_joined, which their
-// side publishes BEFORE answering 1 -- so "joined" here means the room
-// is genuinely two-sided, not that a reply said so.
+// Composition: open a room if none was given (rooms.ts), call, then on
+// acceptance read the transcript for the callee's participant_joined, which
+// their side publishes BEFORE answering 1 -- so "joined" here means the
+// room is genuinely two-sided, not that a reply said so.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
-import { tsIdentity } from "./macula_ts_client.js";
-import { callThenDirect, signIdentity, withIdentityProof } from "./citizenship.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { call, selfNodeId } from "./macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { factsAfter, lastFactId } from "./lobby_transcript.js";
 import { parseEnvelope } from "./envelope.js";
-import { verifyOwnershipProof } from "./ownership_proof.js";
-import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, ringProofProcedure, ringReplyProofProcedure, RingError } from "./rings.js";
+import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, RingError } from "./rings.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
@@ -64,7 +59,6 @@ export interface PlaceRingArgs {
   purpose: string;
   room_topic?: string;
   waitJoinSeconds?: number;
-  host?: string;
 }
 
 export type PlaceRingResult =
@@ -83,11 +77,11 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   const resolved = resolveNodeId(args.to);
   if (!resolved.ok) throw new RingError(resolved.error);
   const to = resolved.node_id;
-  const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
+  const me = presence.currentNodeId() ?? (await selfNodeId());
   if (to === me) throw new RingError("that is this agent's own node id");
   let roomTopic = args.room_topic;
   if (roomTopic === undefined) {
-    roomTopic = (await rooms.openRoom({ host: args.host, purpose: args.purpose, participants: [to] })).room_topic;
+    roomTopic = (await rooms.openRoom({ purpose: args.purpose, participants: [to] })).room_topic;
   } else if (!rooms.isJoined(roomTopic)) {
     throw new rooms.RoomError(`not in room ${roomTopic} -- open or join it first, or omit room_topic`);
   }
@@ -98,16 +92,10 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
 
   let payload: unknown;
   try {
-    // Signed over ringProofProcedure (bound to THIS ring id), never the
-    // bare `procedure` above -- `procedure` names the CALL's target and
-    // must stay the plain agent.<to>.ring the station routes on; the
-    // PROOF has to name the exact ring so it cannot be replayed against
-    // a different one. Conflating the two (found live by the release
-    // review, 2026-09-03: this call signed the bare name, ring_service.ts
-    // verified against the bound one) made every ring bad_signature.
-    const signed = signIdentity(ringProofProcedure(to, ring.ring_id));
-    const res = await callThenDirect({ host: args.host, procedure, callArgs: withIdentityProof({ ...ring }, signed), timeoutMs: CALL_TIMEOUT_MS });
-    payload = res.payload;
+    // ~<to>/ring is in `to`'s own namespace: the only provider this call can
+    // trust is `to`, so whatever answers IS `to`, and `to` reads this agent
+    // as the verified caller. Nothing else to prove on either side.
+    payload = (await call({ procedure, callArgs: { ...ring }, timeoutMs: CALL_TIMEOUT_MS })).payload;
   } catch (e) {
     const reason = `unreachable: ${e instanceof Error ? e.message : String(e)}`;
     answerRing(ring.ring_id, "out", null, reason);
@@ -125,35 +113,6 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   if (!reply || (reply.ring_id !== undefined && reply.ring_id !== ring.ring_id)) {
     answerRing(ring.ring_id, "out", null, "malformed reply");
     throw new RingError(`${procedure} answered with something that is not a reply to this ring: ${JSON.stringify(payload)}`);
-  }
-  // A definitive answer (accepted or declined, as opposed to the
-  // pre-validation declines ring_service.ts gives before it can identify
-  // a ring at all) MUST be proven by the callee's own key, bound to THIS
-  // ring id and THIS answer -- see ring_service.ts's provenReply and
-  // ringReplyProofProcedure. Without this, whoever currently answers the
-  // procedure is believed regardless of who holds `to`'s key; found live
-  // by the release review 2026-09-03 as the way a hijacked or
-  // misdirected agent.<to>.ring registration could silently intercept
-  // every ring meant for `to`. An unproven or wrongly-proven definitive
-  // answer is treated the same as unreachable: this call learned
-  // something answered, but not verifiably `to`.
-  if (reply.ring_id !== undefined && (reply.answer === ANSWER.accepted || reply.answer === ANSWER.declined)) {
-    const proven =
-      reply.proven !== undefined &&
-      reply.proven.citizen_did.toLowerCase() === to.toLowerCase() &&
-      verifyOwnershipProof({ node_id: to, proof: reply.proven.proof, procedure: ringReplyProofProcedure(to, reply.ring_id, reply.answer) }).ok === 1;
-    if (!proven) {
-      const reason = `unreachable: an answer arrived for ${procedure} but was not verifiably signed by ${to}'s own key -- treating as unreachable rather than trusting it`;
-      answerRing(ring.ring_id, "out", null, reason);
-      return {
-        ring_id: ring.ring_id,
-        to,
-        room_topic: roomTopic,
-        unreachable: 1,
-        reason,
-        next_step: "Someone answered on their behalf without proving it. Do not treat the room as joined; ring again once mesh_agents shows the real agent present.",
-      };
-    }
   }
   answerRing(ring.ring_id, "out", reply.answer, reply.reason);
 
@@ -183,22 +142,21 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
 }
 
 const DESCRIPTION_FULL =
-  "Ring another agent: an addressed invite delivered as a mesh_call to their agent.<node_id>.ring " +
-  "procedure with your identity proof, carrying a room to talk in (a new one, opened for the two of " +
-  "you, unless you pass a room you are already in). You get exactly one of: answer 1 accepted (they " +
-  "join the room; this call then waits up to wait_join_seconds for their participant_joined, so " +
-  "joined: 1 means the room is genuinely two-sided and PROVEN -- an accepted or declined answer is " +
-  "verified against their own key before it is trusted, not just whoever answered), 2 declined " +
-  "(with their reason), 3 deferred (their operator's policy is \"ask\", their model decides later " +
-  "and mesh_answer_ring carries the answer back to you; the room stays open), or unreachable: 1 " +
-  "(nobody serves that procedure right now, or answered without proving they hold the key). purpose " +
+  "Ring another agent: an addressed invite delivered as a mesh_call to their ~<node_id>/ring, a " +
+  "procedure in their own namespace that only they can serve, carrying a room to talk in (a new one, " +
+  "opened for the two of you, unless you pass a room you are already in). You get exactly one of: " +
+  "answer 1 accepted (they join the room; this call then waits up to wait_join_seconds for their " +
+  "participant_joined, so joined: 1 means the room is genuinely two-sided), 2 declined (with their " +
+  "reason), 3 deferred (their operator's policy is \"ask\", their model decides later and " +
+  "mesh_answer_ring carries the answer back to you; the room stays open), or unreachable: 1 (they are " +
+  "not serving their ring endpoint right now). Every answer is signed by their key. purpose " +
   "is mandatory and short: a deferred ring is judged from it. This is the ONLY way to reach an agent " +
   "that has not invited you; never write into a room they have not joined.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. A separately-authored summary, not a truncation: keeps the answer-code meanings and the "only way to reach an uninvited agent" rule, since both are load-bearing for correct use. */
 const DESCRIPTION_TERSE =
-  "Ring another agent (an addressed invite with proof, carrying a room to talk in). Reply is one of: " +
-  "1 accepted (room proven two-sided), 2 declined (with reason), 3 deferred (their model answers " +
+  "Ring another agent (an addressed invite to their ~<node_id>/ring, carrying a room to talk in). Reply is one of: " +
+  "1 accepted (they joined the room), 2 declined (with reason), 3 deferred (their model answers " +
   "later via mesh_answer_ring), or unreachable. purpose is mandatory, short, and is what a deferred " +
   "ring is judged on. The only way to reach an agent that hasn't invited you.";
 
@@ -216,19 +174,15 @@ export function registerMeshRing(server: McpServer): void {
         .max(MAX_WAIT_JOIN_SECONDS)
         .optional()
         .describe(`After an accepted answer, how long to wait for their participant_joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait).`),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ to, purpose, room_topic, wait_join_seconds, host }) => {
+    async ({ to, purpose, room_topic, wait_join_seconds }) => {
       presence.ensurePresence(server);
       try {
-        const result = await placeRing({ to, purpose, room_topic, waitJoinSeconds: wait_join_seconds, host });
+        const result = await placeRing({ to, purpose, room_topic, waitJoinSeconds: wait_join_seconds });
         return jsonContent({ ...result, to_petname: petname(result.to) });
       } catch (e) {
         if (e instanceof RingError || e instanceof rooms.RoomError) return errorContent(`mesh_ring failed: ${e.message}`);
-        return errorContent(describeCliError("mesh_ring failed", e));
+        return errorContent(describeMeshError("mesh_ring failed", e));
       }
     },
   );

@@ -12,7 +12,6 @@ import {
   getRing,
   listRings,
   nodeIdFromRingProcedure,
-  parseProven,
   parseRingAnswerArgs,
   parseRingAnswerReply,
   parseRingArgs,
@@ -21,11 +20,8 @@ import {
   recordRing,
   RingError,
   ringAnswerProblems,
-  ringAnswerProofProcedure,
   ringProblems,
   ringProcedure,
-  ringProofProcedure,
-  ringReplyProofProcedure,
   RING_POLL_MS,
   waitRing,
 } from "./rings.js";
@@ -43,9 +39,9 @@ afterEach(() => {
 });
 
 describe("ring procedure name", () => {
-  it("embeds the presence node id and parses back out of it", () => {
-    expect(ringProcedure(THEM)).toBe(`agent.${THEM}.ring`);
-    expect(nodeIdFromRingProcedure(`agent.${THEM}.ring`)).toBe(THEM);
+  it("is ring in the node's own namespace, and parses back out of it", () => {
+    expect(ringProcedure(THEM)).toBe(`~${THEM}/ring`);
+    expect(nodeIdFromRingProcedure(`~${THEM}/ring`)).toBe(THEM);
     expect(nodeIdFromRingProcedure("hecate_citizens.register_presence")).toBeUndefined();
   });
 });
@@ -91,10 +87,6 @@ describe("ring answers", () => {
     expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: true })).toBeUndefined();
   });
 
-  it("reconstructs a nested proven when the acknowledgement carries one (reserved shape, see RingAnswerReply's own doc)", () => {
-    const proven = { citizen_did: ME, proof: { timestamp: 1, signature: "ab" } };
-    expect(parseRingAnswerReply({ ring_id: "f".repeat(32), received: 1, proven })).toEqual({ ring_id: "f".repeat(32), received: 1, proven });
-  });
 });
 
 describe("parseRingReply", () => {
@@ -106,17 +98,6 @@ describe("parseRingReply", () => {
     expect(parseRingReply(null)).toBeUndefined();
   });
 
-  it("reconstructs the callee's nested proven exactly as ring_service.ts's provenReply actually sends it -- {citizen_did, proof} under a `proven` key, not flat on the reply (regression: parseProven used to be called on the reply itself, so this always came back undefined and mesh_ring.ts's placeRing treated every real accept/decline as unproven)", () => {
-    const proven = { citizen_did: ME, proof: { timestamp: 1_756_857_600_000, signature: "ab".repeat(64) } };
-    const wireReply = { ring_id: "f".repeat(32), answer: 1, room_topic: ROOM, proven };
-    expect(parseRingReply(wireReply)).toEqual({ ring_id: "f".repeat(32), answer: 1, room_topic: ROOM, proven });
-  });
-
-  it("leaves proven undefined (not thrown) when it's missing, malformed, or flat on the reply instead of nested", () => {
-    expect(parseRingReply({ ring_id: "f".repeat(32), answer: 1 })).toEqual({ ring_id: "f".repeat(32), answer: 1 });
-    expect(parseRingReply({ ring_id: "f".repeat(32), answer: 1, proven: { citizen_did: ME } })).toEqual({ ring_id: "f".repeat(32), answer: 1 });
-    expect(parseRingReply({ ring_id: "f".repeat(32), answer: 1, citizen_did: ME, proof: { timestamp: 1, signature: "ab" } })).toEqual({ ring_id: "f".repeat(32), answer: 1 });
-  });
 });
 
 describe("ring records", () => {
@@ -159,35 +140,6 @@ describe("ring records", () => {
     expect(listRings({ self: ME })).toHaveLength(1);
     // self is matched case-insensitively, same as node ids everywhere else on this mesh
     expect(getRing("5".repeat(32), ME.toUpperCase())).toMatchObject({ ring_id: "5".repeat(32) });
-  });
-});
-
-describe("proof-binding procedure strings", () => {
-  it("binds a ring's proof to the callee, the ring id, and the kind -- distinct from a plain call to the same endpoint", () => {
-    expect(ringProofProcedure(THEM, "1".repeat(32))).toBe(`${ringProcedure(THEM)}#ring:${"1".repeat(32)}`);
-    expect(ringProofProcedure(THEM, "1".repeat(32))).not.toBe(ringProcedure(THEM));
-  });
-
-  it("binds a reply's proof to the exact answer given, so a decline cannot be replayed as an accept", () => {
-    const accepted = ringReplyProofProcedure(THEM, "1".repeat(32), 1);
-    const declined = ringReplyProofProcedure(THEM, "1".repeat(32), 2);
-    expect(accepted).not.toBe(declined);
-  });
-
-  it("binds a ring_answer's proof to the caller's own endpoint, the ring id and the answer", () => {
-    const a = ringAnswerProofProcedure(ME, "1".repeat(32), 1);
-    const b = ringAnswerProofProcedure(ME, "1".repeat(32), 2);
-    expect(a).not.toBe(b);
-    expect(a).toBe(`${ringProcedure(ME)}#ring_answer:${"1".repeat(32)}:1`);
-  });
-});
-
-describe("parseProven", () => {
-  it("reads a valid {citizen_did, proof} pair and rejects anything short of it", () => {
-    const good = { citizen_did: ME, proof: { timestamp: 1, signature: "ab" } };
-    expect(parseProven(good)).toEqual({ citizen_did: ME, proof: { timestamp: 1, signature: "ab" } });
-    expect(parseProven({ citizen_did: ME })).toBeUndefined();
-    expect(parseProven({ citizen_did: ME, proof: { timestamp: "1", signature: "ab" } })).toBeUndefined();
   });
 });
 

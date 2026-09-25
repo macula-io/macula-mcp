@@ -10,46 +10,20 @@
 //
 // Distinct from citizenship.ts's mcl-citizens registration: that's
 // mesh-wide presence/directory, registering the CALL's verified caller.
-// This is realm MEMBERSHIP --
-// macula-realm's MembershipUcanRpcHandlers (issue_membership_ucan),
-// gated on MaculaRealm.Identity.DeviceKeyOwnershipProof specifically
-// because minting membership is, by definition, for a device that is
-// NOT YET an admitted member (see that Elixir module's own moduledoc)
-// -- a different proof procedure string than every *_ownership_proof
-// on the mesh, but the exact same {node_id, timestamp, procedure}
-// byte layout (ownership_proof.ts's proofMessage), so
-// macula_ts_client.ts's signOwnershipProof signs it unchanged.
+// This is realm MEMBERSHIP -- macula-realm's MembershipUcanRpcHandlers
+// (issue_membership_ucan), gated on MaculaRealm.Identity.
+// DeviceKeyOwnershipProof because minting membership is, by definition,
+// for a device that is NOT YET an admitted member (see that Elixir
+// module's own moduledoc). On macula 12 the proof is over the key as
+// carried (ML-DSA, the realm's pq_hybrid profile) and the realm derives the
+// node_id from it; macula_ts_client.ts's proveKeyPossession builds it.
 //
-// Procedure string traced from source AND confirmed against a live
-// DHT record (2026-09-04, once macula-realm advertised one at all):
-// macula-realm's MembershipUcanRpcHandlers advertises via
-// macula_topic:realm_hope(realm(), "identity", "issue_membership_ucan", 1),
-// and macula_topic:build/6 (macula/src/macula_topic.erl) turns that into
-// "<Realm>/_realm/_realm/identity/issue_membership_ucan_v1" -- Realm
-// here is the human NAME ("io.macula"), not the DHT's own outer hex
-// scope, so the callable procedure string embeds it too; the two are
-// separate segments stacked (hex-realm-id, then the topic string, which
-// starts with the human name again on its own). membershipUcanProcedure()
-// below builds that full string per realm, NOT a bare suffix -- an
-// earlier version of this file mis-traced this (dropped the embedded
-// realm-name segment) and every call failed as unknown_next_peer until
-// a live procedure_advertisement record made the mistake visible.
-//
-// Realm targeting is NOT discovery-based like citizenship.ts's
-// discoverProcedureRealm: that helper assumes exactly one live
-// advertiser of a given procedure name mesh-wide, true for
-// mcl-citizens/register_presence but false here by design --
-// issue_membership_ucan is meant to run identically across MULTIPLE
-// realms (net.beam-campus during build-out, io.macula once proven; see
-// MACULA_MCP_AUTOJOIN_REALM below), so a name-only DHT scan could match
-// either realm's advertisement nondeterministically once both are live.
-// Instead the target realm's id is computed directly, client-side --
-// realmId() below, confirmed byte-for-byte against macula_realm:id/1
-// (crypto:hash(sha256, RealmName), macula/src/macula_realm.erl) and
-// against the exact hex string @macula-io/ts's Session.call already
-// proved live for io.macula (ABB81B5A...FCD1, verified against the
-// citizens directory 2026-09-04) -- so this never needs to find or trust
-// somebody else's advertisement to know which realm to call.
+// Realm targeting is not discovery-based like citizenship.ts's: the same
+// procedure is meant to run in several realms (net.beam-campus while being
+// proven, io.macula after), so a name-only DHT scan could match either.
+// The realm id is computed instead (mesh_config.ts's realmIdOf, macula_realm:
+// id/1's sha256 of the name), and a realm other than io.macula must have its
+// key in MACULA_MESH_REALMS, or no provider in it can be trusted.
 //
 // Opt-in, not opt-out: MACULA_MCP_AUTOJOIN_REALM names the realm to
 // silently join (e.g. "net.beam-campus" while this is being proven
@@ -58,9 +32,8 @@
 // and pressure-test against net.beam-campus first, then flip it on for
 // io.macula") rather than defaulting to minting credentials against the
 // commons realm the moment this ships.
-import { createHash } from "node:crypto";
-import { defaultIdentityPath } from "./mesh_config.js";
-import { callThenDirect, signOwnershipProof } from "./macula_ts_client.js";
+import { realmIdOf } from "./mesh_config.js";
+import { call, proveKeyPossession, selfNodeId } from "./macula_ts_client.js";
 import { loadCredential, storeCredential, type RealmCredential } from "./realm.js";
 
 /**
@@ -92,17 +65,12 @@ export function autoJoinRealmName(): string | undefined {
   return v ? v : undefined;
 }
 
-/** sha256(name), hex, uppercase -- macula_realm:id/1's exact byte layout (crypto:hash(sha256, RealmName)), cased to match what Session.call's `realm` option has already been proven to accept live. Pure. */
-export function realmId(name: string): string {
-  return createHash("sha256").update(name, "utf8").digest("hex").toUpperCase();
-}
-
-/** The issue_membership_ucan payload: base64 pubkey (DeviceKeyOwnershipProof.decode_pubkey expects Base.decode64), hex-signed proof, optional ttl. Pure. */
-export function deviceJoinArgs(input: { nodeId: string; timestamp: number; signature: string; ttlSeconds?: number }): Record<string, unknown> {
+/** The issue_membership_ucan payload: the key as carried (base64, what DeviceKeyOwnershipProof decodes), the hex-signed proof, and an optional ttl. Pure. */
+export function deviceJoinArgs(proof: { public_key: string; timestamp: number; signature: string }, ttlSeconds?: number): Record<string, unknown> {
   return {
-    public_key: Buffer.from(input.nodeId, "hex").toString("base64"),
-    proof: { timestamp: input.timestamp, signature: input.signature },
-    ...(input.ttlSeconds ? { ttl_seconds: input.ttlSeconds } : {}),
+    public_key: proof.public_key,
+    proof: { timestamp: proof.timestamp, signature: proof.signature },
+    ...(ttlSeconds ? { ttl_seconds: ttlSeconds } : {}),
   };
 }
 
@@ -142,37 +110,28 @@ export function parseMembershipUcanResult(payload: unknown): MembershipUcanResul
 }
 
 /**
- * One silent auto-join attempt against `realmName`. Signs a fresh
- * DeviceKeyOwnershipProof (bound to MEMBERSHIP_UCAN_PROOF_PROCEDURE,
- * never the citizen-directory's proof procedure), calls
- * issue_membership_ucan at that realm's own id, and returns the
- * resulting credential -- it does NOT store it; see ensureAutoJoin,
- * which is the idempotent, storing, presence-integrated entry point.
- * Throws on any failure; callers record, never propagate (same
- * discipline as citizenship.ts's register()).
- *
- * Plain-then-direct-dial, same as citizenship.ts's callThenDirect: a
- * plain call depends on inter-station gossip already carrying a route
- * to macula-realm's own station, which direct-dial sidesteps -- and now
- * has something to resolve, since macula-realm gained a real DHT
- * procedure_advertisement record for issue_membership_ucan (2026-09-04,
- * ae0d507) after starting with none at all.
+ * One silent auto-join attempt against `realmName`: proves possession of
+ * this node's key for MEMBERSHIP_UCAN_PROOF_PROCEDURE (never another
+ * procedure's), calls issue_membership_ucan in that realm, and returns the
+ * credential without storing it (ensureAutoJoin stores). A reply naming a
+ * node other than this one is refused. Throws on any failure; callers
+ * record, never propagate.
  */
-export async function joinDevice(input: { host?: string; realmName: string }): Promise<RealmCredential> {
-  const identityPath = defaultIdentityPath();
-  const signed = signOwnershipProof(identityPath, MEMBERSHIP_UCAN_PROOF_PROCEDURE);
-  const callArgs = deviceJoinArgs({ nodeId: signed.node_id, timestamp: signed.timestamp, signature: signed.signature });
-  const res = await callThenDirect({
-    host: input.host,
+export async function joinDevice(input: { realmName: string }): Promise<RealmCredential> {
+  const nodeId = await selfNodeId();
+  const proof = await proveKeyPossession(MEMBERSHIP_UCAN_PROOF_PROCEDURE);
+  const res = await call({
     procedure: membershipUcanProcedure(input.realmName),
-    realm: realmId(input.realmName),
-    callArgs,
+    realm: realmIdOf(input.realmName),
+    callArgs: deviceJoinArgs(proof),
     timeoutMs: CALL_TIMEOUT_MS,
-    identityPath,
   });
   const outcome = parseMembershipUcanResult(res.payload);
+  if (outcome.citizen_did.toLowerCase() !== nodeId) {
+    throw new Error(`issue_membership_ucan names ${outcome.citizen_did}, not this node ${nodeId}`);
+  }
   return {
-    node_id: signed.node_id,
+    node_id: nodeId,
     portal: input.realmName,
     org_identity: `mri:org:${input.realmName}`,
     refresh_token: "",
@@ -191,12 +150,12 @@ export async function joinDevice(input: { host?: string; realmName: string }): P
  * directory/realm being unreachable must never take presence down with
  * it, same discipline as citizenship.ts's attempt()/register() split.
  */
-export async function ensureAutoJoin(input: { host?: string; nodeId: string }): Promise<void> {
+export async function ensureAutoJoin(input: { nodeId: string }): Promise<void> {
   const realmName = autoJoinRealmName();
   if (!realmName) return;
   if (loadCredential(input.nodeId)) return;
   try {
-    const cred = await joinDevice({ host: input.host, realmName });
+    const cred = await joinDevice({ realmName });
     storeCredential(cred);
   } catch (e) {
     console.error(`device_membership: silent auto-join of ${input.nodeId} against ${realmName} failed: ${e instanceof Error ? e.message : String(e)}`);

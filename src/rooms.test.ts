@@ -5,7 +5,7 @@ const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
 
 const mocks = vi.hoisted(() => ({
-  tsIdentity: vi.fn(),
+  selfNodeId: vi.fn(),
   publish: vi.fn(),
   currentNodeId: vi.fn(),
   observerStart: vi.fn(),
@@ -15,8 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 // Boundary mock, same pattern as presence.test.ts's own: replace the module
 // rooms.ts talks to the mesh THROUGH (macula_ts_client.js), not mesh_config.js
-// -- rooms.ts only ever imports pure config (defaultIdentityPath) from there.
-vi.mock("./macula_ts_client.js", () => ({ publish: mocks.publish, tsIdentity: mocks.tsIdentity }));
+vi.mock("./macula_ts_client.js", () => ({ publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
 vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId }));
 vi.mock("./lobby_observer.js", () => ({
   start: mocks.observerStart,
@@ -27,15 +26,14 @@ vi.mock("./lobby_observer.js", () => ({
 
 beforeEach(async () => {
   process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB = ":memory:";
-  process.env.MACULA_MCP_IDENTITY = "test-default-identity";
   mocks.currentNodeId.mockReturnValue(ME);
-  mocks.tsIdentity.mockReturnValue({ node_id: ME, path: "test-default-identity", generated: false });
+  mocks.selfNodeId.mockResolvedValue(ME);
   mocks.observerStart.mockResolvedValue({ already_active: true });
   mocks.isTapped.mockReturnValue(true);
   mocks.publish.mockImplementation(async ({ topic, fact }: { topic: string; fact: Record<string, unknown> }) => {
     // the background watch would record this agent's own fact too, with the
-    // station's own attestation of who published it (the real `publish()`
-    // always uses the default identity, so publisher === fact.from here).
+    // its verified publisher (this server's one identity, so publisher ===
+    // fact.from here).
     recordFact({ topic, payload: fact, at: new Date().toISOString(), publisher: fact.from as string });
     return { topic, duration_ms: 1 };
   });
@@ -45,7 +43,6 @@ beforeEach(async () => {
 afterEach(() => {
   closeTranscript();
   delete process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB;
-  delete process.env.MACULA_MCP_IDENTITY;
   vi.resetAllMocks();
   vi.useRealTimers();
 });

@@ -16,8 +16,7 @@
 // operator privacy even though nothing here is a bearer credential or a
 // state change.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defaultIdentityPath } from "./mesh_config.js";
-import { tsIdentity } from "./macula_ts_client.js";
+import { selfNodeId } from "./macula_ts_client.js";
 import { jsonContent } from "./reply.js";
 import { listCredentials, type RealmMembership } from "./realm.js";
 import { toolDescription } from "./tool_description.js";
@@ -57,7 +56,7 @@ const LIST_REALMS_DESCRIPTION_TERSE =
 
 export function registerMeshListRealms(server: McpServer): void {
   server.tool("mesh_list_realms", toolDescription(LIST_REALMS_DESCRIPTION_FULL, LIST_REALMS_DESCRIPTION_TERSE), {}, async () => {
-    const { node_id: nodeId } = tsIdentity(defaultIdentityPath());
+    const nodeId = await selfNodeId();
     const memberships = listCredentials(nodeId).map(realmSummary);
     return jsonContent({ realms: memberships });
   });

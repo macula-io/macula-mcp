@@ -8,25 +8,80 @@ fires on a `v*` tag push, not on every commit to `main`).
 ## [Unreleased]
 
 ### Breaking
-- The mesh services this server calls are the `mcl-*` services on macula 12;
-  the `hecate-*` ones are gone from the fleet. `mesh_list_stations` calls
-  `mcl-stations/list_stations`, `mesh_recall`/`mesh_remember`/
-  `mesh_remember_directory` call `mcl-rag/answer_query`, `/add_knowledge` and
-  `/upload_knowledge`, and citizenship registers with
-  `mcl-citizens/register_presence`. Each is found by its org-namespaced
-  procedure name in the DHT, as the provider advertised it.
-- Citizenship sends no ownership proof and no `citizen_did`:
-  mcl-citizens registers the call's verified caller.
-- `mesh_list_stations` passes text fields through unchanged (mcl-stations
-  sends them as text) and returns `node_id` as plain 64-hex. The hex
-  decoding of text fields is gone.
+- **On the macula 12 wire.** Releases before this one speak the retired 10.x
+  wire and cannot reach the current fleet. macula-mcp now runs on
+  `@macula-io/ts` 0.18 (macula-go v0.11.0): post-quantum QUIC, signed calls,
+  replies and publications.
+- **New identity: re-join your realms and re-trust your agents.** This server
+  now has ONE identity, an ML-DSA node key under the fleet's `pq_hybrid`
+  profile, at `~/.config/macula-mcp/keys/<session>.key` (still scoped per
+  session, `MACULA_MCP_IDENTITY` still pins it). Its node_id is new: no
+  Ed25519 identity carries over. Anything that named your old node_id must be
+  redone with the new one: realm memberships (`mesh_join_realm`,
+  `macula-mcp-realm join`), other agents' allowlists and trust in you, and
+  yours in them. The old seed files are left untouched and never read.
+- **One pool, one identity, for everything.** The per-concern identities and
+  their variables are gone (`MACULA_MCP_WATCH_IDENTITY`,
+  `MACULA_MCP_PRESENCE_IDENTITY`, `MACULA_MCP_PRESENCE_GOODBYE_IDENTITY`,
+  `MACULA_MCP_SERVE_IDENTITY`, `MACULA_MCP_SERVE_ADVERTISE_IDENTITY`,
+  `MACULA_MCP_OBSERVE_IDENTITY`, `MACULA_MCP_RING_SOCKET_DIR`), and so are the
+  one-Session-per-topic connections and their reconnect loops: the pool
+  links every station, and redials a dropped link with its subscriptions and
+  served procedures replayed.
+- **Stations are pinned by node_id.** `MACULA_MESH_STATIONS` takes
+  `host:port@<node_id hex>` entries and refuses one without a node_id;
+  `MACULA_MESH_STATION` is gone. The default is the six fleet stations.
+- **Realms default to io.macula**, not the all-zero realm, and a provider is
+  trusted only when the realm's key authorizes it: io.macula's key ships
+  with this package, `MACULA_MESH_REALMS` adds `<realm hex>=<key hex>`
+  entries.
+- **No tool takes `host` any more**, and `mesh_call` has no `direct` (every
+  call is by direct dial) and no `prove_identity`.
+- **Ownership proofs are dropped, not ported.** On macula 12 every CALL is
+  signed by its caller and verified before the provider sees it, and every
+  RESULT is signed by the provider, so the Ed25519 proofs rings,
+  `prove_identity` and citizenship carried proved nothing more. A capability
+  that acts as the caller (mcl-mail, mcl-graph, mcl-citizens) reads the
+  verified caller.
+- **Rings are `~<node_id>/ring`**, a procedure in the callee's own namespace
+  that only it can serve, served in-process (no relay subprocess, no local
+  socket). A ring whose `from` is not its verified caller is declined.
+- **`mesh_serve` takes `name` and serves `~<node_id>/<name>`**, in-process;
+  the command gets the caller's verified node_id in `MACULA_MCP_CALLER`.
+  `mesh_unserve` takes the same `name`.
+- **`mesh_put`/`mesh_get` refuse, saying why**: stations keep no content on
+  macula 12, and node-served content (macula-io/macula#35) is not in the SDK
+  yet. **`mesh_call` refuses while `MACULA_MCP_UCAN` is set**: a UCAN cannot
+  be attached until post-quantum UCANs land (macula-io/macula-go#2).
+- **Realm joining proves possession of the ML-DSA key** (the key as carried,
+  and its signature over key, timestamp and procedure), as macula-realm's
+  join session and `issue_membership_ucan` check it on macula 12. Realm
+  credentials without a `tier`, and the pre-multi-realm flat credential file,
+  are no longer read.
+- The DHT tools report records the client verified, and how many it
+  `dropped`; the unverified-record caveat is gone.
+- The mesh services this server calls are the `mcl-*` services on macula 12:
+  `mesh_list_stations` calls `mcl-stations/list_stations`,
+  `mesh_recall`/`mesh_remember`/`mesh_remember_directory` call
+  `mcl-rag/answer_query`, `/add_knowledge` and `/upload_knowledge`, and
+  citizenship registers with `mcl-citizens/register_presence`, each found in
+  the DHT under the realm it is advertised in.
+
+### Changed
+- A hello or goodbye counts only when its `node_id` is its verified
+  publisher: nobody can make another agent appear on, or vanish from, a
+  roster.
+- `mesh_open_room` rings its participants all at once instead of one at a
+  time: nothing serializes calls any more.
+- `scripts/fleet-live-check.mjs` replaces the five live-check scripts: two
+  real agents on the fleet, driving the compiled tool handlers.
 
 ### Known limits
-- None of this reaches the macula 12 fleet yet: `@macula-io/ts` runs on
-  macula-go, which does not speak the macula 12 handshake. It works once
-  the SDK moves to 12.
-- `mesh_call`'s `prove_identity` proof carries no public key, which the
-  mcl-* services on macula 12 require; it arrives with the same SDK move.
+- The ring endpoint and `mesh_serve` need stations that admit a node's own
+  namespace (macula-station 0.6.4); an older station refuses them with
+  `no_authorization`.
+- Citizenship and `mesh_list_stations` wait for mcl-citizens and
+  mcl-stations to be served on the fleet again.
 
 ## [0.32.0] - 2026-09-15
 

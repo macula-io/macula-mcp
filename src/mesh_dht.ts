@@ -1,84 +1,56 @@
 // Tools: mesh_find_record / mesh_find_records / mesh_find_records_by_type
 // — read the mesh's signed DHT record store.
 //
-// A one-shot connect-and-close like every other point-in-time tool here,
-// NOT a standing peer registry: this reads whatever the connected
-// station's own DHT already holds, point-in-time, same shape as
-// mesh_call/mesh_get. macula-mcp itself never accumulates its own
-// directory (the old hecate-daemon did, and it's gone) -- these tools
-// accumulate nothing; the mesh already does.
+// Point-in-time reads of what the stations' DHT holds, not a peer registry
+// macula-mcp keeps. Every record returned has been verified (signature,
+// signer, expiry) by the client before it reaches the tool; `dropped` says
+// how many did not verify and were left out.
 //
-// mesh_find_records_by_type is the discovery entry point: list every
-// record of a type (e.g. procedure_advertisement, the DHT record every
-// direct-dial-advertised capability publishes) currently visible from the
-// connecting station. A capability's realm is embedded in its
-// procedure_uri (hex(realm) + "/" + procedure, macula-go's DiscoveryURI
-// convention), decoded here into procedure_advertisement.realm/.procedure
-// As of the macula-ts cutover (2026-09), these tools no longer verify a
-// record's signature or check its expiry on the caller's behalf -- there
-// is no `verified`/`verify_error` field anymore. @macula-io/ts's own
-// findRecord/findRecords/findRecordsByType say the same in their own doc
-// comments: a caller that needs to trust `payload` must check the
-// signature itself (against `key`/`signature`/`expires_at_ms`). This is a
-// real, known regression from the macula-cli-backed implementation, not
-// an oversight -- see README.md/CHANGELOG.md.
+// mesh_find_records_by_type is the discovery entry point: every record of
+// a type, e.g. procedure_advertisement, each advertisement's realm,
+// procedure, advertiser and serving station decoded.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
-import { findRecord, findRecords, findRecordsByType } from "./macula_ts_client.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { findRecord, findRecords, findRecordsByType, RECORD_TYPE_NAMES } from "./macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { toolDescription } from "./tool_description.js";
 
 const KEY_DESCRIPTION =
-  "32-byte DHT storage key as hex (64 chars) -- e.g. from ProcedureKey(procedure_uri) " +
-  "on the publishing side, or a key already seen in a mesh_find_records_by_type result. " +
-  "This is NOT the same as a record's own advertiser/signer key.";
+  "32-byte DHT storage key as hex (64 chars) -- e.g. a procedure's key, or a key already seen in a " +
+  "mesh_find_records_by_type result. NOT the same as a record's own signer (key_id).";
 
 const FIND_RECORD_DESCRIPTION_FULL =
-  "Fetch one DHT record by its 32-byte storage key. Always the DHT's own all-zero realm " +
-  `(no realm parameter -- DHT storage is protocol-internal). Defaults to ${defaultStation()} if host isn't given.`;
-/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const FIND_RECORD_DESCRIPTION_TERSE = `Fetch one DHT record by its 32-byte storage key. Always the all-zero DHT realm. Defaults to ${defaultStation()} if host isn't given.`;
+  "Fetch one verified DHT record by its 32-byte storage key: its type, signer (key_id), times and payload, " +
+  "a procedure advertisement's fields decoded. found: false when the stations hold none.";
+const FIND_RECORD_DESCRIPTION_TERSE = "Fetch one verified DHT record by its 32-byte storage key.";
 
 const FIND_RECORDS_DESCRIPTION_FULL =
-  "Fetch EVERY record stored at a DHT key -- the full signer-deduped multiset (e.g. every " +
-  "procedure_advertisement one procedure has from different providers). Always the DHT's own " +
-  `all-zero realm. Defaults to ${defaultStation()} if host isn't given.`;
-/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const FIND_RECORDS_DESCRIPTION_TERSE = `Fetch EVERY record stored at a DHT key (full signer-deduped multiset). Always the all-zero DHT realm. Defaults to ${defaultStation()} if host isn't given.`;
+  "Fetch EVERY verified record stored at a DHT key (e.g. every procedure_advertisement one procedure " +
+  "has from different providers), and how many did not verify.";
+const FIND_RECORDS_DESCRIPTION_TERSE = "Fetch every verified record at a DHT key, and how many did not verify.";
 
 const FIND_RECORDS_BY_TYPE_DESCRIPTION_FULL =
-  "List every DHT record of one type currently visible from the connecting station -- the " +
-  "discovery entry point. Pass record_type \"procedure_advertisement\" to see every capability " +
-  "this station knows about (each record's realm and plain procedure name decoded out of its " +
-  "procedure_uri). Coverage depends on that station's own view of the DHT, not the whole mesh. " +
-  `Always the DHT's own all-zero realm. Defaults to ${defaultStation()} if host isn't given.`;
-/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "this station's view, not the whole mesh" caveat -- a real coverage limit, not just color. */
+  "List every verified DHT record of one type the stations hold -- the discovery entry point. Pass " +
+  "record_type \"procedure_advertisement\" to see every capability on the mesh with its realm, procedure, " +
+  "advertiser and serving station. Coverage is what the linked stations' DHT holds, not a census.";
 const FIND_RECORDS_BY_TYPE_DESCRIPTION_TERSE =
-  "List every DHT record of one type (discovery entry point -- try \"procedure_advertisement\" " +
-  `for every capability this station knows about). Coverage is this station's own DHT view, not ` +
-  `the whole mesh. Always the all-zero DHT realm. Defaults to ${defaultStation()} if host isn't given.`;
+  "List every verified DHT record of one type (discovery entry point -- try \"procedure_advertisement\"). " +
+  "Coverage is the linked stations' DHT, not a census.";
 
 export function registerMeshDht(server: McpServer): void {
   server.tool(
     "mesh_find_record",
     toolDescription(FIND_RECORD_DESCRIPTION_FULL, FIND_RECORD_DESCRIPTION_TERSE),
-    {
-      key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
-    },
-    async ({ key_hex, host }) => {
+    { key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION) },
+    async ({ key_hex }) => {
       ensurePresence(server);
       try {
-        const res = await findRecord({ host, keyHex: key_hex, identityPath: defaultIdentityPath() });
-        return jsonContent({ host: res.host, found: res.found, record: res.record });
+        const record = await findRecord({ keyHex: key_hex });
+        return jsonContent({ found: record !== null, record });
       } catch (e) {
-        return errorContent(describeCliError("mesh_find_record failed", e));
+        return errorContent(describeMeshError("mesh_find_record failed", e));
       }
     },
   );
@@ -86,20 +58,13 @@ export function registerMeshDht(server: McpServer): void {
   server.tool(
     "mesh_find_records",
     toolDescription(FIND_RECORDS_DESCRIPTION_FULL, FIND_RECORDS_DESCRIPTION_TERSE),
-    {
-      key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
-    },
-    async ({ key_hex, host }) => {
+    { key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION) },
+    async ({ key_hex }) => {
       ensurePresence(server);
       try {
-        const res = await findRecords({ host, keyHex: key_hex, identityPath: defaultIdentityPath() });
-        return jsonContent({ host: res.host, count: res.count, records: res.records });
+        return jsonContent(await findRecords({ keyHex: key_hex }));
       } catch (e) {
-        return errorContent(describeCliError("mesh_find_records failed", e));
+        return errorContent(describeMeshError("mesh_find_records failed", e));
       }
     },
   );
@@ -107,25 +72,13 @@ export function registerMeshDht(server: McpServer): void {
   server.tool(
     "mesh_find_records_by_type",
     toolDescription(FIND_RECORDS_BY_TYPE_DESCRIPTION_FULL, FIND_RECORDS_BY_TYPE_DESCRIPTION_TERSE),
-    {
-      record_type: z
-        .string()
-        .describe(
-          "\"procedure_advertisement\", \"content_announcement\", \"station_endpoint\", or a raw " +
-            "type number 0-255.",
-        ),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
-    },
-    async ({ record_type, host }) => {
+    { record_type: z.string().describe(`One of ${RECORD_TYPE_NAMES.map((n) => `"${n}"`).join(", ")}, or a raw type number 0-255.`) },
+    async ({ record_type }) => {
       ensurePresence(server);
       try {
-        const res = await findRecordsByType({ host, recordType: record_type, identityPath: defaultIdentityPath() });
-        return jsonContent({ host: res.host, type: res.type, count: res.count, records: res.records });
+        return jsonContent(await findRecordsByType({ recordType: record_type }));
       } catch (e) {
-        return errorContent(describeCliError("mesh_find_records_by_type failed", e));
+        return errorContent(describeMeshError("mesh_find_records_by_type failed", e));
       }
     },
   );

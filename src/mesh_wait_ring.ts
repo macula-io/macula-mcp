@@ -23,9 +23,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultIdentityPath } from "./mesh_config.js";
-import { tsIdentity } from "./macula_ts_client.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { selfNodeId } from "./macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
 import * as ringService from "./ring_service.js";
@@ -73,11 +72,11 @@ export function registerMeshWaitRing(server: McpServer): void {
         return errorContent(`mesh_wait_ring: ${why} -- nothing can ring this agent right now, waiting would only time out`);
       }
       try {
-        const me = presence.currentNodeId() ?? tsIdentity(defaultIdentityPath()).node_id;
+        const me = presence.currentNodeId() ?? (await selfNodeId());
         const res = await waitRing({ self: me, waitSeconds: wait_seconds });
         return jsonContent(res.ring ? { ...res, ring: { ...res.ring, peer_petname: petname(res.ring.peer) } } : res);
       } catch (e) {
-        return errorContent(describeCliError("mesh_wait_ring failed", e));
+        return errorContent(describeMeshError("mesh_wait_ring failed", e));
       }
     },
   );

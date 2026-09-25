@@ -47,8 +47,7 @@
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./mesh_config.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { toolDescription } from "./tool_description.js";
@@ -130,12 +129,8 @@ export function registerMeshHello(server: McpServer): void {
         .positive()
         .optional()
         .describe("Heartbeat interval in seconds (default 60, minimum 10)."),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ operator_name, session_name, message, model, interval_seconds, host }) => {
+    async ({ operator_name, session_name, message, model, interval_seconds }) => {
       try {
         // Only the explicit tool args, not the MACULA_MCP_*-env-var
         // fallbacks below -- those are an operator's own standing
@@ -145,7 +140,6 @@ export function registerMeshHello(server: McpServer): void {
         if (session_name !== undefined) assertNoLikelySecret(session_name, "session_name");
         if (message !== undefined) assertNoLikelySecret(message, "message");
         const result = await presence.start({
-          host,
           // Explicit args win; MACULA_MCP_OPERATOR_NAME/SESSION_NAME/
           // HELLO_MESSAGE/MODEL are an operator's standing default so an
           // agent doesn't have to type them on every call, same spirit as
@@ -159,7 +153,7 @@ export function registerMeshHello(server: McpServer): void {
         });
         return jsonContent({ banner: banner(), ...result });
       } catch (e) {
-        return errorContent(describeCliError("mesh_hello failed", e));
+        return errorContent(describeMeshError("mesh_hello failed", e));
       }
     },
   );
