@@ -49,9 +49,11 @@ fires on a `v*` tag push, not on every commit to `main`).
 - **`mesh_serve` takes `name` and serves `~<node_id>/<name>`**, in-process;
   the command gets the caller's verified node_id in `MACULA_MCP_CALLER`.
   `mesh_unserve` takes the same `name`.
-- **`mesh_put`/`mesh_get` refuse, saying why**: stations keep no content on
-  macula 12, and node-served content (macula-io/macula#35) is not in the SDK
-  yet. **`mesh_call` refuses while `MACULA_MCP_UCAN` is set**: a UCAN cannot
+- **`mesh_put`/`mesh_get` are node-served content** (macula 12, D27, through
+  `@macula-io/ts` 0.19.0): stations keep no content, so `mesh_put` shares the
+  bytes from this agent while it is present and answers a 100-hex MCID, and
+  `mesh_get` fetches an MCID from any node sharing it, verifying every byte.
+  The old `artifact_id`/`content_base64` shape is gone. **`mesh_call` refuses while `MACULA_MCP_UCAN` is set**: a UCAN cannot
   be attached until post-quantum UCANs land (macula-io/macula-go#2).
 - **Realm joining proves possession of the ML-DSA key** (the key as carried,
   and its signature over key, timestamp and procedure), as macula-realm's

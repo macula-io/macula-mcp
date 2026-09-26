@@ -139,8 +139,9 @@ this is a STANDING INBOUND SURFACE, not a one-shot action. Never register a comm
 a stranger able to trigger repeatedly. Call mesh_unserve to stop. The ring endpoint above is the one \
 procedure served without you asking; its handler ships in this package and consults your operator's \
 contact policy before doing anything.
-- mesh_put/mesh_get refuse for now: macula 12 stations keep no content, and node-served content is not \
-in the SDK yet.`;
+- mesh_put shares bytes from THIS agent: they are served while it is present and gone when it leaves. \
+Anyone who learns the MCID can fetch them, so share nothing private. mesh_get fetches an MCID from any node \
+that shares it and verifies every byte; code=not_shared means nobody shares it right now.`;
 
 const server = new McpServer(
   { name: "macula-mcp", version: serverVersion() },

@@ -100,8 +100,8 @@ The descriptions below are the full ones, always what a full-context client sees
 | Tool           | Primitive       | What it does                                                                                                                                                                                                                                                                      |
 | -------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mesh_call`    | RPC             | Invoke a capability a provider advertises (build, test, search, deploy) over the mesh, by direct dial to a provider the realm's key authorizes. Returns the result + `duration_ms`; a provider's error or a station's relay error comes back with its code. Refuses by name while `MACULA_MCP_UCAN` is set (post-quantum UCANs are macula-io/macula-go#2). |
-| `mesh_put`     | Content Sharing | Refuses for now, saying why: macula 12 stations keep no content, and node-served content (macula-io/macula#35) is not in the SDK yet. |
-| `mesh_get`     | Content Sharing | Refuses for now, for the same reason. |
+| `mesh_put`     | Content Sharing | Share bytes from this agent, served while it is present; answers their MCID. Anyone with the MCID can fetch them. |
+| `mesh_get`     | Content Sharing | Fetch an MCID from any node that shares it, every byte verified against the MCID. |
 | `mesh_find_record` / `mesh_find_records` / `mesh_find_records_by_type` | DHT | Read the mesh's signed DHT record store. Every record returned is verified (signature, signer, expiry) and `dropped` counts the ones that were not. `mesh_find_records_by_type` with `record_type: "procedure_advertisement"` is the discovery entry point: every capability on the mesh with its realm, procedure, advertiser and serving station. See [Realms](#realms). |
 | `mesh_list_stations` | DHT + RPC | "Which stations can you connect to?" in one call: discovers which realm `mcl-stations/list_stations` (the mesh's canonical station directory) is advertised under, then calls it. Optional `near`/`continent`/`country`/`city` filters; human-readable fields (city, hostname, ...) decoded from the wire's byte-string encoding. A composition of two calls under the hood, not one. See [Stations](#stations). |
 | `mesh_recall`  | DHT + RPC       | Query the mesh's shared memory (`mcl-rag`) for anything relevant to `query_text`: semantic retrieval. Auto-discovers `mcl-rag`'s realm, same composition as `mesh_list_stations`. Empty results mean nothing relevant is there yet, not an error. See [Memory](#memory). |
@@ -842,8 +842,7 @@ admit a node's own namespace (macula-station 0.6.4). Citizenship and
 `mesh_list_stations` wait for mcl-citizens and mcl-stations to be served on
 the fleet again.
 
-**Not available yet:** content exchange (`mesh_put`/`mesh_get` refuse, see
-[Tools](#tools)) and UCAN-gated calls (post-quantum UCANs,
+**Not available yet:** UCAN-gated calls (post-quantum UCANs,
 macula-io/macula-go#2).
 
 **Not available, by design:** no standing background subscription beyond

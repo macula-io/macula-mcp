@@ -30,9 +30,9 @@ Stations: 0.6.4 (own-namespace admission) not released; the fleet runs 0.6.2.
 - **Ownership proofs** (Ed25519, signed through `identity sign`) are dropped,
   not ported: a served call carries the caller's verified key id and every
   publication is signed, so on 12 they prove nothing more.
-- **Artifacts** (content transfer) refuse by name until macula has
-  node-served content (macula#35); **UCAN-gated calls** until PQ UCANs
-  (macula-go#2).
+- **Artifacts** (`mesh_put`/`mesh_get`) are node-served content (D27) through
+  `@macula-io/ts` 0.19.0: served by the sharing agent while present.
+  **UCAN-gated calls** refuse until PQ UCANs (macula-go#2).
 
 ## Stations and realms
 

@@ -13,7 +13,9 @@
 // one pool.
 
 import {
+  ContentUnavailableError,
   NodeKey,
+  NotSharedError,
   Pool,
   ProviderError,
   RecordType,
@@ -79,6 +81,8 @@ export function toMeshError(e: unknown): MeshError {
   if (e instanceof MeshError) return e;
   if (e instanceof ProviderError) return new MeshError(e.message, e.code, "provider");
   if (e instanceof RelayError) return new MeshError(e.message, e.code, "station");
+  if (e instanceof NotSharedError) return new MeshError(e.message, "not_shared");
+  if (e instanceof ContentUnavailableError) return new MeshError(e.message, "unavailable");
   return new MeshError(messageOf(e));
 }
 
@@ -236,6 +240,38 @@ export async function serve(args: {
   const pool = await sharedPool();
   try {
     return await pool.serve(realmOf(args.realm), args.procedure, args.handler, { bytes: args.bytes });
+  } catch (e) {
+    throw toMeshError(e);
+  }
+}
+
+// ---- content ---------------------------------------------------------------
+
+/**
+ * Shares data in `realm` (io.macula by default): this node keeps it, serves it
+ * on its own ~<node_id>/content_v1 and announces it for as long as this
+ * process runs, and returns its content id (MCID) as hex. Data of at most 256
+ * KiB is one block; larger data a manifest over 256 KiB chunks, named name.
+ */
+export async function shareContent(args: { data: Uint8Array; name?: string; realm?: string }): Promise<string> {
+  const pool = await sharedPool();
+  try {
+    return await pool.shareContent(realmOf(args.realm), args.data, args.name ?? "");
+  } catch (e) {
+    throw toMeshError(e);
+  }
+}
+
+/**
+ * The content `mcidHex` names in `realm` (io.macula by default), fetched from
+ * a node that shares it and checked against the content id: no sharer is
+ * trusted. Nobody sharing it is code not_shared; every sharer failing, code
+ * unavailable.
+ */
+export async function getContent(args: { mcidHex: string; realm?: string }): Promise<Uint8Array> {
+  const pool = await sharedPool();
+  try {
+    return await pool.getContent(realmOf(args.realm), args.mcidHex, {});
   } catch (e) {
     throw toMeshError(e);
   }

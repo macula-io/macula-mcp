@@ -12,11 +12,13 @@ vi.mock("@macula-io/ts", async (importOriginal) => {
   return { ...actual, Pool: { connect: poolConnect }, NodeKey: { loadOrCreate } };
 });
 
-import { ProviderError, RelayError, RecordType } from "@macula-io/ts";
+import { ContentUnavailableError, NotSharedError, ProviderError, RelayError, RecordType } from "@macula-io/ts";
 import {
   call,
   ownProcedure,
   serve,
+  shareContent,
+  getContent,
   decodeRecord,
   discoverProcedureRealm,
   findRecordsByType,
@@ -36,6 +38,8 @@ function fakePool() {
     subscribe: vi.fn(),
     findRecordsByType: vi.fn(async () => ({ records: [], dropped: 0 })),
     serve: vi.fn(async () => ({ stop: vi.fn() })),
+    shareContent: vi.fn(async () => "0255" + "ab".repeat(48)),
+    getContent: vi.fn(async () => new Uint8Array([1, 2, 3])),
     close: vi.fn(async () => {}),
   };
 }
@@ -191,5 +195,21 @@ describe("serving in this node's own namespace", () => {
   it("refuses a name that is not one segment", async () => {
     await expect(ownProcedure("a/b")).rejects.toThrow(MeshError);
     await expect(ownProcedure("")).rejects.toThrow(MeshError);
+  });
+});
+
+describe("content", () => {
+  it("shares bytes in io.macula and fetches a content id, both by the pool", async () => {
+    expect(await shareContent({ data: new Uint8Array([9]), name: "a.txt" })).toBe("0255" + "ab".repeat(48));
+    expect(pool.shareContent).toHaveBeenCalledWith(IO_MACULA_REALM_ID, new Uint8Array([9]), "a.txt");
+    expect(await getContent({ mcidHex: "0255" + "ab".repeat(48) })).toEqual(new Uint8Array([1, 2, 3]));
+    expect(pool.getContent).toHaveBeenCalledWith(IO_MACULA_REALM_ID, "0255" + "ab".repeat(48), {});
+  });
+
+  it("brings content nobody shares, and content no sharer gave, back as MeshErrors with their codes", async () => {
+    pool.getContent.mockRejectedValueOnce(new NotSharedError());
+    await expect(getContent({ mcidHex: "0255" + "ab".repeat(48) })).rejects.toMatchObject({ code: "not_shared" });
+    pool.getContent.mockRejectedValueOnce(new ContentUnavailableError("sharer 00ab: timeout"));
+    await expect(getContent({ mcidHex: "0255" + "ab".repeat(48) })).rejects.toMatchObject({ code: "unavailable", message: expect.stringContaining("00ab") });
   });
 });

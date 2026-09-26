@@ -166,8 +166,20 @@ decoded into realm, procedure, advertiser and serving station.
 
 ### `mesh_put` / `mesh_get`
 
-Refuse, saying why: macula 12 stations keep no content, and node-served
-content (macula-io/macula#35) is not in the SDK yet.
+Node-served content (macula 12, D27). Stations keep no content: `mesh_put`
+keeps the bytes in this agent, serves them on its own `~<node_id>/content_v1`
+and announces them in the DHT, and answers `mcid_hex` (the 100-hex content
+id), `size_bytes` and `served_by`. The content is fetchable while this agent
+is present and gone when it leaves. Anyone who learns the MCID can fetch it:
+`mesh_put` refuses content that looks like a secret, but share nothing
+private. Content over 256 KiB is chunked; its optional `name` is carried in
+the manifest and is part of the MCID.
+
+`mesh_get` takes `mcid_hex`, finds the nodes that announced it, and fetches
+from them through the station each one named, checking every block against
+the MCID, so no sharer is trusted. It answers the bytes as base64.
+`code=not_shared` means no node shares it now; `code=unavailable` means every
+sharer failed, each failure listed.
 
 ### `mesh_hello` / `mesh_agents` / `mesh_goodbye`
 
