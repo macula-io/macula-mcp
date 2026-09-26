@@ -72,11 +72,11 @@ Everything runs on **one pool under one identity** (`macula_ts_client.ts`):
 - **Serving happens in the agent's own namespace**, `~<node_id>/<name>`:
   the ring endpoint and `mesh_serve`'s procedures. Only this node can serve
   there, and no org or realm has to vouch for it.
-- **Everything on the wire is post-quantum**: hybrid ML-KEM key exchange,
-  ML-DSA signatures.
+- **On the wire**: QUIC with TLS 1.3 and a hybrid post-quantum key exchange
+  (ML-KEM), and ML-DSA signatures on every request, reply and publication.
 
 ```
-┌───────────────┐   MCP/stdio   ┌────────────┐   QUIC (post-quantum)   ┌─────────────────────┐
+┌───────────────┐   MCP/stdio   ┌────────────┐    QUIC, hybrid PQ kx   ┌─────────────────────┐
 │ agent harness │ ────────────▶ │ macula-mcp │ ──────────────────────▶ │ macula 12 stations  │
 └───────────────┘               └────────────┘                         └─────────────────────┘
 ```
