@@ -26,10 +26,13 @@ const DESCRIPTION_FULL =
   "Returns the provider's result plus duration_ms. Defaults to the io.macula realm. " +
   "Bytes: send a byte string in args as {\"$bytes\": \"<standard base64>\"}, e.g. " +
   "{\"channel_id\": {\"$bytes\": \"AQID\"}}; a plain string is always text. Bytes in the result " +
-  "appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form.";
+  "appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form. " +
+  "prove_ownership: 1 attaches an ownership proof (asserted_by) signed by this agent's key, for a " +
+  "provider that reads one (mcl-graph's learn_link records the proven identity as the link's " +
+  "provenance); args must not carry \"caller\".";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form.`;
+const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form. prove_ownership: 1 signs args with an ownership proof, for a provider that reads one.`;
 
 /**
  * A UCAN attaches to a call only once macula-go signs post-quantum UCANs
@@ -61,6 +64,14 @@ export function registerMeshCall(server: McpServer): void {
         .record(z.string(), z.unknown())
         .optional()
         .describe("Structured arguments for the procedure (plain JSON; this server encodes the wire). Bytes as {\"$bytes\": \"<base64>\"}."),
+      prove_ownership: z
+        .union([z.literal(0), z.literal(1)])
+        .optional()
+        .describe(
+          "1 attaches an ownership proof v2 (mcl-om#7) to args, under asserted_by: this agent's key vouches " +
+            "for every field, for this procedure in this realm, once; the provider refuses it changed or sent " +
+            "twice. For a provider that reads one. 0 or omitted: none. args must not carry \"caller\".",
+        ),
       timeout_ms: z.number().int().positive().optional().describe("How long to wait for the result, in milliseconds (5000 by default)."),
       realm: z
         .string()
@@ -74,13 +85,14 @@ export function registerMeshCall(server: McpServer): void {
             "realm with mesh_find_records_by_type (record_type \"procedure_advertisement\").",
         ),
     },
-    async ({ procedure: rawProcedure, args, timeout_ms, realm: rawRealm }) => {
+    async ({ procedure: rawProcedure, args, timeout_ms, realm: rawRealm, prove_ownership }) => {
       ensurePresence(server);
       try {
         refuseUcan();
         assertNoLikelySecret(args, "args");
         const { procedure, realm } = splitRealmPrefix(rawProcedure, rawRealm);
-        const res = await call({ procedure, callArgs: args, timeoutMs: timeout_ms, realm, bytes: "tagged" });
+        const res = await call({ procedure, callArgs: args, timeoutMs: timeout_ms, realm, bytes: "tagged",
+          proveOwnership: prove_ownership === 1 });
         return jsonContent({ result: res.payload, duration_ms: res.duration_ms });
       } catch (e) {
         return errorContent(describeMeshError("mesh_call failed", e));

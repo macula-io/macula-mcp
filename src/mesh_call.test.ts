@@ -26,8 +26,19 @@ describe("mesh_call", () => {
   it("splits a realm-prefixed procedure, calls it, and asks for tagged bytes back", async () => {
     mocks.call.mockResolvedValue({ procedure: "mcl-echo/echo", payload: { echoed: "hi" }, duration_ms: 12 });
     const res = await (await meshCall())({ procedure: `${REALM}/mcl-echo/echo`, args: { text: "hi" } });
-    expect(mocks.call).toHaveBeenCalledWith({ procedure: "mcl-echo/echo", callArgs: { text: "hi" }, timeoutMs: undefined, realm: REALM, bytes: "tagged" });
+    expect(mocks.call).toHaveBeenCalledWith({ procedure: "mcl-echo/echo", callArgs: { text: "hi" }, timeoutMs: undefined, realm: REALM, bytes: "tagged", proveOwnership: false });
     expect(JSON.parse(res.content[0]!.text)).toEqual({ result: { echoed: "hi" }, duration_ms: 12 });
+  });
+
+  it("proves ownership only when prove_ownership is 1", async () => {
+    mocks.call.mockResolvedValue({ procedure: "mcl-graph/learn_link", payload: 1, duration_ms: 3 });
+    const handler = await meshCall();
+    await handler({ procedure: "mcl-graph/learn_link", args: { subject: "a" }, prove_ownership: 1 });
+    expect(mocks.call).toHaveBeenLastCalledWith(expect.objectContaining({ procedure: "mcl-graph/learn_link", proveOwnership: true }));
+    await handler({ procedure: "mcl-graph/learn_link", args: { subject: "a" }, prove_ownership: 0 });
+    expect(mocks.call).toHaveBeenLastCalledWith(expect.objectContaining({ proveOwnership: false }));
+    await handler({ procedure: "mcl-graph/learn_link", args: { subject: "a" } });
+    expect(mocks.call).toHaveBeenLastCalledWith(expect.objectContaining({ proveOwnership: false }));
   });
 
   it("refuses by name while MACULA_MCP_UCAN is set, rather than dropping the token silently", async () => {

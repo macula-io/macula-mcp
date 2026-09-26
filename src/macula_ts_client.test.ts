@@ -12,7 +12,7 @@ vi.mock("@macula-io/ts", async (importOriginal) => {
   return { ...actual, Pool: { connect: poolConnect }, NodeKey: { loadOrCreate } };
 });
 
-import { ContentUnavailableError, NotSharedError, ProviderError, RelayError, RecordType } from "@macula-io/ts";
+import { ContentUnavailableError, MaculaError, NotSharedError, ProviderError, RelayError, RecordType } from "@macula-io/ts";
 import {
   call,
   ownProcedure,
@@ -101,6 +101,30 @@ describe("call", () => {
   it("brings a station's relay error back as a MeshError with its code", async () => {
     pool.call.mockRejectedValueOnce(new RelayError("unknown_next_peer"));
     await expect(call({ procedure: "x/y" })).rejects.toMatchObject({ code: "unknown_next_peer", from: "station" });
+  });
+
+  it("sends, with proveOwnership, the payload as the node key's ownershipProof made it, and only then", async () => {
+    const proven = { text: "hi", asserted_by: { identity: SELF, proof: { v: 2 } } };
+    const ownershipProof = vi.fn(async () => proven);
+    loadOrCreate.mockResolvedValue({ nodeIdHex: () => SELF, ownershipProof });
+    await call({ procedure: "mcl-graph/learn_link", callArgs: { text: "hi" }, realm: "AB".repeat(32), proveOwnership: true });
+    expect(ownershipProof).toHaveBeenCalledWith("ab".repeat(32), "mcl-graph/learn_link", { text: "hi" });
+    expect(pool.call).toHaveBeenLastCalledWith("ab".repeat(32), "mcl-graph/learn_link", proven, expect.any(Object));
+    await call({ procedure: "mcl-echo/echo", callArgs: { text: "hi" } });
+    expect(ownershipProof).toHaveBeenCalledTimes(1);
+    expect(pool.call).toHaveBeenLastCalledWith(IO_MACULA_REALM_ID, "mcl-echo/echo", { text: "hi" }, expect.any(Object));
+  });
+
+  it("brings an ownership proof's refusal back as a MeshError with its kind, and calls nothing", async () => {
+    const ownershipProof = vi.fn(async () => {
+      throw new MaculaError("invalid_argument", "an ownership-proven payload carries \"caller\", which a station replaces; leave it out");
+    });
+    loadOrCreate.mockResolvedValue({ nodeIdHex: () => SELF, ownershipProof });
+    const e = await call({ procedure: "x/y", callArgs: { caller: "me" }, proveOwnership: true }).catch((err) => err);
+    expect(e).toBeInstanceOf(MeshError);
+    expect(e).toMatchObject({ code: "invalid_argument" });
+    expect(e.message).toMatch(/caller/);
+    expect(pool.call).not.toHaveBeenCalled();
   });
 });
 

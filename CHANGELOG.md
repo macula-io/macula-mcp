@@ -7,6 +7,25 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- `mesh_call` takes `prove_ownership: 1|0`. With 1, `args` go out with an
+  ownership proof v2 (mcl-om#7) under `asserted_by`, signed by this server's
+  key for that procedure in that realm right before the call, through
+  @macula-io/ts 0.23.0's `NodeKey.ownershipProof`. A provider that reads it
+  refuses it changed, for another procedure or realm, or sent twice; mcl-graph's
+  `learn_link` records the proven identity as the link's provenance. `args`
+  carrying `caller` are refused (`invalid_argument`) before anything is sent.
+  No live call was made against mcl-graph, since `learn_link` writes lasting
+  links: what a provider accepts was measured in @macula-io/ts 0.23.0, where a
+  payload it signed was accepted by mcl_om 0.32.0's `verify_asserted_by`.
+
+### Changed
+
+- @macula-io/ts ^0.23.0 (from ^0.21.0): the shared macula-go ABI, Windows
+  support, `MaculaError` with a kind; an ABI error now reaches a tool as a
+  `MeshError` carrying that kind.
+
 ## [0.33.0] - 2026-09-26
 
 ### Fixed

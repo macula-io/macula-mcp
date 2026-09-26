@@ -15,6 +15,7 @@
 import {
   ContentUnavailableError,
   JOIN_SESSION_PROCEDURE,
+  MaculaError,
   MEMBERSHIP_UCAN_PROCEDURE,
   NodeKey,
   NotSharedError,
@@ -87,6 +88,7 @@ export function toMeshError(e: unknown): MeshError {
   if (e instanceof RelayError) return new MeshError(e.message, e.code, "station");
   if (e instanceof NotSharedError) return new MeshError(e.message, "not_shared");
   if (e instanceof ContentUnavailableError) return new MeshError(e.message, "unavailable");
+  if (e instanceof MaculaError) return new MeshError(e.message, e.kind);
   return new MeshError(messageOf(e));
 }
 
@@ -124,7 +126,13 @@ export interface CallResult {
   duration_ms: number;
 }
 
-/** Calls `procedure` in `realm` (io.macula by default) at any trusted provider, by direct dial. */
+/**
+ * Calls `procedure` in `realm` (io.macula by default) at any trusted provider,
+ * by direct dial. With `proveOwnership`, the payload carries an ownership
+ * proof v2 (mcl-om#7) this server's key made for that procedure in that realm,
+ * signed right before the call: a provider verifying it refuses it changed,
+ * for another procedure or realm, or sent twice.
+ */
 export async function call(args: {
   procedure: string;
   callArgs?: Record<string, unknown>;
@@ -132,12 +140,15 @@ export async function call(args: {
   timeoutMs?: number;
   /** How bytes in the result come back: "hex" (default) or "tagged" ({"$bytes": base64}). */
   bytes?: BytesOutput;
+  proveOwnership?: boolean;
 }): Promise<CallResult> {
   const start = Date.now();
-  const payload = toJsonValue(args.callArgs ?? {});
+  const realm = realmOf(args.realm);
+  const fields = toJsonValue(args.callArgs ?? {}) as { [field: string]: JsonValue };
   const pool = await sharedPool();
   try {
-    const result = await pool.call(realmOf(args.realm), args.procedure, payload, { timeoutMs: args.timeoutMs, bytes: args.bytes });
+    const payload = args.proveOwnership ? await (await nodeKey()).ownershipProof(realm, args.procedure, fields) : fields;
+    const result = await pool.call(realm, args.procedure, payload, { timeoutMs: args.timeoutMs, bytes: args.bytes });
     return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
   } catch (e) {
     throw toMeshError(e);
