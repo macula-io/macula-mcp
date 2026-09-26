@@ -5,14 +5,17 @@
 //
 // The callee says hello with an "open" contact policy (so a ring is
 // accepted without a model in the loop) and serves `echo` in its own
-// namespace with `cat`. The caller then goes through: presence and
-// citizenship; mcl-echo/echo by direct dial; mesh_list_stations; the DHT by
-// type; a publish heard by its own watch; a ring to the callee (accepted,
-// and the callee's participant_joined seen); a call to ~<callee>/echo; and
-// goodbye. Each step prints its outcome and timing; the exit code is the
-// number of failed steps. The ring and ~<callee>/echo steps need stations
-// that admit a node's own namespace (macula-station 0.6.4); against older
-// stations both fail with the station's no_authorization, as expected.
+// namespace with `cat`, and shares an artifact with mesh_put. The caller then
+// goes through: presence and citizenship; mcl-echo/echo by direct dial;
+// mesh_list_stations; the DHT by type; a publish heard by its own watch; a
+// ring to the callee (accepted, and the callee's participant_joined seen); a
+// call to ~<callee>/echo; the callee's artifact fetched with mesh_get and
+// checked; a realm join session (mesh_join_realm, realm proof v2) that is left
+// to lapse; and goodbye. Each step prints its outcome and timing; the exit
+// code is the number of failed steps. The ring, ~<callee>/echo and artifact
+// steps need stations that admit a node's own namespace (macula-station
+// 0.6.4); against older stations they fail with the station's
+// no_authorization, as expected.
 //
 // Run after `npm run build`:
 //   node scripts/fleet-live-check.mjs
@@ -29,6 +32,8 @@ import { createInterface } from "node:readline";
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const DIST = join(HERE, "..", "dist");
 const role = process.argv[2] ?? "caller";
+// What the callee shares: over 256 KiB, so it goes as a manifest and chunks.
+const ARTIFACT = Buffer.from("macula fleet live check ".repeat(12_000)).toString("base64");
 
 /** A throwaway agent: its own key file and stores, and no session id inherited from the harness running this script. */
 function isolatedEnv(dir, extra = {}) {
@@ -69,6 +74,8 @@ async function toolsFor(label) {
     ["mesh_watch.js", "registerMeshWatch"],
     ["mesh_ring.js", "registerMeshRing"],
     ["mesh_serve.js", "registerMeshServe"],
+    ["mesh_artifact.js", "registerMeshArtifact"],
+    ["mesh_join_realm.js", "registerMeshJoinRealm"],
   ]) {
     (await import(join(DIST, file)))[register](server);
   }
@@ -88,7 +95,8 @@ async function callee() {
   // A station without own-namespace admission (macula-station < 0.6.4)
   // refuses both this and the ring endpoint; the callee stays up and says so.
   const echo = await run("mesh_serve", { name: "echo", exec: "cat" }).catch((e) => ({ error: e.message }));
-  console.log(JSON.stringify({ ready: 1, node_id: hello.node_id, ring: hello.ring, echo: echo.procedure ?? `~${hello.node_id}/echo`, serve_error: echo.error }));
+  const artifact = await run("mesh_put", { content: ARTIFACT, name: "fleet-live-check.txt" }).catch((e) => ({ error: e.message }));
+  console.log(JSON.stringify({ ready: 1, node_id: hello.node_id, ring: hello.ring, echo: echo.procedure ?? `~${hello.node_id}/echo`, serve_error: echo.error, mcid: artifact.mcid_hex, put_error: artifact.error }));
   await new Promise((resolve) => process.stdin.on("end", resolve).resume());
   await run("mesh_goodbye");
   process.exit(0);
@@ -155,6 +163,17 @@ async function caller() {
     });
     await step("mesh_call ~<callee>/echo (served with mesh_serve)", async () => {
       return run("mesh_call", { procedure: peer.echo, args: { n: 42, text: "round trip" }, timeout_ms: 15_000 });
+    });
+    await step("mesh_get the callee's artifact (mesh_put)", async () => {
+      if (!peer.mcid) throw new Error(`the callee could not share: ${peer.put_error}`);
+      const r = await run("mesh_get", { mcid_hex: peer.mcid });
+      if (r.content !== ARTIFACT) throw new Error(`fetched ${r.size_bytes} bytes that differ`);
+      return { mcid: peer.mcid.slice(0, 16), size_bytes: r.size_bytes };
+    });
+    await step("mesh_join_realm (realm proof v2 join session, left to lapse)", async () => {
+      const r = await run("mesh_join_realm");
+      if (!r.join_url) throw new Error(JSON.stringify(r).slice(0, 300));
+      return { expires_at: r.expires_at };
     });
     await step("mesh_goodbye", () => run("mesh_goodbye"));
   } finally {
