@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-27
+
 ### Added
 
 - `mesh_call` takes `prove_ownership: 1|0`. With 1, `args` go out with an
