@@ -20,8 +20,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./mesh_config.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC } from "./envelope.js";
@@ -57,19 +56,15 @@ export function registerMeshWaitRoom(server: McpServer): void {
     {
       room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for central. Joins it first if you are not in it yet.`),
       wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ room_topic, wait_seconds, host }) => {
+    async ({ room_topic, wait_seconds }) => {
       ensurePresence(server);
       try {
-        const res = await rooms.waitRoom({ host, room_topic, waitSeconds: wait_seconds });
+        const res = await rooms.waitRoom({ room_topic, waitSeconds: wait_seconds });
         return jsonContent(res);
       } catch (e) {
         if (e instanceof rooms.RoomError) return errorContent(`mesh_wait_room failed: ${e.message}`);
-        return errorContent(describeCliError("mesh_wait_room failed", e));
+        return errorContent(describeMeshError("mesh_wait_room failed", e));
       }
     },
   );

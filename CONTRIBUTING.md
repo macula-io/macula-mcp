@@ -35,19 +35,16 @@ CI's `test` job is deliberately offline-only (see its own comment in
 `@macula-io/ts` (`macula_ts_client.ts`), which the test suite mocks at
 that module boundary where it's tested at all (`mesh_stations.test.ts`,
 `mesh_memory.test.ts`, `rooms.test.ts`, `citizenship.test.ts`,
-`presence.test.ts`, `ring_service.test.ts` — see any of those for the
-pattern). Several tool files (`mesh_call.ts`, `mesh_publish.ts`,
-`mesh_watch.ts`, the DHT tools, `serve.ts`) have no such mocked coverage
-yet — only their pure helpers do (`mesh_call.test.ts`'s
-`splitRealmPrefix`, for instance). That means `npm test` passing does not
-confirm a tool actually works against a real station.
+`presence.test.ts`, `ring_service.test.ts`, `serve.test.ts`, `mesh_call.test.ts`
+— see any of those for the pattern), and `macula_ts_client.test.ts` tests the
+client layer itself against a fake `Pool`. That means `npm test` passing does
+not confirm a tool actually works against a real station.
 
 If your change touches what a tool actually does against the mesh
 (not just how its output is parsed), verify it for real before calling
-it done: build the server, connect a real MCP `Client` to it (or run it
-through an actual agent harness), and call the tool against a live
-station. `MACULA_MESH_STATION` defaults to a public demo fleet
-(`station-de-frankfurt.macula.io:4433`) — treat it as shared
+it done: `npm run build`, then `node scripts/fleet-live-check.mjs`, which
+runs two throwaway agents through the compiled tool handlers against the
+fleet (`MACULA_MESH_STATIONS` picks other stations). The fleet is shared
 infrastructure, not a sandbox (see `mesh://etiquette` for the norms that
 apply to anything you publish or call while testing).
 
@@ -66,20 +63,12 @@ locally.
 ## Code conventions
 
 **Talking to the mesh: always go through `macula_ts_client.ts`, never
-touch `@macula-io/ts`'s `Session`/`Identity` directly from a tool file.**
-Every one-shot operation goes through `withSession()` (connect, run the
-callback, always close and dispose the identity afterward, even on
-failure) rather than each tool file managing its own connect/close pair —
-see its own doc comment. A persistent-Session module (`serve.ts`,
-`presence.ts`, `lobby_observer.ts`) still calls `connectWithFallback()`/
-`loadOrGenerateIdentity()` from the same file rather than reimplementing
-station-fallback or seed-file loading itself. If you add a new operation,
-follow the existing ones in `macula_ts_client.ts` rather than opening a
-`Session` by hand elsewhere. (This project used to shell out to a
-separate `macula-cli` binary and had an analogous convention for
-building its `--json` argv correctly — see CHANGELOG.md's 0.18.0 entry
-for that migration; `macula-cli` is not a dependency of this project any
-more, in any form.)
+touch `@macula-io/ts`'s `Pool`/`NodeKey` directly from a tool file.**
+There is one pool and one key per process, shared by every tool;
+`macula_ts_client.ts` owns both, maps every mesh error onto `MeshError`
+with its code, and refuses what the wire cannot carry (booleans) before
+anything is sent. If you add a new operation, add it there, next to the
+existing ones.
 
 ## Commit messages
 

@@ -1,36 +1,26 @@
-// Tool: mesh_unserve — the deliberate counterpart to mesh_serve.
-//
-// Unregisters one procedure. If nothing else is registered afterward,
-// also stops this process's own serve-daemon entirely -- no reason to
-// hold a station connection open once nothing is being served. No-op
-// if the given procedure was never registered (or mesh_serve was never
-// called at all).
+// Tool: mesh_unserve — stop serving a procedure mesh_serve registered: its
+// advertisement is withdrawn and its command stops answering.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import * as serveModule from "./serve.js";
 import { toolDescription } from "./tool_description.js";
 
-const DESCRIPTION_FULL =
-  "Stop serving a procedure registered by mesh_serve. If nothing else is registered afterward, " +
-  "also stops this process's own serve-daemon. No-op if the procedure was never registered.";
-/** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const DESCRIPTION_TERSE = "Stop serving a procedure registered by mesh_serve. No-op if it was never registered.";
+const DESCRIPTION = "Stop serving a procedure registered by mesh_serve, by the name it was given. No-op if it was never registered.";
 
 export function registerMeshUnserve(server: McpServer): void {
   server.tool(
     "mesh_unserve",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+    toolDescription(DESCRIPTION, "Stop serving a procedure mesh_serve registered. No-op if never registered."),
     {
-      procedure: z.string().min(1).describe("The procedure name to stop serving, as passed to mesh_serve."),
+      name: z.string().min(1).describe("The name passed to mesh_serve."),
     },
-    async ({ procedure }) => {
+    async ({ name }) => {
       try {
-        const result = await serveModule.unserve(procedure);
-        return jsonContent(result);
+        return jsonContent(await serveModule.unserve(name));
       } catch (e) {
-        return errorContent(describeCliError("mesh_unserve failed", e));
+        return errorContent(describeMeshError("mesh_unserve failed", e));
       }
     },
   );

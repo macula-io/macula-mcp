@@ -2,8 +2,7 @@
 // mcl-rag (macula-services/mcl-rag), the mesh's realm-bound RAG
 // service, on the exact same template mesh_stations.ts already
 // established for mcl-stations: discover which realm the service
-// is CURRENTLY advertised under (a DHT lookup -- never assume the
-// all-zero default), then call it. This tool hardcodes awareness of
+// is advertised in (a DHT lookup -- never assume a realm), then call it. This tool hardcodes awareness of
 // that ONE specific service on purpose, unlike mesh_find_records_by_type
 // (which stays app-agnostic) -- if a second, different memory/RAG
 // service ever exists, this tool would need to pick one or learn to
@@ -54,14 +53,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-// Same as mesh_stations.ts and for the identical reason: mcl-rag is
-// ALWAYS called under a discovered non-zero realm. Both the DHT discovery
-// half and the actual realm-scoped call now go through @macula-io/ts --
-// realm support on Session.call (landed in @macula-io/ts 0.12.0) closed
-// the gap that used to force the second half onto a macula-cli subprocess.
-import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
-import { call, findRecordsByType } from "./macula_ts_client.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+// Same as mesh_stations.ts: mcl-rag is called in the realm its own
+// advertisement names, discovered first.
+import { call, discoverProcedureRealm } from "./macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret, findLikelySecret, isExcludedPath } from "./secret_scan.js";
 import { toolDescription } from "./tool_description.js";
@@ -70,25 +65,13 @@ const SEARCH_PROCEDURE = "mcl-rag/answer_query";
 const ADD_KNOWLEDGE_PROCEDURE = "mcl-rag/add_knowledge";
 const UPLOAD_KNOWLEDGE_PROCEDURE = "mcl-rag/upload_knowledge";
 
-/** Discovers which realm mcl-rag is CURRENTLY advertised under -- never the all-zero default, matching mesh_list_stations's own reasoning. */
-async function discoverRagRealm(host: string | undefined): Promise<{ realm: string } | { error: string }> {
-  const discovered = await findRecordsByType({
-    host,
-    recordType: "procedure_advertisement",
-    identityPath: defaultIdentityPath(),
-  });
-  const match = discovered.records.find(
-    (r) => r.procedure_advertisement?.procedure === ADD_KNOWLEDGE_PROCEDURE,
-  );
-  if (!match?.procedure_advertisement?.realm) {
-    return {
-      error:
-        `mcl-rag is not currently advertised on the mesh (checked ${discovered.count} ` +
-        `procedure_advertisement record(s) visible from ${host ?? defaultStation()}) -- it may not be ` +
-        "deployed, or is unreachable from this station right now.",
-    };
+/** The realm mcl-rag is advertised in, or why it cannot be found. */
+async function discoverRagRealm(): Promise<{ realm: string } | { error: string }> {
+  try {
+    return { realm: await discoverProcedureRealm(ADD_KNOWLEDGE_PROCEDURE) };
+  } catch (e) {
+    return { error: `mcl-rag cannot be reached: ${e instanceof Error ? e.message : String(e)}` };
   }
-  return { realm: match.procedure_advertisement.realm };
 }
 
 export const DEFAULT_INCLUDE_EXTENSIONS = [".md", ".mdx", ".txt"];
@@ -176,27 +159,21 @@ export function registerMeshMemory(server: McpServer): void {
     {
       query_text: z.string().describe("What to search for, in natural language."),
       top_k: z.number().int().positive().max(100).optional().describe("Max results (default 10)."),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through for both the discovery lookup and the call, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ query_text, top_k, host }) => {
+    async ({ query_text, top_k }) => {
       ensurePresence(server);
       try {
-        const discovery = await discoverRagRealm(host);
+        const discovery = await discoverRagRealm();
         if ("error" in discovery) return errorContent(discovery.error);
         const res = await call({
-          host,
           procedure: SEARCH_PROCEDURE,
           callArgs: { query_text, top_k },
           realm: discovery.realm,
-          identityPath: defaultIdentityPath(),
         });
         const payload = res.payload as { hits?: unknown[] } | undefined;
         return jsonContent({ realm: discovery.realm, hits: payload?.hits ?? [] });
       } catch (e) {
-        return errorContent(describeCliError("mesh_recall failed", e));
+        return errorContent(describeMeshError("mesh_recall failed", e));
       }
     },
   );
@@ -208,25 +185,19 @@ export function registerMeshMemory(server: McpServer): void {
       content: z.string().describe("The text to remember, in your own words. Markdown is fine -- header-aware chunking splits it if long."),
       source_label: z.string().optional().describe("Grouping/attribution label, e.g. \"agent-notes/macula-mcp-presence\". Defaults to \"conversational\" if omitted."),
       topics: z.array(z.string()).optional().describe("Topic labels to tag this deposit with, for later topic-filtered search."),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through for both the discovery lookup and the call, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ content, source_label, topics, host }) => {
+    async ({ content, source_label, topics }) => {
       ensurePresence(server);
       try {
         assertNoLikelySecret(content, "content");
         if (topics !== undefined) assertNoLikelySecret(topics, "topics");
-        const discovery = await discoverRagRealm(host);
+        const discovery = await discoverRagRealm();
         if ("error" in discovery) return errorContent(discovery.error);
 
         const res = await call({
-          host,
           procedure: ADD_KNOWLEDGE_PROCEDURE,
           callArgs: { text: content, source_label, topics },
           realm: discovery.realm,
-          identityPath: defaultIdentityPath(),
         });
         const payload = res.payload as { chunks?: number } | undefined;
         return jsonContent({
@@ -235,7 +206,7 @@ export function registerMeshMemory(server: McpServer): void {
           chunks: payload?.chunks ?? 0,
         });
       } catch (e) {
-        return errorContent(describeCliError("mesh_remember failed", e));
+        return errorContent(describeMeshError("mesh_remember failed", e));
       }
     },
   );
@@ -254,12 +225,8 @@ export function registerMeshMemory(server: McpServer): void {
         .optional()
         .describe(`Directory names to skip anywhere in the tree. Defaults to ${JSON.stringify(DEFAULT_EXCLUDE_DIRS)}.`),
       source_prefix: z.string().optional().describe('Prepended to each file\'s relative path for source_path, e.g. "hecate-corpus".'),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through for both the discovery lookup and every call, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ directory, include_extensions, exclude_dirs, source_prefix, host }) => {
+    async ({ directory, include_extensions, exclude_dirs, source_prefix }) => {
       ensurePresence(server);
       const includeExt = include_extensions ?? DEFAULT_INCLUDE_EXTENSIONS;
       const excludeDirs = exclude_dirs ?? DEFAULT_EXCLUDE_DIRS;
@@ -271,7 +238,7 @@ export function registerMeshMemory(server: McpServer): void {
         return errorContent(`could not read directory ${directory}: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      const discovery = await discoverRagRealm(host);
+      const discovery = await discoverRagRealm();
       if ("error" in discovery) return errorContent(discovery.error);
 
       const ingested: { path: string; document_id: string; chunks: number }[] = [];
@@ -313,16 +280,14 @@ export function registerMeshMemory(server: McpServer): void {
         const sourcePath = source_prefix ? `${source_prefix}/${rel}` : rel;
         try {
           const res = await call({
-            host,
             procedure: UPLOAD_KNOWLEDGE_PROCEDURE,
             callArgs: { document_id: documentId, source_path: sourcePath, source_type: sourceTypeFor(ext), raw_bytes: content },
             realm: discovery.realm,
-            identityPath: defaultIdentityPath(),
           });
           const payload = res.payload as { chunks?: number } | undefined;
           ingested.push({ path: rel, document_id: documentId, chunks: payload?.chunks ?? 0 });
         } catch (e) {
-          failed.push({ path: rel, error: describeCliError("upload_knowledge failed", e) });
+          failed.push({ path: rel, error: describeMeshError("upload_knowledge failed", e) });
         }
       }
 

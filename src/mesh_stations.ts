@@ -10,10 +10,8 @@
 // tool hardcodes awareness of that ONE service on purpose, unlike
 // mesh_find_records_by_type, which stays app-agnostic.
 //
-// Two calls happen here, not one: the DHT lookup finds which realm
-// mcl-stations is currently advertised under (never the default all-zero
-// realm; there is no way to know it without asking the DHT first), then
-// list_stations is called in it. The advertisement's `procedure' is the
+// Two steps happen here, not one: the DHT lookup finds which realm
+// mcl-stations is advertised in, then list_stations is called in it. The advertisement's `procedure' is the
 // org-namespaced name the provider advertised, `mcl-stations/list_stations'
 // (mcl_om advertises `Org/Name'). If nothing advertises it, this fails with
 // a clear, specific error rather than an opaque unknown_next_peer.
@@ -26,13 +24,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-// Both the DHT lookup (all-zero realm) and the actual list_stations call
-// go through @macula-io/ts now -- realm support on Session.call (landed
-// in @macula-io/ts 0.12.0) closed the one gap that used to force the
-// second half onto a macula-cli subprocess. See README.md/CHANGELOG.md.
-import { defaultIdentityPath, defaultStation } from "./mesh_config.js";
-import { call, findRecordsByType } from "./macula_ts_client.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { call, discoverProcedureRealm } from "./macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { toolDescription } from "./tool_description.js";
 
@@ -50,11 +43,11 @@ function withPlainNodeId(station: Record<string, unknown>): Record<string, unkno
 const DESCRIPTION_FULL =
   "List macula stations via mcl-stations/list_stations, the mesh's canonical station directory -- " +
   "so an agent never has to hand-maintain a station list. Auto-discovers which realm mcl-stations " +
-  "is currently advertised under (never the default all-zero realm) via a DHT lookup, then calls it. " +
+  "is advertised in via a DHT lookup, then calls it. " +
   "Optional near (nearest-first by great-circle distance) or continent/country/city filters, matching " +
-  `the service's own filter API -- omit all filters to list every known station. Defaults to ${defaultStation()} if host isn't given.`;
+  "the service's own filter API -- omit all filters to list every known station.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const DESCRIPTION_TERSE = `List macula stations via mcl-stations/list_stations (auto-discovers its realm via DHT). Optional near/continent/country/city filters -- omit all to list everything. Defaults to ${defaultStation()} if host isn't given.`;
+const DESCRIPTION_TERSE = "List macula stations via mcl-stations/list_stations (auto-discovers its realm via DHT). Optional near/continent/country/city filters -- omit all to list everything.";
 
 export function registerMeshListStations(server: McpServer): void {
   server.tool(
@@ -72,43 +65,17 @@ export function registerMeshListStations(server: McpServer): void {
       continent: z.string().optional().describe("Exact match, e.g. \"Europe\"."),
       country: z.string().optional().describe("Exact match, e.g. \"FR\"."),
       city: z.string().optional().describe("Exact match, e.g. \"paris\"."),
-      host: z
-        .string()
-        .optional()
-        .describe(
-          `Station to connect through for both the discovery lookup and the call, "host[:port]". Defaults to ${defaultStation()}.`,
-        ),
     },
-    async ({ near, continent, country, city, host }) => {
+    async ({ near, continent, country, city }) => {
       ensurePresence(server);
       try {
-        const discovered = await findRecordsByType({
-          host,
-          recordType: "procedure_advertisement",
-          identityPath: defaultIdentityPath(),
-        });
-        const match = discovered.records.find(
-          (r) => r.procedure_advertisement?.procedure === LIST_STATIONS_PROCEDURE,
-        );
-        if (!match?.procedure_advertisement?.realm) {
-          return errorContent(
-            `${LIST_STATIONS_PROCEDURE} is not currently advertised on the mesh (checked ${discovered.count} ` +
-              `procedure_advertisement record(s) visible from ${host ?? defaultStation()}) -- mcl-stations ` +
-              "may be down or unreachable from this station right now.",
-          );
-        }
-        const res = await call({
-          host,
-          procedure: LIST_STATIONS_PROCEDURE,
-          callArgs: { near, continent, country, city },
-          realm: match.procedure_advertisement.realm,
-          identityPath: defaultIdentityPath(),
-        });
+        const realm = await discoverProcedureRealm(LIST_STATIONS_PROCEDURE);
+        const res = await call({ procedure: LIST_STATIONS_PROCEDURE, callArgs: { near, continent, country, city }, realm });
         const payload = res.payload as { stations?: Record<string, unknown>[] } | undefined;
         const stations = (payload?.stations ?? []).map(withPlainNodeId);
-        return jsonContent({ realm: match.procedure_advertisement.realm, count: stations.length, stations });
+        return jsonContent({ realm, count: stations.length, stations });
       } catch (e) {
-        return errorContent(describeCliError("mesh_list_stations failed", e));
+        return errorContent(describeMeshError("mesh_list_stations failed", e));
       }
     },
   );

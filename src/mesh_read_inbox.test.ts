@@ -81,14 +81,14 @@ describe("waitingHint", () => {
 const toolMocks = vi.hoisted(() => ({
   ensurePresence: vi.fn(),
   currentNodeId: vi.fn(),
-  tsIdentity: vi.fn(),
+  selfNodeId: vi.fn(),
   listRooms: vi.fn(),
   recentFacts: vi.fn(),
   pendingIncoming: vi.fn(),
   listRings: vi.fn(),
 }));
 vi.mock("./presence.js", () => ({ ensurePresence: toolMocks.ensurePresence, currentNodeId: toolMocks.currentNodeId }));
-vi.mock("./macula_ts_client.js", () => ({ tsIdentity: toolMocks.tsIdentity }));
+vi.mock("./macula_ts_client.js", () => ({ selfNodeId: toolMocks.selfNodeId }));
 vi.mock("./rooms.js", () => ({ listRooms: toolMocks.listRooms }));
 vi.mock("./lobby_transcript.js", () => ({ recentFacts: toolMocks.recentFacts }));
 vi.mock("./rings.js", async (importOriginal) => {
@@ -114,7 +114,7 @@ function fakeServer(): { server: McpServer; getHandler: () => Handler } {
 describe("mesh_read_inbox tool: the `me` cold-start race", () => {
   beforeEach(() => {
     toolMocks.currentNodeId.mockReturnValue(undefined); // presence not active yet -- the race's exact starting condition
-    toolMocks.tsIdentity.mockReturnValue({ node_id: ME, path: "test-default-identity", generated: false });
+    toolMocks.selfNodeId.mockResolvedValue(ME);
     toolMocks.listRooms.mockReturnValue({ joined: [], seen_on_central: [] });
     toolMocks.recentFacts.mockReturnValue({ total: 0, facts: [] });
     toolMocks.pendingIncoming.mockReturnValue([]);
@@ -124,7 +124,7 @@ describe("mesh_read_inbox tool: the `me` cold-start race", () => {
     vi.resetAllMocks();
   });
 
-  it("still includes the `rings` key on a fresh identity's very first call, falling back to the local identity file", async () => {
+  it("still includes the `rings` key on a fresh identity's very first call, falling back to the key's own node id", async () => {
     const { registerMeshReadInbox } = await import("./mesh_read_inbox.js");
     const { server, getHandler } = fakeServer();
     registerMeshReadInbox(server);

@@ -1,166 +1,85 @@
-// Serving: mesh_serve/mesh_unserve manage this process's own registered
-// mesh procedures -- since 2026-09, persistent @macula-io/ts Sessions
-// this process holds directly in memory, not a macula-cli daemon
-// subprocess anymore. The daemon existed ONLY to let separate one-shot
-// macula-cli subprocess invocations share one connection; that reason
-// disappears entirely once macula-ts is called in-process, since this
-// Node process can just hold Session objects itself for as long as
-// anything is registered. No control-socket, no NDJSON protocol, no
-// separate identity-per-daemon-kind supervision -- see README.md/
-// CHANGELOG.md for the full before/after.
+// Serving: mesh_serve/mesh_unserve manage the procedures this agent serves
+// by hand, each answered by a local shell command run once per inbound
+// call (the caller's JSON payload on stdin, stdout as the reply, the
+// caller's verified node_id in MACULA_MCP_CALLER).
 //
-// (2026-09-04, fixed after a live-confirmed regression) ONE SESSION PER
-// REGISTERED PROCEDURE, not one shared Session serving many. The first
-// version of this cutover held a single shared Session and let
-// registrations.Map imply multiplexing many procedures on it -- but
-// @macula-io/ts's Session.serve() throws if it is already serving
-// anything (the SDK's own stated one-procedure-per-Session contract).
-// presence.ts registers this process's own ring endpoint
-// (ring_service.ts, via this module) the moment presence starts, which
-// runs on nearly every mesh tool call -- so the ring endpoint silently
-// claimed the one shared serving slot, and any real mesh_serve call
-// after that failed with "Session is already serving" naming an
-// internal Session the caller could not act on (reverse order broke the
-// ring registration instead, just as silently). Confirmed live before
-// this fix, confirmed fixed after it: every registered procedure now
-// gets its OWN Session and its OWN identity
-// (mesh_config.ts's serveProcedureIdentityPath(procedure), hashed from
-// the procedure name -- see its own doc for why a per-procedure identity
-// is required here, the same anti-duplicate-session reason presence.ts
-// and lobby_observer.ts each need multiple identities for their own
-// multiple concurrent connections).
+// Each is served in this agent's own namespace, ~<node_id>/<name>, on the
+// shared pool (macula_ts_client.ts), which advertises it, renews it and
+// re-advertises it after a redial. A node's own namespace needs no org and
+// no realm to vouch for it, and only this node can serve in it.
 //
-// The direct-dial advertisement leg is DIFFERENT and stays SHARED across
-// every registration, deliberately: it never calls Session.serve() at
-// all (only Session.putProcedureAdvertisement, an ordinary CALL), so it
-// is not subject to the one-serve-per-Session constraint that caused the
-// bug above -- see ServeState... no, see ensureDirectAdvertiseSession's
-// own doc below for why one shared Session/identity is correct here, not
-// a regression of the same class.
-//
-// The exec behavior (a served procedure answered by running a local
-// shell command once per inbound call, JSON on stdin/stdout) used to
-// live inside macula-cli's own daemon (exec_handler.go); it's
-// reimplemented here now, in TypeScript, since there is no daemon
-// subprocess left to own it.
-//
-// This is a materially bigger exposure than anything else in this
-// server: every other tool is a one-shot action this server's OWN
-// caller initiated. A served procedure is a standing inbound trigger
-// ANY mesh caller can invoke, repeatedly, running a local shell command
-// on this machine, for as long as it stays registered -- see
-// mesh_serve.ts's own tool description and mesh_etiquette.ts for the
-// operator-facing framing of that risk.
-//
-// Known, honest gap vs. the old daemon: macula-cli's daemon had its own
-// reconnect/replay supervisor (mirroring the Erlang reference SDK's
-// respawn_link pattern) that transparently re-established a dropped
-// connection and re-advertised everything on it. This module does not
-// yet reimplement that per-registration -- if a given registration's
-// Session dies, that ONE procedure stops answering until it's
-// re-registered (every OTHER registration, being on its own independent
-// Session, is unaffected). presence.ts's and lobby_observer.ts's own
-// legs got real reconnect-with-backoff in this same effort; serving
-// hasn't yet, deliberately -- a real per-registration reconnect
-// supervisor is separate, scoped future work (see CHANGELOG).
+// This is a materially bigger exposure than anything else in this server:
+// every other tool is a one-shot action this server's own caller
+// initiated. A served procedure is a standing inbound trigger ANY mesh
+// caller can invoke, repeatedly, running a local shell command on this
+// machine, for as long as it stays registered -- see mesh_serve.ts's own
+// tool description and mesh_etiquette.ts for the operator-facing framing.
 
-import { spawn } from "node:child_process";
-import type { Session, Identity, JsonValue } from "@macula-io/ts";
-import { onShutdown, serveAdvertiseIdentityPath, serveProcedureIdentityPath } from "./mesh_config.js";
-import { connectWithFallback, loadOrGenerateIdentity, toCliError } from "./macula_ts_client.js";
-import type { BytesOutput } from "@macula-io/ts";
+import { spawn, type ChildProcess } from "node:child_process";
+import type { BytesOutput, JsonValue, Request, Served } from "@macula-io/ts";
+import { ownProcedure, serve as serveProcedure } from "./macula_ts_client.js";
 import { findLikelySecret } from "./secret_scan.js";
 
 interface Registration {
+  name: string;
   procedure: string;
   exec: string;
-  execTimeoutSeconds: number;
-  identity: Identity;
-  session: Session;
-  stop: () => Promise<void>;
-}
-
-interface DirectAdvertiseSession {
-  session: Session;
-  identity: Identity;
+  execTimeoutMs: number;
+  served: Served;
 }
 
 const registrations = new Map<string, Registration>();
 
-/**
- * The ONE Session/identity shared across every direct: true registration,
- * lazily opened on first use -- deliberately NOT one per registration,
- * unlike the serving Sessions above. This leg never calls Session.serve();
- * it only issues an ordinary putProcedureAdvertisement CALL (an
- * @macula-io/ts Session's control-stream #enqueue already serializes
- * concurrent ordinary calls safely, the same guarantee every other
- * one-shot tool in this server already relies on), so it is not subject
- * to the one-serve-per-Session constraint that required splitting the
- * serving Sessions apart above. Sharing it also means N registrations
- * with direct: true cost one extra connection total, not N.
- */
-let directAdvertise: DirectAdvertiseSession | undefined;
-let shutdownRegistered = false;
+const DEFAULT_EXEC_TIMEOUT_SECONDS = 10;
 
 export function isActive(): boolean {
   return registrations.size > 0;
 }
 
-/** Connects (once; reused after) the shared direct-dial advertisement Session -- see its own doc above for why this is deliberately shared, unlike the per-registration serving Sessions. Tries `host` first, same connectWithFallback discipline as everything else in this file. */
-async function ensureDirectAdvertiseSession(host: string | undefined): Promise<Session> {
-  if (directAdvertise) return directAdvertise.session;
-  const identity = loadOrGenerateIdentity(serveAdvertiseIdentityPath());
-  try {
-    const session = await connectWithFallback(identity, host);
-    directAdvertise = { session, identity };
-    return session;
-  } catch (e) {
-    identity.dispose();
-    throw e;
-  }
+function serving(): string[] {
+  return [...registrations.values()].map((r) => r.procedure);
 }
 
-async function closeDirectAdvertiseSession(): Promise<void> {
-  if (!directAdvertise) return;
-  const d = directAdvertise;
-  directAdvertise = undefined;
-  try {
-    await d.session.close(d.identity);
-  } catch {
-    // best effort -- stopSync tears everything down either way
-  } finally {
-    d.identity.dispose();
+/**
+ * Runs `execCmd` once via a shell, feeding `payload` as JSON on stdin and
+ * the caller's verified node_id in MACULA_MCP_CALLER, parsing stdout as
+ * JSON (empty stdout replies null). The payload only ever reaches the
+ * child's stdin, never the command string, so a caller cannot inject shell
+ * syntax. A non-zero exit, a timeout, invalid JSON or a likely secret on
+ * stdout is a thrown error, which goes back to that caller as a
+ * handler_error with its message.
+ */
+/** Ends a command and everything it started: its whole process group where there are groups, the process alone on Windows. */
+function killGroup(child: ChildProcess): void {
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch {
+      // The group is already gone; the child's own kill below is a no-op then.
+    }
   }
+  child.kill("SIGKILL");
 }
 
-/** Synchronous best-effort teardown only -- what onShutdown registers, same reasoning as presence.ts's own stopSync: a SIGINT/SIGTERM handler cannot reliably wait on an async close. An abrupt process kill just drops every connection; the station's own advertise entries age out on their own. */
-function stopSync(): void {
-  for (const reg of registrations.values()) {
-    reg.identity.dispose();
-  }
-  registrations.clear();
-  directAdvertise?.identity.dispose();
-  directAdvertise = undefined;
-}
-
-/** Runs `execCmd` once via a shell, feeding `payload` as JSON on stdin,
- * parsing stdout as JSON (empty stdout replies null). Never shell-
- * interpolates the payload into the command string itself -- it only ever
- * reaches the child process's stdin -- so a malicious caller's payload
- * can't inject shell syntax. A non-zero exit, a timeout, or invalid JSON
- * on stdout all become a normal thrown error, which Session.serve()'s own
- * handler contract maps to a BOLT#4 unknown_error reply to that caller,
- * verified not to affect any OTHER procedure registered on this same
- * Session. */
-function runExec(execCmd: string, timeoutMs: number, payload: JsonValue): Promise<JsonValue> {
+function runExec(execCmd: string, timeoutMs: number, request: Request): Promise<JsonValue> {
   return new Promise((resolve, reject) => {
-    const child = spawn(execCmd, { shell: true, stdio: ["pipe", "pipe", "pipe"] });
+    // Its own process group (detached), so a timeout ends everything the
+    // command started: a shell that forks (dash for any command, every shell
+    // for a pipeline or a sequence) would otherwise leave a child holding
+    // stdout open, and the caller waiting, after the shell itself is gone.
+    const child = spawn(execCmd, {
+      shell: true,
+      detached: process.platform !== "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, MACULA_MCP_CALLER: request.caller },
+    });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup(child);
     }, timeoutMs);
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString("utf8");
@@ -194,11 +113,9 @@ function runExec(execCmd: string, timeoutMs: number, payload: JsonValue): Promis
         reject(new Error(`exec stdout was not valid JSON: ${e instanceof Error ? e.message : String(e)}`));
         return;
       }
-      // This reply is about to leave the machine to WHOEVER called this
-      // served procedure, not a choice this agent made in the moment --
-      // a registered command's output (e.g. an innocently-configured
-      // "show config" helper) deserves the same scan every other outbound
-      // path gets, see secret_scan.ts's own doc.
+      // The reply leaves the machine for whoever called, not a choice this
+      // agent made in the moment: a registered command's output gets the
+      // same scan every other outbound path does (secret_scan.ts).
       const secretMatch = findLikelySecret(parsed, "exec stdout");
       if (secretMatch) {
         reject(new Error(`exec stdout looks like it contains a ${secretMatch.patternName} (at ${secretMatch.path}) -- refusing to reply with it.`));
@@ -206,175 +123,68 @@ function runExec(execCmd: string, timeoutMs: number, payload: JsonValue): Promis
       }
       resolve(parsed);
     });
-    try {
-      child.stdin.write(JSON.stringify(payload));
-      child.stdin.end();
-    } catch (e) {
-      clearTimeout(timer);
-      reject(e instanceof Error ? e : new Error(String(e)));
-    }
+    // A command that never reads stdin closes it early; that is not an error.
+    child.stdin.on("error", () => {});
+    child.stdin.end(JSON.stringify(request.payload));
   });
 }
 
 export interface ServeArgs {
-  procedure: string;
+  /** One segment: the procedure callers reach is ~<this node_id>/<name>. */
+  name: string;
   exec: string;
   execTimeoutSeconds?: number;
-  host?: string;
-  /** Also publishes a direct-dial DHT procedure_advertisement (via
-   * Session.putProcedureAdvertisement) so callers on other stations can
-   * dial this one in one hop -- approximates macula-go's own
-   * directdial.AdvertiseDirect (which does a plain Advertise + a DHT
-   * PutRecord; the plain Advertise already happens unconditionally
-   * below, this adds the DHT half). */
-  direct?: boolean;
-  /** TTL for that DHT advertisement, if `direct`; renews on re-registration. */
-  ttlSeconds?: number;
-  /** How bytes in each inbound payload reach the command's stdin, "hex" when
-   * omitted. mesh_serve asks for "tagged" ({"$bytes": "<base64>"}), the same
-   * form a command's stdout reply may use to send bytes back. */
+  /** How bytes in each inbound payload reach the command's stdin, "hex" when omitted. mesh_serve asks for "tagged" ({"$bytes": "<base64>"}), the same form a command's stdout may use to send bytes back. */
   bytes?: BytesOutput;
 }
 
 export interface ServeResult {
+  name: string;
   procedure: string;
   registered: boolean;
   serving: string[];
 }
 
-const DEFAULT_EXEC_TIMEOUT_SECONDS = 10;
-
-/** Registers `args.procedure` on its OWN persistent Session+identity (see
- * this module's own top comment for why each registration needs its own,
- * not a shared one). Re-registering the same procedure (including
- * ring_service.ts's own periodic direct-dial renewal, which calls this
- * with otherwise-identical args just to refresh the DHT TTL) connects and
- * serve()s the REPLACEMENT first and only retires the previous Session
- * once that succeeds -- serve-then-swap, not teardown-then-serve.
- *
- * Found live 2026-09-06: the old teardown-then-serve order closed the
- * existing registration UNCONDITIONALLY before attempting the new one, so
- * a renewal whose connect/serve() failed (a real, observed QUIC-level
- * "connection: write frame: Application error 0x0 (remote): closed") left
- * the procedure completely unregistered -- not degraded, GONE -- until
- * the next renewal happened to succeed. For ring_service.ts specifically
- * that meant every incoming ring silently failed as unreachable for the
- * whole gap, with nothing surfacing it beyond a `lastError` string nobody
- * was polling. Connecting the identity dedupe on the station's own side
- * (macula_station_listener.erl's per-identity peer dedupe, the same one
- * presence.ts's own doc extensively documents) already retires the OLD
- * session the moment the NEW one under the same identity connects
- * successfully -- this function's own explicit teardown of `existing`
- * below is then just cleaning up a session the station most likely
- * already closed, not doing the actual swap itself. */
+/**
+ * Serves `name` in this node's own namespace, answered by `exec`.
+ * Registering a name that is already served changes its command and
+ * timeout in place: the advertisement stays as it is.
+ */
 export async function serve(args: ServeArgs): Promise<ServeResult> {
-  try {
-    const execTimeoutMs = (args.execTimeoutSeconds ?? DEFAULT_EXEC_TIMEOUT_SECONDS) * 1000;
-    const identity = loadOrGenerateIdentity(serveProcedureIdentityPath(args.procedure));
-    let session: Session;
-    try {
-      session = await connectWithFallback(identity, args.host);
-    } catch (e) {
-      identity.dispose();
-      throw e;
-    }
-    let stop: () => Promise<void>;
-    try {
-      stop = await session.serve(args.procedure, (payload) => runExec(args.exec, execTimeoutMs, payload), { bytes: args.bytes });
-    } catch (e) {
-      await session.close(identity).catch(() => {});
-      identity.dispose();
-      throw e;
-    }
-
-    // The replacement is live -- now it's safe to retire the previous
-    // registration, if any. A failure anywhere above never reaches here,
-    // so `existing` (still fully serving) is untouched by a failed retry.
-    const existing = registrations.get(args.procedure);
-    registrations.set(args.procedure, {
-      procedure: args.procedure,
-      exec: args.exec,
-      execTimeoutSeconds: execTimeoutMs / 1000,
-      identity,
-      session,
-      stop,
-    });
-    if (existing) {
-      await existing.stop().catch(() => {});
-      await existing.session.close(existing.identity).catch(() => {});
-      existing.identity.dispose();
-    }
-
-    if (args.direct) {
-      // Advertise the SERVING session's own resolved station (the one
-      // actually serve()-ing `procedure`), via the SEPARATE, shared
-      // direct-advertise leg -- deliberately not the advertise session's
-      // own station, which could in principle differ via its own
-      // independent connectWithFallback if the primary happened to be
-      // briefly unreachable for that connect.
-      const directSession = await ensureDirectAdvertiseSession(args.host);
-      await directSession.putProcedureAdvertisement(args.procedure, session.stationNodeId, {
-        ttlMs: args.ttlSeconds ? args.ttlSeconds * 1000 : undefined,
-      });
-    }
-
-    if (!shutdownRegistered) {
-      onShutdown(stopSync);
-      shutdownRegistered = true;
-    }
-
-    return { procedure: args.procedure, registered: true, serving: [...registrations.keys()] };
-  } catch (e) {
-    throw toCliError(e);
+  const execTimeoutMs = (args.execTimeoutSeconds ?? DEFAULT_EXEC_TIMEOUT_SECONDS) * 1000;
+  const existing = registrations.get(args.name);
+  if (existing) {
+    existing.exec = args.exec;
+    existing.execTimeoutMs = execTimeoutMs;
+    return { name: args.name, procedure: existing.procedure, registered: true, serving: serving() };
   }
-}
-
-/** Gracefully unregisters every active registration and closes the shared
- * direct-advertise Session, in that order -- used by index.ts's MCP
- * transport-close handler (see its own doc: a dropped/closed client
- * connection must not leave served procedures standing forever, holding
- * QUIC connections open and answering calls with nobody left to receive
- * the results). Reuses the same per-registration teardown unserve() already
- * does, just for everything at once rather than one procedure. Best-effort
- * throughout (this runs during shutdown, not a path any caller is waiting
- * on) -- a single registration failing to tear down cleanly does not stop
- * the rest from being attempted. */
-export async function stopAll(): Promise<void> {
-  const procedures = [...registrations.keys()];
-  await Promise.all(procedures.map((p) => unserve(p).catch(() => {})));
+  const procedure = await ownProcedure(args.name);
+  const registration = { name: args.name, procedure, exec: args.exec, execTimeoutMs } as Registration;
+  registration.served = await serveProcedure({
+    procedure,
+    bytes: args.bytes,
+    handler: (request) => runExec(registration.exec, registration.execTimeoutMs, request),
+  });
+  registrations.set(args.name, registration);
+  return { name: args.name, procedure, registered: true, serving: serving() };
 }
 
 export interface UnserveResult {
-  procedure: string;
+  name: string;
   unregistered: boolean;
   serving: string[];
-  daemon_stopped: boolean;
 }
 
-/** Unregisters `procedure` and closes its own Session. If nothing else is
- * registered afterward, also closes the shared direct-advertise Session --
- * no reason to hold it open once nothing needs a direct-dial advertisement
- * refreshed. A later mesh_serve call reconnects everything it needs, same
- * as the first one. */
-export async function unserve(procedure: string): Promise<UnserveResult> {
-  const reg = registrations.get(procedure);
-  if (!reg) {
-    return { procedure, unregistered: false, serving: [...registrations.keys()], daemon_stopped: false };
-  }
-  await reg.stop().catch(() => {});
-  await reg.session.close(reg.identity).catch(() => {});
-  reg.identity.dispose();
-  registrations.delete(procedure);
+/** Withdraws `name`. No-op if it was never registered. */
+export async function unserve(name: string): Promise<UnserveResult> {
+  const reg = registrations.get(name);
+  if (!reg) return { name, unregistered: false, serving: serving() };
+  registrations.delete(name);
+  await reg.served.stop().catch(() => {});
+  return { name, unregistered: true, serving: serving() };
+}
 
-  let allStopped = false;
-  if (registrations.size === 0) {
-    await closeDirectAdvertiseSession();
-    allStopped = true;
-  }
-  return {
-    procedure,
-    unregistered: true,
-    serving: [...registrations.keys()],
-    daemon_stopped: allStopped,
-  };
+/** Withdraws every registration: index.ts's shutdown, so a closed client never leaves procedures answering with nobody behind them. */
+export async function stopAll(): Promise<void> {
+  await Promise.all([...registrations.keys()].map((name) => unserve(name)));
 }

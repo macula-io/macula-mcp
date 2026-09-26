@@ -7,8 +7,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./mesh_config.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as ringService from "./ring_service.js";
 import * as rooms from "./rooms.js";
@@ -37,16 +36,12 @@ export function registerMeshAnswerRing(server: McpServer): void {
       ring_id: z.string().length(32).regex(/^[0-9a-f]+$/, "must be lowercase hex").describe("From rings.pending in mesh_read_inbox."),
       answer: z.number().int().min(1).max(2).describe("1 accept, 2 decline. No booleans on the wire."),
       reason: z.string().max(280).optional().describe("Shown to the caller. Worth giving on a decline."),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ ring_id, answer, reason, host }) => {
+    async ({ ring_id, answer, reason }) => {
       ensurePresence(server);
       try {
         if (reason !== undefined) assertNoLikelySecret(reason, "reason");
-        const res = await ringService.answerPendingRing({ ring_id, answer: answer === 1 ? 1 : 2, reason, host });
+        const res = await ringService.answerPendingRing({ ring_id, answer: answer === 1 ? 1 : 2, reason });
         return jsonContent({
           ...res,
           peer_petname: petname(res.peer),
@@ -59,7 +54,7 @@ export function registerMeshAnswerRing(server: McpServer): void {
         });
       } catch (e) {
         if (e instanceof rooms.RoomError) return errorContent(`mesh_answer_ring failed: ${e.message}`);
-        return errorContent(describeCliError("mesh_answer_ring failed", e));
+        return errorContent(describeMeshError("mesh_answer_ring failed", e));
       }
     },
   );

@@ -1,30 +1,15 @@
 // Resource: who am I on the mesh.
 //
-// An agent SHOULD read this before it acts. This identity is a bare
-// Ed25519 node ID -- no realm, no membership state, since this server is
-// a raw wire-protocol client, not a realm-joined daemon (that concept
-// belonged to hecate-daemon, now dropped). Report what's actually true
-// rather than fake the fields the old daemon-backed shape had.
-//
-// This is THIS macula-mcp server process's own identity (see
-// defaultIdentityPath() in mesh_config.ts) -- freshly minted per
-// process, one of several separate per-concern identities this server
-// holds (mesh_watch, presence, serving and observing each use their
-// own -- see mesh_config.ts's own doc comment for why). Sharing one
-// identity across every concurrent mesh-mcp process/session used to
-// cause real connection collisions (verified live: 5/6 concurrent calls
-// failed under a shared identity, 0/6 failed once each had its own),
-// which is what the per-concern split (2026-08-29) fixed.
-//
-// mesh://peers was dropped, not reworked: it was already an admitted
-// stub even under the old daemon-backed design ("v1 surfaces an empty
-// list until hecate_mesh:get_peers/0 returns real data"), and
-// @macula-io/ts has no peer-listing API to expose either. A real stub in
-// both directions isn't worth keeping around.
+// An agent SHOULD read this before it acts. This server has ONE identity:
+// an ML-DSA node key under the fleet's pq_hybrid profile (mesh_config.ts's
+// nodeKeyPath), used for every link, call, publication and served
+// procedure. Its node_id is what providers see as the caller, what
+// subscribers see as the publisher, and this agent's citizen_did in
+// mcl-citizens.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defaultIdentityPath } from "./mesh_config.js";
-import { tsIdentity } from "./macula_ts_client.js";
+import { nodeKeyPath } from "./mesh_config.js";
+import { KEY_PROFILE, selfNodeId } from "./macula_ts_client.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
 import * as ringService from "./ring_service.js";
@@ -35,32 +20,26 @@ export function registerIdentity(server: McpServer): void {
     "mesh://identity",
     {
       description:
-        "This macula-mcp server process's own Ed25519 identity (node ID), persisted per session -- " +
-        "not mesh_watch's identity, presence's, or serving's own separate ones. " +
-        "Its node_id is also this agent's citizen_did in mcl-citizens; citizenship says whether it is " +
-        "registered there right now (presence registers it, and renews it, automatically). ring says " +
-        "whether this agent is currently serving its ring endpoint (agent.<node_id>.ring) and under which " +
-        "contact policy.",
+        "This macula-mcp server's one identity: its node_id, key file and crypto profile. The node_id is what " +
+        "providers see as the caller and subscribers as the publisher, and this agent's citizen_did in " +
+        "mcl-citizens; citizenship says whether it is registered there right now (presence registers and renews " +
+        "it). realm says whether a person's account vouches for it. ring says whether this agent can be rung.",
       mimeType: "application/json",
     },
     async (uri) => {
-      const id = tsIdentity(defaultIdentityPath());
-      // redactPending: true -- a pending join's session_id/join_url is a
-      // bearer link meant for the human who is about to scan/click it,
-      // not for a routine identity check (see realm.ts's own doc on
-      // status()'s redactPending param for the live leak this closes).
+      const nodeId = await selfNodeId();
       const shaped = {
-        ...id,
-        citizen_did: id.node_id,
+        node_id: nodeId,
+        key_path: nodeKeyPath(),
+        profile: KEY_PROFILE,
+        citizen_did: nodeId,
         citizenship: citizenship.status(),
-        realm: realm.status(id.node_id, { redactPending: true }),
+        // mesh://identity is not the channel for a pending join's bearer
+        // link; mesh_join_realm is (see realm.ts's status()).
+        realm: realm.status(nodeId, { redactPending: true }),
         ring: ringService.status(),
       };
-      return {
-        contents: [
-          { uri: uri.href, mimeType: "application/json", text: JSON.stringify(shaped, null, 2) },
-        ],
-      };
+      return { contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(shaped, null, 2) }] };
     },
   );
 }

@@ -13,9 +13,8 @@
 // as and agent.hello announces. mcl-citizens/register_presence registers
 // the CALL's caller, which macula signs end to end with that identity's key
 // and the provider verifies, so no proof travels in the payload and nothing
-// is signed here. register()'s realm discovery (macula_ts_client.ts's
-// discoverProcedureRealm) is in-process, the same DHT find-records-by-type
-// + filter mesh_stations.ts/mesh_memory.ts do inline for their own calls.
+// is signed here. register() learns the directory's realm from its verified
+// advertisement (macula_ts_client.ts's discoverProcedureRealm).
 //
 // Registration is presence, not identity: entries expire (mcl-citizens
 // keeps one at most twenty minutes), so this re-registers every
@@ -31,8 +30,7 @@
 // Opt out with MACULA_MCP_NO_CITIZENSHIP=1: registering puts this agent
 // in a public directory, same category of decision as presence's own
 // agent.hello broadcast (see presence.ts on why that is on by default).
-import { defaultIdentityPath } from "./mesh_config.js";
-import { callThenDirect as callThenDirectTs, discoverProcedureRealm, signOwnershipProof, type TsCallResult, type TsIdentitySignResult } from "./macula_ts_client.js";
+import { call, discoverProcedureRealm } from "./macula_ts_client.js";
 
 export const REGISTER_PROCEDURE = "mcl-citizens/register_presence";
 export const CITIZEN_KIND = "agent";
@@ -59,13 +57,6 @@ export interface CitizenshipStatus {
 }
 
 interface CitizenshipState {
-  // Deliberately the ORIGINAL possibly-undefined override, not
-  // resolved via defaultStation() here -- discoverProcedureRealm/call's
-  // own connectWithFallback() (macula_ts_client.ts) needs the real
-  // absence of a host to attach its own multi-station fallback to each
-  // periodic renewal; a pre-resolved string looks exactly like an
-  // explicit override and would silently lose it.
-  host?: string;
   nodeId: string;
   displayName: string;
   realm?: string;
@@ -107,27 +98,9 @@ export function registerArgs(input: { displayName: string }): Record<string, unk
   };
 }
 
-/**
- * Merge an ownership proof for `procedure` into a call's args, for
- * mesh_call's prove_identity. The proof is bound to THIS server's default
- * identity, so citizen_did and proof always come from the signature --
- * a caller-supplied citizen_did for some other key could never verify
- * anyway. Every other arg the caller passed is kept. Pure.
- */
-export function withIdentityProof(
-  args: Record<string, unknown> | undefined,
-  signed: TsIdentitySignResult,
-): Record<string, unknown> {
-  return {
-    ...(args ?? {}),
-    citizen_did: signed.node_id,
-    proof: { timestamp: signed.timestamp, signature: signed.signature },
-  };
-}
-
 function readOk(payload: unknown): { ok: boolean; expires_at?: number; error?: string } {
   const p = (payload ?? {}) as Record<string, unknown>;
-  const ok = p.ok === 1 || p.ok === true;
+  const ok = p.ok === 1;
   return {
     ok,
     expires_at: typeof p.expires_at === "number" ? p.expires_at : undefined,
@@ -135,44 +108,11 @@ function readOk(payload: unknown): { ok: boolean; expires_at?: number; error?: s
   };
 }
 
-/**
- * A plain (gossip-routed) call, then the same call direct-dialled if the
- * plain one fails. The plain route depends on inter-station gossip
- * having carried a route to mcl-citizens' own station; during a
- * fleet rollout that route is exactly what is missing for a minute or
- * two (seen live 2026-09-02 as temporary_relay_failure on the very first
- * registration of a fresh install), while the service's own direct-dial
- * DHT record is still there. Same advice mesh_call's own `direct` doc
- * gives a caller, applied here automatically. Thin wrapper over
- * macula_ts_client.ts's callThenDirect, pinned to this server's own
- * default identity -- the same identity every mesh_call/mesh_publish
- * call uses, and the one signIdentity() below signs proofs for.
- */
-export async function callThenDirect(args: {
-  host?: string;
-  procedure: string;
-  callArgs?: Record<string, unknown>;
-  timeoutMs?: number;
-  realm?: string;
-}): Promise<TsCallResult> {
-  return callThenDirectTs({ ...args, identityPath: defaultIdentityPath() });
-}
-
-/**
- * An ownership proof for `procedure`, signed by this server's own
- * default identity -- macula_ts_client.ts's signOwnershipProof pinned to
- * defaultIdentityPath(), the same identity register()/mesh_call's
- * prove_identity/ring_service.ts/mesh_ring.ts all act as.
- */
-export function signIdentity(procedure: string): TsIdentitySignResult {
-  return signOwnershipProof(defaultIdentityPath(), procedure);
-}
-
 /** One registration attempt against the directory. Throws on any failure; callers record, never propagate. */
-export async function register(input: { host?: string; displayName: string }): Promise<{ realm: string; expires_at?: number }> {
-  const realm = await discoverProcedureRealm({ host: input.host, procedure: REGISTER_PROCEDURE, identityPath: defaultIdentityPath() });
+export async function register(input: { displayName: string }): Promise<{ realm: string; expires_at?: number }> {
+  const realm = await discoverProcedureRealm(REGISTER_PROCEDURE);
   const callArgs = registerArgs({ displayName: input.displayName });
-  const res = await callThenDirect({ host: input.host, procedure: REGISTER_PROCEDURE, realm, timeoutMs: CALL_TIMEOUT_MS, callArgs });
+  const res = await call({ procedure: REGISTER_PROCEDURE, realm, timeoutMs: CALL_TIMEOUT_MS, callArgs });
   const outcome = readOk(res.payload);
   if (!outcome.ok) throw new Error(`${REGISTER_PROCEDURE} refused: ${outcome.error ?? "no reason given"}`);
   return { realm, expires_at: outcome.expires_at };
@@ -184,7 +124,7 @@ async function attempt(): Promise<void> {
   if (s.inFlight) return; // a renewal must never stack on a slow first attempt
   s.inFlight = true;
   try {
-    const { realm, expires_at } = await register({ host: s.host, displayName: s.displayName });
+    const { realm, expires_at } = await register({ displayName: s.displayName });
     s.realm = realm;
     s.expiresAt = expires_at;
     s.registeredAt = new Date().toISOString();
@@ -215,7 +155,6 @@ function withTimeout(p: Promise<void>, ms: number): Promise<void> {
  * first attempt, or a disabled status when opted out.
  */
 export async function start(input: {
-  host?: string;
   nodeId: string;
   displayName: string;
   renewSeconds?: number;
@@ -227,7 +166,7 @@ export async function start(input: {
   }
   stop();
   const renewSeconds = Math.max(30, input.renewSeconds ?? DEFAULT_RENEW_SECONDS);
-  state = { host: input.host, nodeId: input.nodeId, displayName: input.displayName, renewSeconds, inFlight: false };
+  state = { nodeId: input.nodeId, displayName: input.displayName, renewSeconds, inFlight: false };
   await withTimeout(attempt(), FIRST_ATTEMPT_TIMEOUT_MS);
   const timer = setInterval(() => void attempt(), renewSeconds * 1000);
   timer.unref();

@@ -1,46 +1,48 @@
-import { describe, expect, it } from "vitest";
-import { MaculaCliError, splitRealmPrefix } from "./mesh_config.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-// The io.macula realm, sha256("io.macula"), as a DHT listing prints it.
-const REALM = "ABB81B5A614B63551B400B810648C0C8A78EFAD845442630C94B46CC95D2FCD1";
+const REALM = "abb81b5a614b63551b400b810648c0c8a78efad845442630c94b46cc95d2fcd1";
 
-describe("splitRealmPrefix", () => {
-  it("leaves a bare procedure and its realm alone", () => {
-    expect(splitRealmPrefix("hecate-rag.search_chunks_semantic", REALM)).toEqual({
-      procedure: "hecate-rag.search_chunks_semantic",
-      realm: REALM,
-    });
-    expect(splitRealmPrefix("rl_probe.echo")).toEqual({ procedure: "rl_probe.echo", realm: undefined });
+const mocks = vi.hoisted(() => ({ call: vi.fn(), ensurePresence: vi.fn() }));
+vi.mock("./macula_ts_client.js", () => ({ call: mocks.call }));
+vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
+
+type Handler = (args: Record<string, unknown>) => Promise<{ isError?: boolean; content: { text: string }[] }>;
+
+async function meshCall(): Promise<Handler> {
+  let handler: Handler | undefined;
+  const server = { tool: (_n: string, _d: string, _s: unknown, fn: Handler) => (handler = fn) } as unknown as McpServer;
+  const { registerMeshCall } = await import("./mesh_call.js");
+  registerMeshCall(server);
+  return handler!;
+}
+
+afterEach(() => {
+  delete process.env.MACULA_MCP_UCAN;
+  vi.resetAllMocks();
+});
+
+describe("mesh_call", () => {
+  it("splits a realm-prefixed procedure, calls it, and asks for tagged bytes back", async () => {
+    mocks.call.mockResolvedValue({ procedure: "mcl-echo/echo", payload: { echoed: "hi" }, duration_ms: 12 });
+    const res = await (await meshCall())({ procedure: `${REALM}/mcl-echo/echo`, args: { text: "hi" } });
+    expect(mocks.call).toHaveBeenCalledWith({ procedure: "mcl-echo/echo", callArgs: { text: "hi" }, timeoutMs: undefined, realm: REALM, bytes: "tagged" });
+    expect(JSON.parse(res.content[0]!.text)).toEqual({ result: { echoed: "hi" }, duration_ms: 12 });
   });
 
-  it("splits the realm-prefixed form a procedure_advertisement prints", () => {
-    expect(splitRealmPrefix(`${REALM}/hecate-rag.search_chunks_semantic`)).toEqual({
-      procedure: "hecate-rag.search_chunks_semantic",
-      realm: REALM,
-    });
+  it("refuses by name while MACULA_MCP_UCAN is set, rather than dropping the token silently", async () => {
+    process.env.MACULA_MCP_UCAN = "/tmp/token";
+    const res = await (await meshCall())({ procedure: "mcl-mail/open_mailbox" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/macula-go#2/);
+    expect(mocks.call).not.toHaveBeenCalled();
   });
 
-  it("keeps the org segment: the registry holds _/name as its own entry", () => {
-    expect(splitRealmPrefix(`${REALM}/_/hecate_agora.get_posts_page`)).toEqual({
-      procedure: "_/hecate_agora.get_posts_page",
-      realm: REALM,
-    });
-  });
-
-  it("accepts a realm passed alongside when it agrees, whatever the case", () => {
-    expect(splitRealmPrefix(`${REALM}/hecate-rag.answer_query`, REALM.toLowerCase())).toEqual({
-      procedure: "hecate-rag.answer_query",
-      realm: REALM,
-    });
-  });
-
-  it("refuses a realm passed alongside that disagrees with the prefix", () => {
-    const other = "0".repeat(64);
-    expect(() => splitRealmPrefix(`${REALM}/hecate-rag.answer_query`, other)).toThrow(MaculaCliError);
-    expect(() => splitRealmPrefix(`${REALM}/hecate-rag.answer_query`, other)).toThrow(/hecate-rag\.answer_query/);
-  });
-
-  it("does not mistake a short hex-looking prefix for a realm", () => {
-    expect(splitRealmPrefix("abcd/thing")).toEqual({ procedure: "abcd/thing", realm: undefined });
+  it("reports a provider's error with its code", async () => {
+    const { MeshError } = await import("./mesh_config.js");
+    mocks.call.mockRejectedValue(new MeshError("the provider answered handler_error: no such mailbox", "handler_error", "provider"));
+    const res = await (await meshCall())({ procedure: "mcl-mail/open_mailbox" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/code=handler_error, from=provider/);
   });
 });

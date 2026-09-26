@@ -4,8 +4,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as realm from "./realm.js";
-import { defaultIdentityPath } from "./mesh_config.js";
-import { tsIdentity } from "./macula_ts_client.js";
+import { nodeKeyPath } from "./mesh_config.js";
+import { selfNodeId } from "./macula_ts_client.js";
 import { errorContent } from "./reply.js";
 import { connectedViaLabel, ensurePresence } from "./presence.js";
 import { toolDescription } from "./tool_description.js";
@@ -76,21 +76,21 @@ export function registerMeshJoinRealm(server: McpServer): void {
     async ({ wait_seconds }) => {
       ensurePresence(server);
       try {
-        const id = tsIdentity(defaultIdentityPath());
-        const already = realm.status(id.node_id);
+        const nodeId = await selfNodeId();
+        const already = realm.status(nodeId);
         if (already.joined) {
           return { content: [{ type: "text", text: JSON.stringify({ status: "joined", ...already }, null, 2) }] };
         }
         const began = await realm.begin({ connectedVia: connectedViaLabel(server) });
         if (!wait_seconds) {
-          return { content: pendingContent(began, id.path) };
+          return { content: pendingContent(began, nodeKeyPath()) };
         }
-        const after = await realm.waitForOutcome(id.node_id, wait_seconds);
+        const after = await realm.waitForOutcome(nodeId, wait_seconds);
         if (after.joined) {
           return { content: [{ type: "text", text: JSON.stringify({ status: "joined", ...after }, null, 2) }] };
         }
         if (after.pending) {
-          return { content: pendingContent(began, id.path) };
+          return { content: pendingContent(began, nodeKeyPath()) };
         }
         return errorContent(`mesh_join_realm: not joined -- ${after.error ?? "the session ended without a confirmation"}`);
       } catch (e) {

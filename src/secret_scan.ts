@@ -36,7 +36,7 @@
 // false positive be redacted and retried -- there's no legitimate case
 // for actually needing to publish a real credential onto a shared mesh.
 
-import { MaculaCliError } from "./mesh_config.js";
+import { MeshError } from "./mesh_config.js";
 
 interface SecretPattern {
   name: string;
@@ -142,8 +142,8 @@ export function findLikelySecret(value: unknown, path: string): SecretMatch | un
 }
 
 /**
- * Throws a MaculaCliError (the same error type every mesh tool's catch
- * block already formats via reply.ts's describeCliError, so this needs no
+ * Throws a MeshError (the same error type every mesh tool's catch
+ * block already formats via reply.ts's describeMeshError, so this needs no
  * new error-handling path at any call site) if `value` looks like it
  * contains a secret. `label` names the argument being scanned, for the
  * error message and as the root of the reported path.
@@ -151,7 +151,7 @@ export function findLikelySecret(value: unknown, path: string): SecretMatch | un
 export function assertNoLikelySecret(value: unknown, label: string): void {
   const match = findLikelySecret(value, label);
   if (match) {
-    throw new MaculaCliError(
+    throw new MeshError(
       `${label} looks like it contains a ${match.patternName} (at ${match.path}) -- refusing to send it over the ` +
         "mesh. If this is a false positive, remove or redact the matched text and try again.",
     );

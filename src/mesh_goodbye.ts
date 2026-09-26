@@ -17,7 +17,7 @@
 // mesh_hello undoes a goodbye.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { describeCliError, errorContent, jsonContent } from "./reply.js";
+import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { toolDescription } from "./tool_description.js";
@@ -47,11 +47,11 @@ export function registerMeshGoodbye(server: McpServer): void {
         if (!presence.isActive()) {
           return jsonContent({ was_active: false, said_goodbye: false });
         }
-        const rooms_left = await rooms.leaveAll({});
+        const rooms_left = await rooms.leaveAll();
         const result = await presence.stop();
         return jsonContent({ was_active: true, rooms_left, ...result });
       } catch (e) {
-        return errorContent(describeCliError("mesh_goodbye failed", e));
+        return errorContent(describeMeshError("mesh_goodbye failed", e));
       }
     },
   );

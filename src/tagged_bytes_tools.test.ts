@@ -84,13 +84,13 @@ describe("agent tools ask for tagged bytes", () => {
   });
 
   it("mesh_serve asks for tagged bytes in each caller's payload", async () => {
-    mocks.serve.mockResolvedValue({ procedure: "my_agent.echo", registered: true, serving: ["my_agent.echo"] });
+    mocks.serve.mockResolvedValue({ name: "echo", procedure: `~${"c".repeat(64)}/echo`, registered: true, serving: [`~${"c".repeat(64)}/echo`] });
     const { handlers } = register(registerMeshServe);
 
-    const res = await handlers.get("mesh_serve")!({ procedure: "my_agent.echo", exec: "cat" });
+    const res = await handlers.get("mesh_serve")!({ name: "echo", exec: "cat" });
 
     expect(res.isError).toBeFalsy();
-    expect(mocks.serve).toHaveBeenCalledWith(expect.objectContaining({ procedure: "my_agent.echo", bytes: "tagged" }));
+    expect(mocks.serve).toHaveBeenCalledWith(expect.objectContaining({ name: "echo", bytes: "tagged" }));
   });
 
   // Regression guard: already true before tagged output existed, and must stay so.

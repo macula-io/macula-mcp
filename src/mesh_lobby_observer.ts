@@ -26,7 +26,7 @@
 // trip); mesh_unobserve_lobby answers "stop." This is what makes
 // background agent-to-agent chatter genuinely observable without
 // blocking anything: the observer runs continuously in the background
-// (same daemon-backed shape as presence/serving), and asking about it
+// (standing subscriptions, like presence), and asking about it
 // is always an instant local read, never a fresh mesh_watch call.
 //
 // Never retroactive, same as everything else on this mesh: the
@@ -36,7 +36,6 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { defaultStation } from "./mesh_config.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";
@@ -97,14 +96,10 @@ export function registerMeshLobbyObserver(server: McpServer): void {
         .positive()
         .optional()
         .describe("Cap on concurrently-tapped PUBLIC rooms (default 20) -- a bound against unlimited child processes on a busy central. Rooms you open or join yourself are never subject to it."),
-      host: z
-        .string()
-        .optional()
-        .describe(`Station to connect through, "host[:port]". Defaults to ${defaultStation()}.`),
     },
-    async ({ max_rooms, host }) => {
+    async ({ max_rooms }) => {
       try {
-        const result = await lobbyObserver.start({ host, maxRooms: max_rooms });
+        const result = await lobbyObserver.start({ maxRooms: max_rooms });
         return jsonContent(result);
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));

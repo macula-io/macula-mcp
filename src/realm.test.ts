@@ -1,15 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Identity } from "@macula-io/ts";
-import { verifyOwnershipProof } from "./ownership_proof.js";
+import { vi } from "vitest";
 
-// begin() now signs in-process (@macula-io/ts's Identity.sign(), no
-// macula-cli subprocess) against whatever identity MACULA_MCP_IDENTITY
-// points at -- nothing to mock here, the "join flow" describe below
-// points it at a real seed file and lets real Ed25519 signing run.
+// Boundary mock: begin() takes this node's id, its key as carried, and a
+// realm proof v2 over the request from the client layer (@macula-io/ts
+// checks the proof's bytes against the realm's own vector); the realm's HTTP
+// side is a scripted fake below.
+const mocks = vi.hoisted(() => ({ selfNodeId: vi.fn(), carriedPublicKey: vi.fn(), proveDeviceRequest: vi.fn() }));
+vi.mock("./macula_ts_client.js", () => ({
+  selfNodeId: mocks.selfNodeId,
+  carriedPublicKey: mocks.carriedPublicKey,
+  proveDeviceRequest: mocks.proveDeviceRequest,
+  JOIN_SESSION_PROCEDURE: "macula_realm.join_session",
+}));
+
 import * as realm from "./realm.js";
 
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
@@ -47,18 +53,17 @@ describe("pure shapes", () => {
       if (previous !== undefined) process.env.MACULA_MCP_REALM_URL = previous;
     }
     expect(realm.DEFAULT_REALM_URL).toBe("https://realm.macula.io");
-    expect(realm.JOIN_PROOF_PROCEDURE).toBe("macula_realm.join_session");
   });
 
   it("agentMri names this server and the identity's first bytes", () => {
     expect(realm.agentMri(NODE)).toBe("mri:agent:io.macula/anonymous/macula-mcp-4f769c4e");
   });
 
-  it("joinRequest sends the key base64 (as the realm decodes it), device_info (not agent_info -- see the field's own doc comment), and the proof", () => {
-    const req = realm.joinRequest({ nodeId: NODE, proof: { timestamp: 7, signature: "ab" }, connectedVia: "opencode 1.18.25" });
-    expect(Buffer.from(req.public_key as string, "base64").toString("hex")).toBe(NODE);
+  it("joinRequest is the request the proof signs: the key as carried (base64, as the realm decodes it) and device_info (not agent_info -- see the field's own doc comment), with no proof yet", () => {
+    const req = realm.joinRequest({ nodeId: NODE, publicKey: "Y2FycmllZA==", connectedVia: "opencode 1.18.25" });
+    expect(req.public_key).toBe("Y2FycmllZA==");
     expect(req.agent_mri).toBe(realm.agentMri(NODE));
-    expect(req.proof).toEqual({ timestamp: 7, signature: "ab" });
+    expect(req.proof).toBeUndefined();
     expect(req.agent_info).toBeUndefined();
     const info = req.device_info as Record<string, unknown>;
     expect(typeof info.hostname).toBe("string");
@@ -132,6 +137,7 @@ describe("credential store", () => {
       joined_at: "2026-09-02T14:00:00Z",
       citizen_did: NODE,
       ucan: "eyJ.fake.token",
+      tier: "citizen",
     });
     // Nested (node_id, realm) layout, not the old flat <node_id>.json --
     // see credentialPath's own doc for why: a credential now belongs to
@@ -159,6 +165,7 @@ describe("credential store", () => {
       org_identity: "mri:org:io.macula/rgfaber",
       refresh_token: "mrt_1",
       joined_at: "2026-09-02T14:00:00Z",
+      tier: "citizen",
     });
     const s = realm.status(NODE);
     expect(s.joined).toBe(true);
@@ -170,22 +177,6 @@ describe("credential store", () => {
     expect(realm.loadCredential(NODE)).toBeUndefined();
     expect(realm.status(NODE)).toEqual({ portal: "https://realm.test", joined: false });
     expect(realm.status(undefined).joined).toBe(false);
-  });
-
-  it("a credential written before RealmCredential.tier existed defaults to citizen -- every one on disk before this field came exclusively from the full Hanko join flow", async () => {
-    await writeFile(
-      join(dir, `${NODE}.json`),
-      JSON.stringify({
-        node_id: NODE,
-        portal: "https://realm.test",
-        org_identity: "mri:org:io.macula/rgfaber",
-        refresh_token: "mrt_1",
-        joined_at: "2026-09-02T14:00:00Z",
-      }),
-      "utf8",
-    );
-    expect(realm.loadCredential(NODE)?.tier).toBe("citizen");
-    expect(realm.status(NODE).tier).toBe("citizen");
   });
 
   it("a device-tier credential (device_membership.ts's auto-join) round-trips its tier through status()", () => {
@@ -204,11 +195,11 @@ describe("credential store", () => {
 
   it("stores and loads independently under different realms for the same identity -- one does not clobber or leak into the other", () => {
     realm.storeCredential(
-      { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_macula", joined_at: "2026-09-08T00:00:00Z" },
+      { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_macula", joined_at: "2026-09-08T00:00:00Z", tier: "citizen" },
       "io.macula",
     );
     realm.storeCredential(
-      { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z" },
+      { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z", tier: "citizen" },
       "net.beam-campus",
     );
     expect(realm.loadCredential(NODE, "io.macula")?.refresh_token).toBe("mrt_macula");
@@ -217,77 +208,43 @@ describe("credential store", () => {
     expect(realm.loadCredential(NODE)?.refresh_token).toBe("mrt_macula");
   });
 
-  it("falls back to the pre-multi-realm flat <node_id>.json for io.macula specifically, when the nested layout has nothing yet", async () => {
-    // Simulates an operator who joined io.macula before this migration --
-    // written directly to the OLD flat path, not through storeCredential
-    // (which only ever writes the new nested layout, see its own doc).
-    await writeFile(
-      join(dir, `${NODE}.json`),
-      JSON.stringify({ node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_legacy", joined_at: "2026-09-01T00:00:00Z" }),
-      "utf8",
-    );
-    expect(realm.loadCredential(NODE, "io.macula")?.refresh_token).toBe("mrt_legacy");
-    // The fallback is scoped to io.macula only -- a legacy flat file can
-    // only ever have meant that realm (it's the only one that existed),
-    // so it must never be treated as the answer for a DIFFERENT realm.
-    expect(realm.loadCredential(NODE, "net.beam-campus")).toBeUndefined();
-  });
-
-  it("a fresh join for io.macula writes the new nested layout, not the old flat one, migrating forward on its own", () => {
-    const path = realm.storeCredential(
-      { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_1", joined_at: "2026-09-08T00:00:00Z" },
-      "io.macula",
-    );
-    expect(path).toBe(join(dir, NODE, "io.macula.json"));
-    expect(existsSync(join(dir, `${NODE}.json`))).toBe(false);
-  });
-
-  it("listCredentials returns every realm a node_id has a confirmed membership for, tagged by realm, and folds in a legacy flat io.macula credential too", async () => {
+  it("listCredentials returns every realm a node_id has a confirmed membership for, tagged by realm", () => {
     realm.storeCredential(
-      { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z" },
+      { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z", tier: "citizen" },
       "net.beam-campus",
     );
-    await writeFile(
-      join(dir, `${NODE}.json`),
-      JSON.stringify({ node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_legacy", joined_at: "2026-09-01T00:00:00Z" }),
-      "utf8",
+    realm.storeCredential(
+      { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_macula", joined_at: "2026-09-08T00:02:00Z", tier: "citizen" },
+      "io.macula",
     );
-    const memberships = realm.listCredentials(NODE);
-    expect(memberships).toHaveLength(2);
-    const byRealm = Object.fromEntries(memberships.map((m) => [m.realm, m]));
+    const byRealm = Object.fromEntries(realm.listCredentials(NODE).map((m) => [m.realm, m]));
+    expect(Object.keys(byRealm).sort()).toEqual(["io.macula", "net.beam-campus"]);
     expect(byRealm["net.beam-campus"]?.refresh_token).toBe("mrt_beamcampus");
-    expect(byRealm["io.macula"]?.refresh_token).toBe("mrt_legacy");
   });
 
+  it("a stored file without a tier is not a credential this server wrote, and is not read as one", async () => {
+    await mkdir(join(dir, NODE), { recursive: true });
+    await writeFile(join(dir, NODE, "io.macula.json"), JSON.stringify({ node_id: NODE, org_identity: "mri:org:io.macula/x", refresh_token: "t" }), "utf8");
+    expect(realm.loadCredential(NODE)).toBeUndefined();
+  });
   it("listCredentials is empty, not an error, for an identity with no memberships at all", () => {
     expect(realm.listCredentials(NODE)).toEqual([]);
   });
 });
 
 describe("join flow against a fake realm", () => {
-  // begin() signs via loadOrGenerateIdentity(defaultIdentityPath()) --
-  // point MACULA_MCP_IDENTITY at a real seed file so a real Ed25519
-  // identity gets loaded and used, same as the live server. NODE for
-  // this describe block is that identity's own node id, computed from
-  // the seed once so the fake-realm script/assertions below can name
-  // it -- not the arbitrary top-level NODE constant.
-  let NODE = "";
-  const SEED = new Uint8Array(32).fill(0x7a);
+  const NODE = "5e".repeat(32);
+  const CARRIED = Buffer.alloc(3118, 3).toString("base64");
+  const PROOF = { v: 2, timestamp: 0, nonce: "00".repeat(16), signature: "cd".repeat(5139) };
 
-  beforeEach(async () => {
-    const identityPath = join(dir, "identity.seed");
-    process.env.MACULA_MCP_IDENTITY = identityPath;
-    await writeFile(identityPath, SEED, { mode: 0o600 });
-    const probe = Identity.fromSeedBytes(SEED);
-    try {
-      NODE = Buffer.from(probe.nodeId).toString("hex");
-    } finally {
-      probe.dispose();
-    }
+  beforeEach(() => {
+    mocks.selfNodeId.mockResolvedValue(NODE);
+    mocks.carriedPublicKey.mockResolvedValue(CARRIED);
+    mocks.proveDeviceRequest.mockImplementation(async () => ({ ...PROOF, timestamp: Date.now() }));
   });
 
   afterEach(() => {
-    delete process.env.MACULA_MCP_IDENTITY;
+    vi.resetAllMocks();
   });
 
   function fakeRealm(script: Array<{ status: number; body: unknown }>) {
@@ -300,7 +257,7 @@ describe("join flow against a fake realm", () => {
     return { fetchImpl, calls };
   }
 
-  it("begin creates the session with a proof bound to the join procedure -- a real Identity.sign() signature over proofMessage()'s exact byte layout -- and returns link + QR", async () => {
+  it("begin creates the session with a realm proof v2 over exactly the body it sends, for io.macula and the join procedure, and returns link + QR", async () => {
     const server = fakeRealm([{ status: 201, body: { session_id: "s1", join_url: "https://realm.test/join/s1", expires_at: "2999-01-01T00:00:00Z" } }]);
     const began = await realm.begin({ connectedVia: "opencode 1.18.25", fetchImpl: server.fetchImpl });
     expect(began.reused).toBe(false);
@@ -309,16 +266,17 @@ describe("join flow against a fake realm", () => {
     expect(began.qr_terminal.length).toBeGreaterThan(0);
     expect(server.calls[0].url).toBe("https://realm.test/api/v1/join/sessions");
     const sent = JSON.parse(String(server.calls[0].init?.body));
-    expect(typeof sent.proof.timestamp).toBe("number");
-    expect(Math.abs(Date.now() - sent.proof.timestamp)).toBeLessThan(5_000);
-    // This is exactly hecate-citizens'/hecate-mail's *_ownership_proof
-    // check, run here against the real signature begin() produced --
-    // proof that Identity.sign() signed proofMessage()'s real byte
-    // layout, not a mismatched or malformed one that would fail
-    // silently wrong on the Erlang side.
-    expect(verifyOwnershipProof({ node_id: NODE, proof: sent.proof, procedure: realm.JOIN_PROOF_PROCEDURE })).toEqual({ ok: 1 });
-    // bound to the join procedure specifically -- a proof for any other procedure must not verify
-    expect(verifyOwnershipProof({ node_id: NODE, proof: sent.proof, procedure: "some.other.procedure" })).toEqual({ ok: 0, reason: "bad_signature" });
+    // The proof signs the body as sent, less the proof itself (device_info
+    // included), for io.macula's realm id and the join procedure, under the
+    // realm's HTTP rule; the body carries the key the realm derives the
+    // node_id from.
+    const { proof, ...signedBody } = sent;
+    const { realmIdOf } = await import("./mesh_config.js");
+    expect(mocks.proveDeviceRequest).toHaveBeenCalledWith(realmIdOf("io.macula"), "macula_realm.join_session", signedBody, "http");
+    expect(sent.public_key).toBe(CARRIED);
+    expect(proof.v).toBe(2);
+    expect(proof.signature).toBe(PROOF.signature);
+    expect(Math.abs(Date.now() - proof.timestamp)).toBeLessThan(5_000);
     expect(realm.status(NODE).pending?.session_id).toBe("s1");
     // Found live 2026-09-08: mesh://identity and mesh_hello's own result
     // both embed this exact status(), neither behind any tool allowlist

@@ -39,7 +39,7 @@ const TOPICS: HelpTopic[] = [
       "Quick-start help for the Macula mesh tools in this conversation -- overview, examples, gotchas.",
     ask:
       "Give me a quick, example-driven overview of the Macula mesh tools available in this " +
-      "conversation: mesh_call, mesh_put, mesh_get, mesh_publish, mesh_watch, mesh_hello, " +
+      "conversation: mesh_call, mesh_publish, mesh_watch, mesh_hello, " +
       "mesh_agents, mesh_goodbye, mesh_open_room, mesh_say, mesh_read_inbox, mesh_serve, mesh_unserve, plus the mesh://identity and " +
       "mesh://etiquette resources. Show one realistic example call per tool and the top 3 " +
       "gotchas to avoid -- for mesh_serve specifically, lead with the fact that it opens a real " +
@@ -47,16 +47,14 @@ const TOPICS: HelpTopic[] = [
   },
   {
     name: "help_identity",
-    description: "Explain how mesh identity works in this conversation (mesh_watch vs. every other tool).",
+    description: "Explain how mesh identity works in this conversation: one post-quantum key per session.",
     ask:
       "Explain how identity works for the Macula mesh tools in this conversation: what " +
-      "mesh://identity shows, why mesh_watch, presence (mesh_hello/mesh_agents/mesh_goodbye), " +
-      "serving (mesh_serve/mesh_unserve) and observing (mesh_observe_lobby and friends) each use their " +
-      "own identity distinct from the other tools, that every one of the five is now PERSISTED per " +
-      "logical session (scoped by CLAUDE_CODE_SESSION_ID, else the parent pid) rather than a fresh " +
-      "temp file per process, and how to pin any of them to a fixed path instead with MACULA_MCP_IDENTITY " +
-      "/ MACULA_MCP_WATCH_IDENTITY / MACULA_MCP_PRESENCE_IDENTITY / MACULA_MCP_SERVE_IDENTITY / " +
-      "MACULA_MCP_OBSERVE_IDENTITY if a stable node ID across sessions is needed.",
+      "mesh://identity shows (the node_id, key file and pq_hybrid profile), that this server has ONE " +
+      "identity key -- an ML-DSA node key -- used for every link, call, publication and served " +
+      "procedure, so providers see it as the caller and subscribers as the publisher; that it is " +
+      "persisted per logical session (scoped by CLAUDE_CODE_SESSION_ID, else the parent pid), and how " +
+      "to pin it to a fixed file with MACULA_MCP_IDENTITY when a stable node_id across sessions is needed.",
   },
   {
     name: "help_wire_format",
@@ -82,8 +80,8 @@ const TOPICS: HelpTopic[] = [
       "Explain the presence tools in this conversation: what presence actually starts (a " +
       "periodic agent.hello heartbeat, a durable subscription to other agents' hellos, a " +
       "standing watch over central (agents.lobby) plus every room this agent opens, joins or sees " +
-      "announced there, AND the served ring endpoint agent.<node_id>.ring -- all backed by daemons " +
-      "this server manages internally, not a one-shot call like every other tool here), what " +
+      "announced there, AND the served ring endpoint ~<node_id>/ring -- all standing subscriptions " +
+      "and a served procedure on this server's one pool, not a one-shot call like every other tool), what " +
       "mesh_agents shows (a persistent SQLite roster, not an in-memory list, so it survives a " +
       "restart) and how staleness/pruning works, what mesh_read_inbox shows (an instant, " +
       "never-blocking, threaded local read of the rooms you are in -- see help_conversations), " +
@@ -121,7 +119,7 @@ const TOPICS: HelpTopic[] = [
       "how mesh_say's " +
       "wait_reply_seconds differs from a publish-then-watch pair (the room was already being watched " +
       "before the message went out), and rings: mesh_ring({to, purpose}) delivers an addressed invite as a " +
-      "mesh_call to the callee's agent.<node_id>.ring procedure with this agent's ownership proof, carrying " +
+      "mesh_call to the callee's ~<node_id>/ring, a procedure in its own namespace only it can serve, carrying " +
       "a fresh two-party room; the callee's operator policy (contact_policy.json: open / ask, the " +
       "default / allowlist / closed) answers 1 accepted (they join the room before answering, so joined: 1 " +
       "means the room is two-sided), 2 declined with a reason, or 3 deferred to their model (pending in their " +
@@ -137,18 +135,18 @@ const TOPICS: HelpTopic[] = [
     name: "help_serve",
     description: "Explain mesh_serve/mesh_unserve -- what serving actually exposes and the risk to weigh before using it.",
     ask:
-      "Explain the serving tools in this conversation: what mesh_serve actually does (advertises a " +
-      "procedure on the mesh, answered by running a local shell command once per inbound call -- " +
+      "Explain the serving tools in this conversation: what mesh_serve actually does (serves " +
+      "~<this node_id>/<name> on the mesh, answered by running a local shell command once per inbound call -- " +
       "the caller's JSON payload arrives on the command's stdin, never shell-interpolated into the " +
-      "command string itself, and the command's stdout becomes the reply), and why this is a " +
+      "command string itself, the caller's verified node_id in MACULA_MCP_CALLER, and the command's " +
+      "stdout becomes the reply), and why this is a " +
       "materially bigger exposure than every other tool here: it's a STANDING INBOUND TRIGGER any " +
       "mesh caller can invoke repeatedly, not a one-shot action this agent initiates. Emphasize: " +
       "never register a command you wouldn't want a stranger able to run repeatedly on this " +
-      "machine, a failing/timing-out handler only fails its own caller (verified live, it can't " +
-      "affect any other procedure or the daemon itself), and mesh_unserve should be called as soon " +
+      "machine, a failing/timing-out handler only fails its own caller, and mesh_unserve should be called as soon " +
       "as a procedure no longer needs to be reachable rather than left registered indefinitely. Name " +
-      "the one exception: presence automatically serves agent.<node_id>.ring, the ring endpoint, whose " +
-      "handler ships in this package, verifies the caller's ownership proof and consults the operator's " +
+      "the one exception: presence automatically serves ~<node_id>/ring, the ring endpoint, whose " +
+      "handler ships in this package, checks the ring comes from the verified caller and consults the operator's " +
       "contact policy before doing anything; MACULA_MCP_NO_RING=1 opts out of serving it at all.",
   },
   {

@@ -5,14 +5,14 @@ const REALM = "abb81b5a614b63551b400b810648c0c8a78efad845442630c94b46cc95d2fcd1"
 
 const mocks = vi.hoisted(() => ({
   call: vi.fn(),
-  findRecordsByType: vi.fn(),
+  discoverProcedureRealm: vi.fn(),
   ensurePresence: vi.fn(),
 }));
 // Boundary mock, same pattern as rooms.test.ts/presence.test.ts: replace the
 // module mesh_stations.ts talks to the mesh THROUGH (macula_ts_client.js) --
 // both the DHT discovery half and the actual list_stations call go through
 // it now that realm support landed, so this is the one seam to mock.
-vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, findRecordsByType: mocks.findRecordsByType }));
+vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, discoverProcedureRealm: mocks.discoverProcedureRealm }));
 vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<unknown>;
@@ -36,15 +36,7 @@ afterEach(() => {
 
 describe("mesh_list_stations", () => {
   it("discovers mcl-stations' current realm via the DHT, then calls list_stations under it", async () => {
-    mocks.findRecordsByType.mockResolvedValue({
-      host: "demo.macula.io:4433",
-      type: 0x06,
-      count: 2,
-      records: [
-        { procedure_advertisement: { procedure: "other.thing", realm: "0".repeat(64) } },
-        { procedure_advertisement: { procedure: "mcl-stations/list_stations", realm: REALM } },
-      ],
-    });
+    mocks.discoverProcedureRealm.mockResolvedValue(REALM);
     mocks.call.mockResolvedValue({
       procedure: "mcl-stations/list_stations",
       // The reply as @macula-io/ts renders mcl-stations' wire: text fields are
@@ -71,7 +63,7 @@ describe("mesh_list_stations", () => {
   });
 
   it("errors clearly, without ever calling list_stations, when mcl-stations isn't advertised", async () => {
-    mocks.findRecordsByType.mockResolvedValue({ host: "demo.macula.io:4433", type: 0x06, count: 0, records: [] });
+    mocks.discoverProcedureRealm.mockRejectedValue(new Error("mcl-x/y is not advertised on the mesh right now (0 procedure advertisement(s) checked)"));
 
     const { registerMeshListStations } = await import("./mesh_stations.js");
     const { server, getHandler } = fakeServer();
@@ -79,7 +71,7 @@ describe("mesh_list_stations", () => {
     const res = (await getHandler()({})) as { isError?: boolean; content: { text: string }[] };
 
     expect(res.isError).toBe(true);
-    expect(res.content[0]!.text).toMatch(/not currently advertised/);
+    expect(res.content[0]!.text).toMatch(/is not advertised/);
     expect(mocks.call).not.toHaveBeenCalled();
   });
 });

@@ -66,12 +66,11 @@ npx -y -p @macula-io/mcp macula-mcp-uninstall --all
 `--all` on purpose, so a client you've since uninstalled still gets its
 stale config entry cleaned up. Took the persistent-`PATH`-copy route
 above instead? `macula-mcp-uninstall --all` bare, then `npm uninstall -g
-@macula-io/mcp`. (If you've had macula-mcp installed since before v0.4.0,
-there may be one legacy leftover neither command above touches:
-`~/.macula-mcp/watch-identity.seed`. Nothing has read it since that
-version — every identity since is minted fresh per process in a
-self-cleaning temp directory — so it's safe to `rm` by hand if you find
-it; not worth its own flag for what's by now a narrow, historical case.)
+@macula-io/mcp`. Neither command deletes identity keys: they are yours.
+The Ed25519 seed files of releases before macula 12
+(`~/.config/macula-mcp/identities/*.seed`, `~/.macula-mcp/watch-identity.seed`)
+are no longer read by anything and are safe to remove by hand; the
+macula 12 keys live in `~/.config/macula-mcp/keys/`.
 
 ### Troubleshooting the install
 
@@ -126,355 +125,108 @@ extensions:
 
 ## 2. Tools
 
-Every tool takes an optional `host` (`"host[:port]"`); all default to
-`MACULA_MESH_STATION` (env var on the machine running `macula-mcp`,
-default `station-de-frankfurt.macula.io:4433`).
+Every tool works on one pool of links under one identity key
+(`src/macula_ts_client.ts`): links to every configured station, each
+pinned by its node_id (`MACULA_MESH_STATIONS`, as `host:port@<node_id>`),
+and trust in io.macula plus any realm in `MACULA_MESH_REALMS`. No tool
+takes a station.
 
 ### `mesh_call`
 
-Invokes a procedure advertised on the mesh. Real output against an
-unadvertised procedure (the expected shape of "nobody's listening", not a
-crash):
-
-```json
-{
-  "content": [{ "type": "text", "text": "mesh_call failed: call failed: unknown_next_peer (code=1) (bolt4=unknown_next_peer, retryable=true)" }],
-  "isError": true
-}
-```
-
-Against a procedure that's advertised, the result payload comes back
-directly: `{"result": ..., "responded_by": "<hex>", "duration_ms": N}`.
-
-**`prove_identity: true`** signs a `{citizen_did, timestamp, procedure}`
-ownership proof with this server's default identity (in-process
-`Identity.sign()`, via `citizenship.ts`'s `signIdentity()`) and merges
-`citizen_did` + `proof` into `args`, which is exactly what
-hecate-citizens' and hecate-mail's `*_ownership_proof` verifiers expect. The
-proof is bound to the procedure named in the same call and to a fresh timestamp
-(60 s skew on the verifying side), and it can only be for this server's own
-identity -- so it overrides any `citizen_did`/`proof` passed in `args`. Use it
-for every capability that asks who is asserting, not for the open ones.
+Calls a procedure by direct dial: its signed advertisements come from the
+DHT, only those the realm's key authorizes are trusted, and the station the
+provider serves from is dialed. `realm` defaults to io.macula; a
+realm-prefixed procedure as a DHT listing prints it (`<realm hex>/<name>`)
+is split for you. The provider sees this agent's node_id as the caller.
+Errors carry their code: `code=handler_error, from=provider` is the
+service saying no; `code=unknown_next_peer, from=station` is a station that
+could not relay; "no trusted provider" is nothing trusted advertising it in
+that realm (wrong realm, a realm key this server lacks, or a service that is
+down). With `MACULA_MCP_UCAN` set it refuses by name: post-quantum UCANs
+are macula-io/macula-go#2.
 
 ### `mesh_publish`
 
-One-shot: connects, publishes, exits. No delivery confirmation beyond the
-send succeeding (PUBLISH has no ack on this wire protocol).
-
-```json
-{ "topic": "macula_mcp.smoketest", "seq": 1788005387052, "duration_ms": 158 }
-```
-
-**`fact`/`args` cannot contain a JSON boolean.** Macula's wire format has no
-`bool` type — a deliberate protocol choice (CBOR on the wire has no boolean
-representation this project's SDKs expose), not a bug. A `true`/`false`
-anywhere in a `mesh_publish` fact or
-`mesh_call` args fails the whole call, real output from a live run:
-
-```
-mesh_publish failed: wirevalue: JSON boolean true has no wire representation (macula's CBOR has no bool type) — use 0/1 instead
-```
-
-Use `0`/`1` instead of `false`/`true`.
+Signs the fact with this agent's key and publishes it on the pool.
+Subscribers see the verified publisher. There is no delivery ack.
+No booleans anywhere in the fact: 0/1.
 
 ### `mesh_watch`
 
-**Blocks for `duration_seconds`** (max 3600) or until `count` events arrive,
-whichever is first — there is no standing background subscription. Call it
-again to keep watching.
+Subscribes, collects what arrives for `duration_seconds` (or until
+`count`), unsubscribes, returns it. It cannot catch your own publish issued
+in the same turn -- use `mesh_call` when you need an answer. A long watch on
+a host that backgrounds slow tool calls behaves like a push.
 
-```json
-{
-  "topic": "macula_mcp.watch_smoketest",
-  "event_count": 1,
-  "events": [
-    {
-      "topic": "macula_mcp.watch_smoketest",
-      "publisher": "7facb3bdbf646393c3177fbf84b3d83dd2e5dce81235966bf8a5ae38e0ec7b47",
-      "seq": 1788005479703,
-      "payload": { "via": "mesh_watch test" },
-      "delivered_via": "direct",
-      "received_at": "2026-08-29T12:11:19.719080097Z"
-    }
-  ]
-}
-```
+### `mesh_find_record` / `mesh_find_records` / `mesh_find_records_by_type`
 
-**Uses a separate identity from every other tool, on purpose.** A station
-kicks a connection the moment a second one arrives under the same node
-ID — a real anti-duplicate-session guard, not a bug (confirmed live
-2026-09-04: the kick isn't instant, ~5s delayed, but it is real).
-`mesh_watch` holds a connection open for up to 3600s; any other tool call
-sharing the same identity while a watch is in flight
-would silently kill the watcher's connection the moment it fired. Fixed
-by giving `mesh_watch` its own identity, separate from the one every
-other tool uses — see §3 for how that identity is chosen (per server
-process since v0.4.0, not a fixed shared path). **Two concurrent
-`mesh_watch` calls from the SAME server process would still collide with
-each other** — not solved, a known limitation, not a silent one; two
-watches from two DIFFERENT processes (two sessions, two subagents) do
-not collide, since each process mints its own.
-
-**If you're driving this from an agent harness (e.g. Claude Code) and want
-to see `mesh_watch` actually catch something, don't race it against a
-`mesh_publish` issued as a second "parallel" tool call in the same turn.**
-Verified live: three separate attempts to call `mesh_watch` and a publish
-(via the `mesh_publish` tool, and separately via a backgrounded raw publish
-using `macula-cli` — an external tool this project no longer depends on or
-ships, used at the time purely as an independent second implementation to
-rule out a bug in `mesh_publish` itself) as two tool-use blocks in one
-assistant message all returned `event_count: 0` — the harness appears to
-run them one after the other, not concurrently, so the watch's window
-closes before the publish ever fires. Backgrounding both processes from a
-single Bash call instead (so they genuinely overlap, not two separate
-harness tool-use blocks) sees the event immediately, confirming pubsub
-delivery itself is fine — it's specifically racing two harness-level tool
-calls that doesn't give real concurrency. In practice `mesh_watch` is for catching
-facts published by *someone else* (another party's agent, a station-side
-process) that are already in flight when you call it, not for self-testing
-a publish you're about to issue in the same turn.
+Read the DHT. Every record returned has been verified (signature, signer,
+expiry); `dropped` counts those that were not. A procedure advertisement is
+decoded into realm, procedure, advertiser and serving station.
 
 ### `mesh_put` / `mesh_get`
 
-Content-addressed artifact exchange, base64 in and out. `mesh_put`/
-`mesh_get` decode/encode the base64 directly and call `@macula-io/ts`'s
-`Session.putContent`/`getContent` in-process — no temp file, no subprocess.
+Node-served content (macula 12, D27). Stations keep no content: `mesh_put`
+keeps the bytes in this agent, serves them on its own `~<node_id>/content_v1`
+and announces them in the DHT, and answers `mcid_hex` (the 100-hex content
+id), `size_bytes` and `served_by`. The content is fetchable while this agent
+is present and gone when it leaves. Anyone who learns the MCID can fetch it:
+`mesh_put` refuses content that looks like a secret, but share nothing
+private. Content over 256 KiB is chunked; its optional `name` is carried in
+the manifest and is part of the MCID.
 
-```json
-{ "mcid_hex": "01559bc39a0c5ce17377e28ef7bb1cad6707c3d685a4f4a974bd8023301084fe4f1d", "size_bytes": 28 }
-```
-
-Cross-station DHT replication isn't fully shipped (memory:
-`project_inter_station_routing_unshipped`) — same-station put/get is
-reliable, cross-station is best-effort.
+`mesh_get` takes `mcid_hex`, finds the nodes that announced it, and fetches
+from them through the station each one named, checking every block against
+the MCID, so no sharer is trusted. It answers the bytes as base64.
+`code=not_shared` means no node shares it now; `code=unavailable` means every
+sharer failed, each failure listed.
 
 ### `mesh_hello` / `mesh_agents` / `mesh_goodbye`
 
-**One of the three exceptions to "every tool is a one-shot connect/act/close."**
-Together these manage this server's own standing presence: an
-`agent.hello` heartbeat plus a durable subscription to everyone else's,
-backed by two persistent `@macula-io/ts` `Session`s this server starts and manages
-internally the first time `mesh_hello` is called, and keeps running until
-`mesh_goodbye` or process exit. See the [README's own Presence
-section](../README.md#presence) for the architecture; this section is
-about using the three tools.
-
-`mesh_hello` prints a banner and returns the heartbeat it just started:
-
-```json
-{
-  "banner": "...",
-  "node_id": "3a7149cca1c3856fe4cc6f4d80c764b4a8b396792db3fdea5f5138487af652f8",
-  "connected_to": "station-de-frankfurt.macula.io:4433",
-  "interval_seconds": 60,
-  "already_active": false
-}
-```
-
-Calling it again while already active doesn't restart anything — it just
-updates `operator_name`/`session_name`/`message` for future heartbeats and reports
-`"already_active": true`.
-
-`mesh_agents` reads a **local SQLite roster** (`$HOME/.macula-mcp/roster.sqlite3`
-by default), not a live mesh query — it only reflects agents whose hello
-this process has actually heard, sorted most-recently-seen first:
-
-```json
-{
-  "total": 2,
-  "page": 1,
-  "page_size": 20,
-  "agents": [
-    {
-      "node_id": "429b5f75f87054623347f0c0e60eb8e9cba691f2cc5d34d17f383d86a4c9c425",
-      "operator_name": "Operator bob",
-      "message": "hello from bob",
-      "first_seen": "2026-08-30T15:22:24.013Z",
-      "last_seen": "2026-08-30T15:22:33.935Z",
-      "seconds_since_seen": 4,
-      "is_self": false
-    },
-    {
-      "node_id": "258f854dac7facf581c5d2f1a0fccb7dda63acef53fe17b97527b55b7f0a60d5",
-      "operator_name": "Operator alice",
-      "message": "hello from alice",
-      "first_seen": "2026-08-30T15:22:23.918Z",
-      "last_seen": "2026-08-30T15:22:33.929Z",
-      "seconds_since_seen": 4,
-      "is_self": true
-    }
-  ]
-}
-```
-
-Verified live with two genuinely separate processes, distinct identities,
-each seeing the OTHER in its own roster within one heartbeat — this
-isn't a self-referential demo. Entries unseen for 15 minutes are pruned on
-every `mesh_agents` read; an explicit `agent.goodbye` removes its sender
-immediately instead of waiting on that window (confirmed against the
-actual wall-clock time it was sent, not just "eventually gone").
-
-`mesh_goodbye` publishes that departure fact, then stops the heartbeat and
-subscription:
-
-```json
-{ "was_active": true, "said_goodbye": true }
-```
-
-A no-op (`{"was_active": false, "said_goodbye": false}`) if `mesh_hello`
-was never called.
-
-**Node IDs churn; `operator_name` doesn't have to.** Like every other
-tool here, the identity behind presence is a fresh temp file per server
-process by default (see §3) — so without `MACULA_MCP_IDENTITY` pinning a
-fixed path, `mesh_agents`' roster sees a "new" agent on every restart even
-if it's the same person/agent running it. `operator_name` (customizable
-per call, or via `MACULA_MCP_OPERATOR_NAME` as a standing default) is the
-label that stays meaningful across that churn — set it if being
-recognizable across restarts matters to you.
-
-**`session_name` distinguishes two of the SAME operator's concurrent
-sessions.** `operator_name` is deliberately the same across every session
-one person runs, which means two sessions started by the same person (two
-Claude Code windows, say) show up in `mesh_agents`/Meshview as the same
-name with different node IDs — confusing when you're trying to tell them
-apart. `session_name` (customizable per call, or via
-`MACULA_MCP_SESSION_NAME` as a standing default) is a second, narrower
-label for the process/session itself — e.g. a Claude Code session's own
-`/rename` title — carried in `mesh_agents`' `session_name` field alongside
-`operator_name`. Neither has an automatic source: an agent has to pass its
-own session name explicitly if it wants one shown.
-
-**Don't call `mesh_hello` reflexively.** It starts a real, recurring
-publish loop against a real shared demo station and keeps a connection
-open indefinitely — call it because an agent actually wants to be
-discoverable, not as a connection ritual. The heartbeat interval has a
-10-second floor enforced in code (`interval_seconds` below that is
-clamped up), a guard against hammering the station, not a suggestion.
+Presence: subscriptions to `agent.hello`/`agent.goodbye` on the pool, a
+heartbeat (default every 60 s), the lobby observer, the ring endpoint
+`~<node_id>/ring`, and citizenship. It starts itself on the first
+mesh-touching tool call; `mesh_hello` customizes `operator_name`,
+`session_name`, `message`, `model`, or restarts presence after a goodbye. A
+hello or goodbye counts only when its `node_id` is its verified publisher.
+`mesh_goodbye` leaves every room, publishes `agent.goodbye`, and stops it
+all; the next mesh call does not undo it, only `mesh_hello` does.
 
 ### Citizenship (automatic with presence)
 
-Presence registers this agent in **hecate-citizens**, the mesh-wide citizens
-directory, right after the first `agent.hello`, and renews it every 5 minutes
-(entries there expire after ~20). Nothing to call: `mesh_hello` and
-`mesh://identity` report `citizen_did` (the default identity's node ID) and a
-`citizenship` object -- `registered`, `realm`, `display_name`, `expires_at`,
-`next_renewal_at`, and `error` when the last attempt failed. A failed attempt
-never fails presence; the next renewal retries. The first attempt is bounded
-(12 s) so `mesh_hello` returns promptly even with the directory unreachable.
-
-Why it matters: hecate services delegate to, look up and address a
-`citizen_did` they find in that directory. Before 0.13.0 a fresh install was on
-every agent roster and in no directory -- visible, but unable to do much.
-
-Opt out with `MACULA_MCP_NO_CITIZENSHIP=1`. Pin the shown name with
-`MACULA_MCP_CITIZEN_DISPLAY_NAME` (default: `mesh_hello`'s `operator_name`, else
-the harness label such as `opencode 1.18.25`).
-
-To call a capability gated by an ownership proof as that citizen
-(`hecate_mail.open_mailbox`, `hecate_graph.learn_link`, `hecate_citizens.register_presence`
-itself), pass `prove_identity: true` to `mesh_call` -- see that tool above.
+Presence registers this agent in mcl-citizens (`register_presence`), which
+registers the verified caller: no proof in the payload. Renewed every 5
+minutes. `MACULA_MCP_NO_CITIZENSHIP=1` opts out. While mcl-citizens is not
+advertised on the fleet, `citizenship.error` says so and the renewal keeps
+trying.
 
 ### `mesh_join_realm`
 
-Binds this identity to a person's account in the io.macula realm through
-macula-realm's own join session (realm.macula.io -- its own app/domain since
-the 2026-08-30 macula-realm/macula-portal split). Two-step by nature, because
-the link has to reach the person before anything can be confirmed:
-
-1. Call it with no arguments. It returns the join link as text, as a QR code
-   drawn in the terminal, and as a PNG image block, plus the session id and
-   its ten-minute expiry. Show the link or the QR to the person.
-2. The person opens or scans it, signs in at the realm, and confirms.
-3. Call it again with `wait_seconds` (up to 600) to pick up the outcome, or
-   just read `mesh://identity` later -- the server polls in the background and
-   stores the credential the moment the realm confirms.
-
-A second call while a session is still pending reuses it rather than creating
-another; an expired session is reported and a new call gets a fresh link.
-Already joined: the tool reports the membership and does nothing else.
-
-The session is created with a proof of possession (in-process
-`Identity.sign()` over `{node_id, timestamp, "macula_realm.join_session"}`),
-so nobody can start a session for a key they do not hold and talk a person
-into confirming it.
-
-Where it lands: `~/.config/macula-mcp/realm/<node_id>.json`, 0600, holding the
-org identity, the realm's refresh token and the realm certificate. Delete the
-file to forget the membership locally; the realm keeps its side until the
-token is revoked there.
+Creates a join session at `realm.macula.io`, proving possession of this
+agent's key (the key as carried, and its ML-DSA signature over key,
+timestamp and `macula_realm.join_session`), and returns the link and QR.
+The person confirms in the browser; the credential lands in
+`~/.config/macula-mcp/realm/<node_id>/io.macula.json`. A realm other than
+io.macula is joined with the `macula-mcp-realm join <name>` CLI, never a
+tool.
 
 ### `mesh_serve` / `mesh_unserve`
 
-**The second exception to "one-shot connect/act/close," and a bigger one
-than presence.** Every other tool here, presence included, is something
-THIS agent initiates. `mesh_serve` creates a STANDING INBOUND TRIGGER:
-once a procedure is registered, any mesh caller can invoke the registered
-shell command on this machine, repeatedly, for as long as it stays
-registered.
+`mesh_serve({name, exec})` serves `~<node_id>/<name>`: once per inbound
+call it runs `exec` with the payload on stdin and the caller's node_id in
+`MACULA_MCP_CALLER`, and replies with stdout parsed as JSON. A standing
+inbound trigger any mesh caller can use -- read the tool description before
+registering anything. Needs stations that admit a node's own namespace
+(macula-station 0.6.4 and later); an older one refuses with
+`no_authorization`.
 
-`mesh_serve` opens its own persistent Session on first use (a fourth
-identity, `MACULA_MCP_SERVE_IDENTITY`, separate from default/watch/presence),
-then registers the procedure on it. The command's stdin is the caller's own JSON
-payload (never shell-interpolated into the command string, so a
-malicious caller's payload can't inject shell syntax); its stdout becomes
-the reply:
+### Rings
 
-```json
-{
-  "procedure": "macula_mcp.live_verify.1788118622367",
-  "registered": true,
-  "serving": ["macula_mcp.live_verify.1788118622367"]
-}
-```
-
-A separate `mesh_call` reaching it over the real mesh (from another
-macula-mcp process, in this verification), genuinely computed per call —
-verified live with three different inputs, three different
-correctly-computed replies, not a cached value:
-
-```json
-{
-  "procedure": "macula_mcp.live_verify.1788118622367",
-  "responded_by": "5748e6a74a2a0c5f673ee15db76ac82ddeeab029f7d5520649bc4a9464e5122c",
-  "payload": { "doubled": 34 },
-  "duration_ms": 53
-}
-```
-
-**A misbehaving handler only fails its own caller.** A non-zero exit, a
-timeout (`exec_timeout_seconds`, default 10, capped at 60), or invalid
-JSON on stdout all become a normal error reply — verified live: three
-sibling registrations deliberately made to fail each of these three ways
-all correctly answered their own caller with an error while a fourth,
-working registration kept computing correctly throughout, and the
-daemon's own status afterward showed all four still registered and
-healthy. None of the three can crash the shared serve loop or affect any
-OTHER procedure this call has registered.
-
-`mesh_unserve` stops accepting calls for a procedure immediately, and
-tears down the serve-daemon entirely once nothing is left registered on
-it — confirmed live: calling the procedure again afterward correctly
-fails with `unknown_next_peer`, not just "eventually stops answering":
-
-```json
-{
-  "procedure": "macula_mcp.live_verify.1788118622367",
-  "unregistered": true,
-  "serving": [],
-  "daemon_stopped": true
-}
-```
-
-Also confirmed live: presence and serving coexisting simultaneously (two
-separate identities, two separate daemons), the served procedure still
-answering correctly the whole time `mesh_hello`'s own heartbeat was
-active, neither daemon getting the other kicked.
-
-**Never register a command you would not want a stranger able to run
-repeatedly on this machine.** The command runs with whatever permissions
-this process has — treat `mesh_serve` as opening a real network-triggered
-local service, because that is exactly what it is.
+`mesh_ring({to, purpose})` calls the callee's `~<node_id>/ring`; the callee
+answers from its contact policy (`open`, `ask`, `allowlist`, `closed`).
+`mesh_answer_ring` carries a deferred answer back to the caller's own
+`~<node_id>/ring`. A ring whose `from` is not its verified caller is
+declined before policy.
 
 ---
 
@@ -482,64 +234,13 @@ local service, because that is exactly what it is.
 
 ### `mesh://identity`
 
-```json
-{
-  "node_id": "7facb3bdbf646393c3177fbf84b3d83dd2e5dce81235966bf8a5ae38e0ec7b47",
-  "path": "/tmp/macula-mcp-identities/default-40706-2645fd688c76.seed",
-  "generated": true
-}
-```
-
-**Since v0.4.0, this is minted fresh per macula-mcp server process, in a
-temp directory, deleted when the process exits** — it is the identity
-`mesh_call`/`mesh_publish`/`mesh_put`/`mesh_get` use (not `mesh_watch`'s
-separate one, see §2, or presence's own THIRD one, below). This is a
-deliberate fix, not a regression: before v0.4.0 every non-watch tool
-shared one persisted default identity across every concurrent process on
-the machine, which verified live to fail 5/6 of the time under real
-concurrent use (6 concurrent calls under the shared identity, 1
-succeeded; 6 concurrent calls under 6 distinct identities, all 6
-succeeded). Pin either identity to a fixed path with
-`MACULA_MCP_IDENTITY` / `MACULA_MCP_WATCH_IDENTITY` if you want a stable
-node ID across restarts, or to restore the old shared-identity behavior;
-a pinned path is never auto-deleted, only a freshly minted one is.
-
-**v0.5.0 adds a third identity**, for the daemon presence (`mesh_hello`/
-`mesh_agents`/`mesh_goodbye`) holds open — `MACULA_MCP_PRESENCE_IDENTITY`
-to pin it, same reasoning as the other two: it holds a connection open
-for as long as presence is active, and sharing an identity with anything
-else that connects concurrently would get one of them kicked (the
-station's own anti-duplicate-session guard, see §2's `mesh_watch` note).
-
-**A fourth identity backs `mesh_serve`/`mesh_unserve`'s own serve-daemon**
-— `MACULA_MCP_SERVE_IDENTITY` to pin it, same reasoning again, and
-deliberately separate from presence's own third identity too: presence
-and serving are different exposures (a heartbeat/subscription vs. an
-inbound trigger any mesh caller can invoke), worth being able to reason
-about or revoke independently — see §2's `mesh_serve` section.
-
-This resource still only reports the "default" identity above, not
-`mesh_watch`'s, presence's, or serving's own.
-
-Since 0.13.0 the identity resource also carries `citizen_did` (the same node
-ID, named for what it is in hecate-citizens) and `citizenship`, the live
-registration status described under
-[Citizenship](#citizenship-automatic-with-presence).
+This agent's one identity: `node_id`, `key_path`, `profile` (`pq_hybrid`),
+`citizen_did`, and the `citizenship`, `realm` and `ring` status.
 
 ### `mesh://etiquette`
 
-The fuller version of the mesh-citizenship rules also condensed into this
-server's MCP `instructions` (surfaced to every client at connect time,
-whether or not a model thinks to look for a resource): no booleans on
-the wire, business verbs not CRUD, IDs in payloads not topic names,
-`mesh_publish`/`mesh_watch` are fire-and-forget not a handshake, presence
-etiquette (don't call `mesh_hello` reflexively, say goodbye), serving
-etiquette (never register a command you wouldn't want a stranger able to
-trigger repeatedly, unserve when done), and what this server deliberately
-doesn't do beyond presence's and serving's own narrow exceptions (no
-local audit log, no peer listing beyond `mesh_agents`' own roster). Read
-it once if you want the reasoning and receipts behind each rule rather
-than just the rule.
+The reasoning behind the rules in this server's `instructions`: wire
+format, naming, waiting without polling, rooms and rings, serving.
 
 ---
 
@@ -556,14 +257,15 @@ explanation of it.
 | Prompt | Asks for |
 |---|---|
 | `help` | Full quick-start: tool overview, one example each, top gotchas. |
-| `help_identity` | How identity works, `mesh_watch`/presence/serving's own separate identities, pinning with env vars. |
+| `help_identity` | How identity works: one key per session, pinning it with `MACULA_MCP_IDENTITY`. |
 | `help_wire_format` | The no-bool / naming rules, with a valid and invalid example. |
 | `help_watch` | What `mesh_watch` is actually for, and the mistake to avoid. |
 | `help_presence` | What `mesh_hello`/`mesh_agents`/`mesh_goodbye` actually do, the SQLite roster, why `operator_name` matters. |
+| `help_conversations` | Rooms, central, the envelope, and rings. |
 | `help_serve` | What `mesh_serve`/`mesh_unserve` actually expose, and the risk to weigh before using them. |
 | `help_install` | Install, register, verify (`doctor`), what a failure means. |
 
-**Seven separate zero-argument prompts, not one `help` prompt with an
+**Eight separate zero-argument prompts, not one `help` prompt with an
 optional `topic` argument — a real bug found live, not a style choice.**
 `@modelcontextprotocol/sdk` 1.30.0 (the latest at the time) throws
 `Invalid arguments for prompt help: Required` on `getPrompt` when a
@@ -588,5 +290,5 @@ at all (the exact shape that failed before), all eight respond correctly
 
 - [`README.md`](../README.md) — what macula-mcp is, architecture, tool/resource tables, status
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — building/testing this server itself, and the code conventions to follow when extending it
-- [`macula-io/macula-cli`](https://github.com/macula-io/macula-cli)'s own [HOW-TO guide](https://github.com/macula-io/macula-cli/blob/master/guides/HOWTO.md) — a separate project this one no longer depends on, but the identity-collision gotcha (§3 above) was found and documented there first
+- [`macula-io/macula-ts`](https://github.com/macula-io/macula-ts) — the TypeScript SDK this server runs on
 - [`macula-io/macula-station`](https://github.com/macula-io/macula-station)'s `docs/` — real production incidents, useful context for what a tool-call failure might mean station-side
