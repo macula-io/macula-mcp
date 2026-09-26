@@ -27,9 +27,10 @@ const DESCRIPTION_FULL =
   "Bytes: send a byte string in args as {\"$bytes\": \"<standard base64>\"}, e.g. " +
   "{\"channel_id\": {\"$bytes\": \"AQID\"}}; a plain string is always text. Bytes in the result " +
   "appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form. " +
-  "prove_ownership: 1 attaches an ownership proof (asserted_by) signed by this agent's key, for a " +
-  "provider that reads one (mcl-graph's learn_link records the proven identity as the link's " +
-  "provenance); args must not carry \"caller\".";
+  "prove_ownership: 1 attaches an ownership proof (asserted_by) signed by this agent's key, valid only " +
+  "for these args, this procedure and realm, once; what a provider does with one is its own policy " +
+  "(mcl-graph's learn_link credits a valid one's identity, ignores an invalid one and refuses a " +
+  "repeated one). args must not carry \"caller\".";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
 const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form. prove_ownership: 1 signs args with an ownership proof, for a provider that reads one.`;
@@ -69,8 +70,11 @@ export function registerMeshCall(server: McpServer): void {
         .optional()
         .describe(
           "1 attaches an ownership proof v2 (mcl-om#7) to args, under asserted_by: this agent's key vouches " +
-            "for every field, for this procedure in this realm, once; the provider refuses it changed or sent " +
-            "twice. For a provider that reads one. 0 or omitted: none. args must not carry \"caller\".",
+            "for every field, for this procedure in this realm, once, and the proof verifies for nothing else. " +
+            "What a provider does with a proof that does not verify is its own policy. The call may be retried " +
+            "at another station with the same proof, which the provider then answers replayed although the " +
+            "first delivery may have been handled (macula-io/macula-go#8). 0 or omitted: none. args must not " +
+            "carry \"caller\".",
         ),
       timeout_ms: z.number().int().positive().optional().describe("How long to wait for the result, in milliseconds (5000 by default)."),
       realm: z

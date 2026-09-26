@@ -112,6 +112,9 @@ describe("call", () => {
     expect(pool.call).toHaveBeenLastCalledWith("ab".repeat(32), "mcl-graph/learn_link", proven, expect.any(Object));
     await call({ procedure: "mcl-echo/echo", callArgs: { text: "hi" } });
     expect(ownershipProof).toHaveBeenCalledTimes(1);
+    await call({ procedure: "x/y", proveOwnership: true });
+    expect(ownershipProof).toHaveBeenLastCalledWith(IO_MACULA_REALM_ID, "x/y", {});
+    await call({ procedure: "mcl-echo/echo", callArgs: { text: "hi" } });
     expect(pool.call).toHaveBeenLastCalledWith(IO_MACULA_REALM_ID, "mcl-echo/echo", { text: "hi" }, expect.any(Object));
   });
 

@@ -130,8 +130,10 @@ export interface CallResult {
  * Calls `procedure` in `realm` (io.macula by default) at any trusted provider,
  * by direct dial. With `proveOwnership`, the payload carries an ownership
  * proof v2 (mcl-om#7) this server's key made for that procedure in that realm,
- * signed right before the call: a provider verifying it refuses it changed,
- * for another procedure or realm, or sent twice.
+ * signed right before the call. It verifies for exactly those fields, that
+ * procedure and realm, once; what a provider does with one that does not is
+ * its own policy. The transport may retry another station with the same
+ * proof (macula-io/macula-go#8).
  */
 export async function call(args: {
   procedure: string;

@@ -12,10 +12,17 @@ fires on a `v*` tag push, not on every commit to `main`).
 - `mesh_call` takes `prove_ownership: 1|0`. With 1, `args` go out with an
   ownership proof v2 (mcl-om#7) under `asserted_by`, signed by this server's
   key for that procedure in that realm right before the call, through
-  @macula-io/ts 0.23.0's `NodeKey.ownershipProof`. A provider that reads it
-  refuses it changed, for another procedure or realm, or sent twice; mcl-graph's
-  `learn_link` records the proven identity as the link's provenance. `args`
-  carrying `caller` are refused (`invalid_argument`) before anything is sent.
+  @macula-io/ts 0.23.0's `NodeKey.ownershipProof`. The proof verifies for
+  exactly those args, that procedure and realm, once. What a provider does
+  with one that does not verify is its own policy: mcl-graph's `learn_link`
+  (f97a0c1) credits a valid proof's identity as the link's provenance, learns
+  the link under the wire caller when the proof does not verify, and refuses
+  a repeated proof. For a direct call from this server the wire caller is
+  this server's node id, the identity the proof names. `args` carrying
+  `caller` are refused (`invalid_argument`) before anything is sent.
+  Known limit: the transport may retry another station with the same proof,
+  which the provider then answers `replayed` although the first delivery may
+  have been handled (macula-io/macula-go#8).
   No live call was made against mcl-graph, since `learn_link` writes lasting
   links: what a provider accepts was measured in @macula-io/ts 0.23.0, where a
   payload it signed was accepted by mcl_om 0.32.0's `verify_asserted_by`.
