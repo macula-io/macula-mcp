@@ -167,20 +167,16 @@ describe("DHT records", () => {
   });
 });
 
-describe("proveKeyPossession", () => {
-  it("signs carried key ++ timestamp (8 bytes, big-endian) ++ procedure, exactly macula-realm's DeviceKeyOwnershipProof.message/3", async () => {
-    const carried = new Uint8Array(Buffer.alloc(3118, 9));
-    const sign = vi.fn(async () => new Uint8Array([0xde, 0xad]));
-    loadOrCreate.mockResolvedValue({ nodeIdHex: () => SELF, publicKey: () => carried, sign });
-    const { proveKeyPossession } = await import("./macula_ts_client.js");
-    const before = Date.now();
-    const proof = await proveKeyPossession("macula_realm.join_session");
-    const signed = Buffer.from(sign.mock.calls[0]![0] as Uint8Array);
-    const ts = Buffer.alloc(8);
-    ts.writeBigUInt64BE(BigInt(proof.timestamp));
-    expect(signed).toEqual(Buffer.concat([Buffer.from(carried), ts, Buffer.from("macula_realm.join_session")]));
-    expect(proof.timestamp).toBeGreaterThanOrEqual(before);
-    expect(proof).toMatchObject({ public_key: Buffer.from(carried).toString("base64"), signature: "dead" });
+describe("realm proof v2", () => {
+  it("is the node key's deviceRequestProof for the realm, procedure, request and rule given", async () => {
+    const proof = { v: 2, timestamp: 1, nonce: "00".repeat(16), signature: "ab" };
+    const deviceRequestProof = vi.fn(async () => proof);
+    loadOrCreate.mockResolvedValue({ nodeIdHex: () => SELF, publicKey: () => new Uint8Array([1, 2, 3]), deviceRequestProof });
+    const { carriedPublicKey, proveDeviceRequest } = await import("./macula_ts_client.js");
+    const request = { public_key: "AQID", ttl_seconds: 60 };
+    await expect(proveDeviceRequest(IO_MACULA_REALM_ID, "macula_realm.membership_ucan", request, "mesh")).resolves.toEqual(proof);
+    expect(deviceRequestProof).toHaveBeenCalledWith(IO_MACULA_REALM_ID, "macula_realm.membership_ucan", request, "mesh");
+    await expect(carriedPublicKey()).resolves.toBe("AQID");
   });
 });
 

@@ -14,6 +14,8 @@
 
 import {
   ContentUnavailableError,
+  JOIN_SESSION_PROCEDURE,
+  MEMBERSHIP_UCAN_PROCEDURE,
   NodeKey,
   NotSharedError,
   Pool,
@@ -21,6 +23,8 @@ import {
   RecordType,
   RelayError,
   type BytesOutput,
+  type DeviceRequestProof,
+  type DeviceRequestRule,
   type DhtRecord,
   type Event,
   type JsonValue,
@@ -393,19 +397,23 @@ export async function discoverProcedureRealm(procedure: string): Promise<string>
 
 // ---- key possession --------------------------------------------------------
 
-/**
- * A proof that this server holds its identity key, as macula-realm checks
- * one (DeviceKeyOwnershipProof): the key as carried, and the key's
- * signature over carried key ++ timestamp (8 bytes, big-endian, ms) ++
- * `procedure`. Sign right before sending; the realm allows 60 s of skew.
- */
-export async function proveKeyPossession(procedure: string): Promise<{ public_key: string; timestamp: number; signature: string }> {
-  const key = await nodeKey();
-  const carried = key.publicKey();
-  const timestamp = Date.now();
-  const ts = Buffer.alloc(8);
-  ts.writeBigUInt64BE(BigInt(timestamp));
-  const message = Buffer.concat([Buffer.from(carried), ts, Buffer.from(procedure, "utf8")]);
-  const signature = await key.sign(new Uint8Array(message));
-  return { public_key: Buffer.from(carried).toString("base64"), timestamp, signature: Buffer.from(signature).toString("hex") };
+/** This server's identity key as carried on the wire, base64: the public_key a realm request names. */
+export async function carriedPublicKey(): Promise<string> {
+  return Buffer.from((await nodeKey()).publicKey()).toString("base64");
 }
+
+/**
+ * A realm proof v2 (macula-realm#29) that this server's key made `request`
+ * (every field of it except "proof") for `procedure` in `realm` (hex id):
+ * the realm, the procedure, a timestamp, a fresh nonce and the whole request
+ * are signed, so a relay cannot change the device_info an admitter reads or
+ * the ttl_seconds a realm grants. "http" is a join-session body, "mesh" a
+ * call's payload as @macula-io/ts sends it. Sign right before sending: the
+ * realm allows 60 s of skew and refuses a nonce twice.
+ */
+export async function proveDeviceRequest(realm: string, procedure: string, request: { [field: string]: JsonValue },
+  rule: DeviceRequestRule): Promise<DeviceRequestProof> {
+  return (await nodeKey()).deviceRequestProof(realm, procedure, request, rule);
+}
+
+export { JOIN_SESSION_PROCEDURE, MEMBERSHIP_UCAN_PROCEDURE };

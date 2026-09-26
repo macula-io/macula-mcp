@@ -21,14 +21,13 @@
 // mesh://identity on its own, and a second mesh_join_realm call (with
 // wait_seconds) picks it up in-conversation.
 //
-// Proof of possession: the session is created with this node's key as
-// carried and its signature over carried key ++ timestamp (8 bytes,
-// big-endian) ++ "macula_realm.join_session" (macula_ts_client.ts's
-// proveKeyPossession; macula-realm's DeviceKeyOwnershipProof checks it and
-// derives the node_id from the key), so nobody can create a session for a
-// key they do not hold and talk a person into confirming it. The procedure
-// string is part of the signed bytes: it must match macula-realm's
-// joining.ex @join_procedure exactly.
+// Proof: the session is created with this node's key as carried and a realm
+// proof v2 (macula-realm#29) over the whole body as sent, device_info
+// included, for io.macula and "macula_realm.join_session", with a fresh
+// nonce (macula_ts_client.ts's proveDeviceRequest, over macula-go's
+// devicerequest). macula-realm's DeviceRequestProof checks it and derives the
+// node_id from the key, so nobody can create a session for a key they do not
+// hold, or change what the person confirming it reads.
 //
 // Credentials live under ~/.config/macula-mcp/realm/<node_id>/<realm>.json
 // (0600), keyed by the identity they belong to: a session-scoped identity
@@ -38,10 +37,11 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { hostname, arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import QRCode from "qrcode";
-import { proveKeyPossession, selfNodeId } from "./macula_ts_client.js";
+import type { JsonValue } from "@macula-io/ts";
+import { carriedPublicKey, JOIN_SESSION_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
+import { realmIdOf } from "./mesh_config.js";
 import { serverVersion } from "./version.js";
 
-export const JOIN_PROOF_PROCEDURE = "macula_realm.join_session";
 export const DEFAULT_REALM_URL = "https://realm.macula.io";
 export const POLL_INTERVAL_MS = 4_000;
 
@@ -93,7 +93,7 @@ function readCredentialFile(path: string): RealmCredential | undefined {
 }
 
 /**
- * "device": DeviceKeyOwnershipProof-only, silent, no human involved --
+ * "device": device-proof-only (realm proof v2), silent, no human involved --
  * device_membership.ts's auto-join. "citizen": Hanko-bound human, via
  * this module's own realm join-session flow below. A citizen-tier
  * credential is strictly stronger; device_membership.ts's
@@ -170,14 +170,14 @@ export function agentMri(nodeId: string): string {
   return `mri:agent:io.macula/anonymous/macula-mcp-${nodeId.slice(0, 8)}`;
 }
 
-/** The join-session request body. Pure. */
+/** The join-session request body the proof signs, before its proof. Pure. */
 export function joinRequest(input: {
   nodeId: string;
-  proof: { public_key: string; timestamp: number; signature: string };
+  publicKey: string;
   connectedVia?: string;
-}): Record<string, unknown> {
+}): { [field: string]: JsonValue } {
   return {
-    public_key: input.proof.public_key,
+    public_key: input.publicKey,
     agent_mri: agentMri(input.nodeId),
     // device_info, not agent_info: found live 2026-09-08 (Orion,
     // realm-admission side) -- macula-realm's JoinSessionController reads
@@ -194,8 +194,14 @@ export function joinRequest(input: {
       version: `macula-mcp ${serverVersion()}`,
       ...(input.connectedVia ? { client: input.connectedVia } : {}),
     },
-    proof: { timestamp: input.proof.timestamp, signature: input.proof.signature },
   };
+}
+
+/** body with its realm proof v2, signed now for realmName's join session: the body is signed as it is sent. */
+export async function signedJoinRequest(body: { [field: string]: JsonValue }, realmName: string = DEFAULT_REALM_NAME):
+  Promise<{ [field: string]: JsonValue }> {
+  const proof = await proveDeviceRequest(realmIdOf(realmName), JOIN_SESSION_PROCEDURE, body, "http");
+  return { ...body, proof: { ...proof } };
 }
 
 export interface CreatedSession {
@@ -335,7 +341,7 @@ export interface RealmStatus {
   citizen_did?: string;
   /** Whether a membership UCAN was issued -- never the token itself here, that's a credential and stays in the credential file only. */
   has_ucan?: boolean;
-  /** "device" (silent, DeviceKeyOwnershipProof-only auto-join) or "citizen" (Hanko-bound human) -- see RealmCredential.tier. Undefined when not joined at all. */
+  /** "device" (silent, device-proof-only auto-join) or "citizen" (Hanko-bound human) -- see RealmCredential.tier. Undefined when not joined at all. */
   tier?: RealmTier;
   /**
    * session_id/join_url are omitted (see status()'s own redactPending
@@ -476,8 +482,8 @@ export async function begin(input: { connectedVia?: string; fetchImpl?: FetchLik
   }
   clearPending();
   // Proven right before the call, never ahead: the realm allows 60 s of skew.
-  const proof = await proveKeyPossession(JOIN_PROOF_PROCEDURE);
-  const created = await createSession(joinRequest({ nodeId, proof, connectedVia: input.connectedVia }), fetchImpl);
+  const body = joinRequest({ nodeId, publicKey: await carriedPublicKey(), connectedVia: input.connectedVia });
+  const created = await createSession(await signedJoinRequest(body), fetchImpl);
   lastError = undefined;
   const timer = setInterval(() => void pollOnce(fetchImpl), POLL_INTERVAL_MS);
   timer.unref();

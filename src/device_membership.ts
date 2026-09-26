@@ -1,5 +1,5 @@
 // Device-tier realm membership: a genuine but silent auto-join, done at
-// connect time with no human involved. DeviceKeyOwnershipProof-only --
+// connect time with no human involved. device-proof-only (realm proof v2) --
 // this identity proves it holds its own keypair and gets back a
 // membership UCAN bound to the device key alone, no citizen_did/human
 // binding on top. This is the lighter of realm.ts's two membership
@@ -12,11 +12,13 @@
 // mesh-wide presence/directory, registering the CALL's verified caller.
 // This is realm MEMBERSHIP -- macula-realm's MembershipUcanRpcHandlers
 // (issue_membership_ucan), gated on MaculaRealm.Identity.
-// DeviceKeyOwnershipProof because minting membership is, by definition,
-// for a device that is NOT YET an admitted member (see that Elixir
-// module's own moduledoc). On macula 12 the proof is over the key as
-// carried (ML-DSA, the realm's pq_hybrid profile) and the realm derives the
-// node_id from it; macula_ts_client.ts's proveKeyPossession builds it.
+// DeviceRequestProof because minting membership is, by definition, for a
+// device that is NOT YET an admitted member (see that Elixir module's own
+// moduledoc). The proof is realm proof v2 (macula-realm#29): the key as
+// carried (ML-DSA, the realm's pq_hybrid profile), from which the realm
+// derives the node_id, signs the realm, the procedure, a nonce and the whole
+// payload, ttl_seconds included; macula_ts_client.ts's proveDeviceRequest
+// builds it.
 //
 // Realm targeting is not discovery-based like citizenship.ts's: the same
 // procedure is meant to run in several realms (net.beam-campus while being
@@ -33,7 +35,8 @@
 // io.macula") rather than defaulting to minting credentials against the
 // commons realm the moment this ships.
 import { realmIdOf } from "./mesh_config.js";
-import { call, proveKeyPossession, selfNodeId } from "./macula_ts_client.js";
+import type { JsonValue } from "@macula-io/ts";
+import { call, carriedPublicKey, MEMBERSHIP_UCAN_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
 import { loadCredential, storeCredential, type RealmCredential } from "./realm.js";
 
 /**
@@ -56,7 +59,6 @@ import { loadCredential, storeCredential, type RealmCredential } from "./realm.j
 export function membershipUcanProcedure(realmName: string): string {
   return `${realmName}/_realm/_realm/identity/issue_membership_ucan_v1`;
 }
-export const MEMBERSHIP_UCAN_PROOF_PROCEDURE = "macula_realm.membership_ucan";
 const CALL_TIMEOUT_MS = 6_000;
 
 /** Which realm to silently auto-join, or undefined if the feature is off. Pure. */
@@ -65,11 +67,10 @@ export function autoJoinRealmName(): string | undefined {
   return v ? v : undefined;
 }
 
-/** The issue_membership_ucan payload: the key as carried (base64, what DeviceKeyOwnershipProof decodes), the hex-signed proof, and an optional ttl. Pure. */
-export function deviceJoinArgs(proof: { public_key: string; timestamp: number; signature: string }, ttlSeconds?: number): Record<string, unknown> {
+/** The issue_membership_ucan request the proof signs: the key as carried (base64, what the realm decodes) and an optional ttl. Pure. */
+export function deviceJoinArgs(publicKey: string, ttlSeconds?: number): { [field: string]: JsonValue } {
   return {
-    public_key: proof.public_key,
-    proof: { timestamp: proof.timestamp, signature: proof.signature },
+    public_key: publicKey,
     ...(ttlSeconds ? { ttl_seconds: ttlSeconds } : {}),
   };
 }
@@ -111,7 +112,7 @@ export function parseMembershipUcanResult(payload: unknown): MembershipUcanResul
 
 /**
  * One silent auto-join attempt against `realmName`: proves possession of
- * this node's key for MEMBERSHIP_UCAN_PROOF_PROCEDURE (never another
+ * this node's key for "macula_realm.membership_ucan" (never another
  * procedure's), calls issue_membership_ucan in that realm, and returns the
  * credential without storing it (ensureAutoJoin stores). A reply naming a
  * node other than this one is refused. Throws on any failure; callers
@@ -119,11 +120,14 @@ export function parseMembershipUcanResult(payload: unknown): MembershipUcanResul
  */
 export async function joinDevice(input: { realmName: string }): Promise<RealmCredential> {
   const nodeId = await selfNodeId();
-  const proof = await proveKeyPossession(MEMBERSHIP_UCAN_PROOF_PROCEDURE);
+  // A realm proof v2 over exactly the payload sent, less the proof, signed
+  // right before the call: the realm allows 60 s of skew.
+  const request = deviceJoinArgs(await carriedPublicKey());
+  const proof = await proveDeviceRequest(realmIdOf(input.realmName), MEMBERSHIP_UCAN_PROCEDURE, request, "mesh");
   const res = await call({
     procedure: membershipUcanProcedure(input.realmName),
     realm: realmIdOf(input.realmName),
-    callArgs: deviceJoinArgs(proof),
+    callArgs: { ...request, proof: { ...proof } },
     timeoutMs: CALL_TIMEOUT_MS,
   });
   const outcome = parseMembershipUcanResult(res.payload);

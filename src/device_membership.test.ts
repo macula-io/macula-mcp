@@ -3,18 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
 const SIG = "ab".repeat(64);
 const CARRIED = Buffer.alloc(3118, 7).toString("base64");
-const PROOF = { public_key: CARRIED, timestamp: 1_756_857_600_000, signature: SIG };
+const PROOF = { v: 2, timestamp: 1_756_857_600_000, nonce: "00".repeat(16), signature: SIG };
 
 // Boundary mock: the client layer device_membership proves and calls through.
 const mocks = vi.hoisted(() => ({
-  proveKeyPossession: vi.fn(),
+  proveDeviceRequest: vi.fn(),
+  carriedPublicKey: vi.fn(),
   call: vi.fn(),
   selfNodeId: vi.fn(),
   loadCredential: vi.fn(),
   storeCredential: vi.fn(),
 }));
 vi.mock("./macula_ts_client.js", () => ({
-  proveKeyPossession: mocks.proveKeyPossession,
+  proveDeviceRequest: mocks.proveDeviceRequest,
+  carriedPublicKey: mocks.carriedPublicKey,
+  MEMBERSHIP_UCAN_PROCEDURE: "macula_realm.membership_ucan",
   call: mocks.call,
   selfNodeId: mocks.selfNodeId,
 }));
@@ -25,7 +28,8 @@ vi.mock("./realm.js", () => ({
 
 beforeEach(() => {
   mocks.selfNodeId.mockResolvedValue(NODE);
-  mocks.proveKeyPossession.mockResolvedValue(PROOF);
+  mocks.proveDeviceRequest.mockResolvedValue(PROOF);
+  mocks.carriedPublicKey.mockResolvedValue(CARRIED);
 });
 afterEach(() => {
   delete process.env.MACULA_MCP_AUTOJOIN_REALM;
@@ -57,16 +61,16 @@ describe("autoJoinRealmName", () => {
 });
 
 describe("deviceJoinArgs", () => {
-  it("carries the key as carried (base64) and the proof over it, omitting ttl_seconds when not given", async () => {
+  it("is the request the proof signs: the key as carried (base64), and ttl_seconds only when given", async () => {
     const { deviceJoinArgs } = await import("./device_membership.js");
-    expect(deviceJoinArgs(PROOF)).toEqual({ public_key: CARRIED, proof: { timestamp: PROOF.timestamp, signature: SIG } });
-    expect(deviceJoinArgs(PROOF, 3600)).toMatchObject({ ttl_seconds: 3600 });
+    expect(deviceJoinArgs(CARRIED)).toEqual({ public_key: CARRIED });
+    expect(deviceJoinArgs(CARRIED, 3600)).toEqual({ public_key: CARRIED, ttl_seconds: 3600 });
   });
 
   it("puts no boolean anywhere on the wire", async () => {
     const { deviceJoinArgs } = await import("./device_membership.js");
     const values = (v: unknown): unknown[] => (v && typeof v === "object" ? Object.values(v as object).flatMap(values) : [v]);
-    expect(values(deviceJoinArgs(PROOF, 60)).some((v) => typeof v === "boolean")).toBe(false);
+    expect(values(deviceJoinArgs(CARRIED, 60)).some((v) => typeof v === "boolean")).toBe(false);
   });
 });
 
@@ -96,19 +100,20 @@ describe("parseMembershipUcanResult", () => {
 });
 
 describe("joinDevice", () => {
-  it("proves possession of this node's key for MEMBERSHIP_UCAN_PROOF_PROCEDURE, calls issue_membership_ucan in the realm named, and returns a device-tier credential", async () => {
+  it("signs the request it sends (realm proof v2, the mesh rule) for the realm named, calls issue_membership_ucan there, and returns a device-tier credential", async () => {
     mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 10 });
-    const { joinDevice, membershipUcanProcedure, MEMBERSHIP_UCAN_PROOF_PROCEDURE } = await import("./device_membership.js");
+    const { joinDevice, membershipUcanProcedure } = await import("./device_membership.js");
     const { realmIdOf } = await import("./mesh_config.js");
 
     const cred = await joinDevice({ realmName: "io.macula" });
 
-    expect(mocks.proveKeyPossession).toHaveBeenCalledWith(MEMBERSHIP_UCAN_PROOF_PROCEDURE);
+    expect(mocks.proveDeviceRequest).toHaveBeenCalledWith(realmIdOf("io.macula"), "macula_realm.membership_ucan",
+      { public_key: CARRIED }, "mesh");
     expect(mocks.call).toHaveBeenCalledWith(
       expect.objectContaining({
         procedure: membershipUcanProcedure("io.macula"),
         realm: realmIdOf("io.macula"),
-        callArgs: { public_key: CARRIED, proof: { timestamp: PROOF.timestamp, signature: SIG } },
+        callArgs: { public_key: CARRIED, proof: PROOF },
       }),
     );
     expect(cred).toMatchObject({ node_id: NODE, citizen_did: NODE, ucan: "eyJ.fake.token", tier: "device", portal: "io.macula" });

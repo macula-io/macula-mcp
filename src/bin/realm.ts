@@ -34,13 +34,13 @@
 // alongside it.
 
 import { fileURLToPath } from "node:url";
-import { proveKeyPossession, selfNodeId } from "../macula_ts_client.js";
+import { carriedPublicKey, selfNodeId } from "../macula_ts_client.js";
 import { parseRealmName, realmBaseURL } from "../realm_name.js";
 import {
-  JOIN_PROOF_PROCEDURE,
   POLL_INTERVAL_MS,
   createSession,
   joinRequest,
+  signedJoinRequest,
   loadCredential,
   pollSession,
   qrPngBase64,
@@ -188,8 +188,9 @@ async function main(): Promise<void> {
   const baseURL = realmBaseURL(canonical);
   let created;
   try {
-    const proof = await proveKeyPossession(JOIN_PROOF_PROCEDURE);
-    created = await createSession(joinRequest({ nodeId, proof, connectedVia: "macula-mcp-realm CLI" }), fetch, baseURL);
+    // A realm proof v2 for the realm being joined, over the body as sent.
+    const body = joinRequest({ nodeId, publicKey: await carriedPublicKey(), connectedVia: "macula-mcp-realm CLI" });
+    created = await createSession(await signedJoinRequest(body, canonical), fetch, baseURL);
   } catch (e) {
     emit(args.json, { event: "error", realm: canonical, message: e instanceof Error ? e.message : String(e) });
     process.exitCode = 1;

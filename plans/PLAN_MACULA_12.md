@@ -62,7 +62,7 @@ A 12 pool pins every station by node_id and trusts a realm only by its key.
 - [x] Client layer (`macula_ts_client.ts`) on `Pool`: one pool per process,
   one `NodeKey` (pq_hybrid) per session scope, seeds pinned by node_id,
   io.macula trust plus `MACULA_MESH_REALMS`; call, publish, subscribe,
-  watch, the DHT finds, serve, ownProcedure, proveKeyPossession.
+  watch, the DHT finds, serve, ownProcedure, proveDeviceRequest (realm proof v2).
 - [x] Presence, lobby observer and rooms on the pool; hello/goodbye bound to
   the verified publisher.
 - [x] Citizenship with no proof; realm join and device membership proving

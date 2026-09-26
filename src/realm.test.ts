@@ -4,11 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
 
-// Boundary mock: begin() takes this node's id and its proof of key
-// possession from the client layer (whose own suite checks the proof's
-// byte layout); the realm's HTTP side is a scripted fake below.
-const mocks = vi.hoisted(() => ({ selfNodeId: vi.fn(), proveKeyPossession: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({ selfNodeId: mocks.selfNodeId, proveKeyPossession: mocks.proveKeyPossession }));
+// Boundary mock: begin() takes this node's id, its key as carried, and a
+// realm proof v2 over the request from the client layer (@macula-io/ts
+// checks the proof's bytes against the realm's own vector); the realm's HTTP
+// side is a scripted fake below.
+const mocks = vi.hoisted(() => ({ selfNodeId: vi.fn(), carriedPublicKey: vi.fn(), proveDeviceRequest: vi.fn() }));
+vi.mock("./macula_ts_client.js", () => ({
+  selfNodeId: mocks.selfNodeId,
+  carriedPublicKey: mocks.carriedPublicKey,
+  proveDeviceRequest: mocks.proveDeviceRequest,
+  JOIN_SESSION_PROCEDURE: "macula_realm.join_session",
+}));
 
 import * as realm from "./realm.js";
 
@@ -47,18 +53,17 @@ describe("pure shapes", () => {
       if (previous !== undefined) process.env.MACULA_MCP_REALM_URL = previous;
     }
     expect(realm.DEFAULT_REALM_URL).toBe("https://realm.macula.io");
-    expect(realm.JOIN_PROOF_PROCEDURE).toBe("macula_realm.join_session");
   });
 
   it("agentMri names this server and the identity's first bytes", () => {
     expect(realm.agentMri(NODE)).toBe("mri:agent:io.macula/anonymous/macula-mcp-4f769c4e");
   });
 
-  it("joinRequest sends the key as carried (base64, as the realm decodes it), device_info (not agent_info -- see the field's own doc comment), and the proof", () => {
-    const req = realm.joinRequest({ nodeId: NODE, proof: { public_key: "Y2FycmllZA==", timestamp: 7, signature: "ab" }, connectedVia: "opencode 1.18.25" });
+  it("joinRequest is the request the proof signs: the key as carried (base64, as the realm decodes it) and device_info (not agent_info -- see the field's own doc comment), with no proof yet", () => {
+    const req = realm.joinRequest({ nodeId: NODE, publicKey: "Y2FycmllZA==", connectedVia: "opencode 1.18.25" });
     expect(req.public_key).toBe("Y2FycmllZA==");
     expect(req.agent_mri).toBe(realm.agentMri(NODE));
-    expect(req.proof).toEqual({ timestamp: 7, signature: "ab" });
+    expect(req.proof).toBeUndefined();
     expect(req.agent_info).toBeUndefined();
     const info = req.device_info as Record<string, unknown>;
     expect(typeof info.hostname).toBe("string");
@@ -229,11 +234,13 @@ describe("credential store", () => {
 
 describe("join flow against a fake realm", () => {
   const NODE = "5e".repeat(32);
-  const PROOF = { public_key: Buffer.alloc(3118, 3).toString("base64"), timestamp: 0, signature: "cd".repeat(5139) };
+  const CARRIED = Buffer.alloc(3118, 3).toString("base64");
+  const PROOF = { v: 2, timestamp: 0, nonce: "00".repeat(16), signature: "cd".repeat(5139) };
 
   beforeEach(() => {
     mocks.selfNodeId.mockResolvedValue(NODE);
-    mocks.proveKeyPossession.mockImplementation(async () => ({ ...PROOF, timestamp: Date.now() }));
+    mocks.carriedPublicKey.mockResolvedValue(CARRIED);
+    mocks.proveDeviceRequest.mockImplementation(async () => ({ ...PROOF, timestamp: Date.now() }));
   });
 
   afterEach(() => {
@@ -250,7 +257,7 @@ describe("join flow against a fake realm", () => {
     return { fetchImpl, calls };
   }
 
-  it("begin creates the session with a proof of key possession bound to the join procedure, and returns link + QR", async () => {
+  it("begin creates the session with a realm proof v2 over exactly the body it sends, for io.macula and the join procedure, and returns link + QR", async () => {
     const server = fakeRealm([{ status: 201, body: { session_id: "s1", join_url: "https://realm.test/join/s1", expires_at: "2999-01-01T00:00:00Z" } }]);
     const began = await realm.begin({ connectedVia: "opencode 1.18.25", fetchImpl: server.fetchImpl });
     expect(began.reused).toBe(false);
@@ -259,12 +266,17 @@ describe("join flow against a fake realm", () => {
     expect(began.qr_terminal.length).toBeGreaterThan(0);
     expect(server.calls[0].url).toBe("https://realm.test/api/v1/join/sessions");
     const sent = JSON.parse(String(server.calls[0].init?.body));
-    // The proof is fresh, bound to the join procedure, and carries the key
-    // it proves: the realm derives the node_id from that key.
-    expect(mocks.proveKeyPossession).toHaveBeenCalledWith(realm.JOIN_PROOF_PROCEDURE);
-    expect(sent.public_key).toBe(PROOF.public_key);
-    expect(sent.proof.signature).toBe(PROOF.signature);
-    expect(Math.abs(Date.now() - sent.proof.timestamp)).toBeLessThan(5_000);
+    // The proof signs the body as sent, less the proof itself (device_info
+    // included), for io.macula's realm id and the join procedure, under the
+    // realm's HTTP rule; the body carries the key the realm derives the
+    // node_id from.
+    const { proof, ...signedBody } = sent;
+    const { realmIdOf } = await import("./mesh_config.js");
+    expect(mocks.proveDeviceRequest).toHaveBeenCalledWith(realmIdOf("io.macula"), "macula_realm.join_session", signedBody, "http");
+    expect(sent.public_key).toBe(CARRIED);
+    expect(proof.v).toBe(2);
+    expect(proof.signature).toBe(PROOF.signature);
+    expect(Math.abs(Date.now() - proof.timestamp)).toBeLessThan(5_000);
     expect(realm.status(NODE).pending?.session_id).toBe("s1");
     // Found live 2026-09-08: mesh://identity and mesh_hello's own result
     // both embed this exact status(), neither behind any tool allowlist

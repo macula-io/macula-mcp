@@ -55,11 +55,17 @@ fires on a `v*` tag push, not on every commit to `main`).
   `mesh_get` fetches an MCID from any node sharing it, verifying every byte.
   The old `artifact_id`/`content_base64` shape is gone. **`mesh_call` refuses while `MACULA_MCP_UCAN` is set**: a UCAN cannot
   be attached until post-quantum UCANs land (macula-io/macula-go#2).
-- **Realm joining proves possession of the ML-DSA key** (the key as carried,
-  and its signature over key, timestamp and procedure), as macula-realm's
-  join session and `issue_membership_ucan` check it on macula 12. Realm
-  credentials without a `tier`, and the pre-multi-realm flat credential file,
-  are no longer read.
+- **Realm requests carry realm proof v2** (macula-realm#29), as macula-realm
+  checks them since bd0a6a7: the ML-DSA key as carried signs the realm, the
+  procedure, a timestamp, a fresh nonce and the whole request, so the
+  device_info a person confirming a join reads, and the ttl_seconds a
+  membership UCAN is asked for, cannot be changed on the way. It covers
+  `mesh_join_realm`'s join session, the `macula-mcp-realm` CLI's, and the
+  silent `issue_membership_ucan` auto-join. The bytes are macula-go's
+  `devicerequest`, through @macula-io/ts, and match the realm's own vector.
+  `scripts/realm-live-check.mjs` proves both paths against a live realm with
+  a throwaway identity. Realm credentials without a `tier`, and the
+  pre-multi-realm flat credential file, are no longer read.
 - The DHT tools report records the client verified, and how many it
   `dropped`; the unverified-record caveat is gone.
 - The mesh services this server calls are the `mcl-*` services on macula 12:
