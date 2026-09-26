@@ -829,18 +829,22 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**On the macula 12 wire** (unreleased; see [CHANGELOG](CHANGELOG.md)): one
-pool, one identity key, calls by direct dial, signed publications, and
-serving in this agent's own namespace. Releases before this one speak the
+**On the macula 12 wire** since 0.33.0 (see [CHANGELOG](CHANGELOG.md)):
+one pool, one identity key, calls by direct dial, signed publications,
+serving in this agent's own namespace, node-served artifacts, and realm
+requests signed with realm proof v2. Releases before 0.33.0 speak the
 retired 10.x wire and cannot reach the current fleet.
 
 Checked live against the fleet with `scripts/fleet-live-check.mjs` (two real
 agents, compiled tool handlers, nothing mocked): presence, the DHT by type,
-`mcl-echo/echo` by direct dial, a publication heard back through a watch,
-and goodbye all pass. The ring and `mesh_serve` steps need stations that
-admit a node's own namespace (macula-station 0.6.4). Citizenship and
-`mesh_list_stations` wait for mcl-citizens and mcl-stations to be served on
-the fleet again.
+`mcl-echo/echo` by direct dial, a publication heard back through a watch, a
+ring accepted, a call to `~<callee>/echo` served with `mesh_serve`, a
+288 KB artifact shared with `mesh_put` and fetched with `mesh_get`, a
+`mesh_join_realm` session, and goodbye all pass.
+`scripts/realm-live-check.mjs` proves the realm join session and the
+membership UCAN against realm.macula.io with a throwaway identity.
+Citizenship and `mesh_list_stations` wait for mcl-citizens and mcl-stations
+to be served on the fleet again.
 
 **Not available yet:** UCAN-gated calls (post-quantum UCANs,
 macula-io/macula-go#2).

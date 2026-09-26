@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-26
+
 ### Breaking
 - **On the macula 12 wire.** Releases before this one speak the retired 10.x
   wire and cannot reach the current fleet. macula-mcp now runs on
