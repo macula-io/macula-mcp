@@ -9,6 +9,14 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [0.33.0] - 2026-09-26
 
+### Fixed
+- **`mesh_serve`'s command timeout now ends everything the command
+  started.** The command runs in its own process group, and a timeout kills
+  the group. Before, only the shell was killed: a shell that forks (dash, for
+  any command; every shell, for a pipeline or a sequence) left the child
+  holding stdout open, so the call waited out the child's whole life after
+  its timeout. Found by CI on Ubuntu, whose /bin/sh is dash.
+
 ### Breaking
 - **On the macula 12 wire.** Releases before this one speak the retired 10.x
   wire and cannot reach the current fleet. macula-mcp now runs on

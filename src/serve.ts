@@ -15,7 +15,7 @@
 // machine, for as long as it stays registered -- see mesh_serve.ts's own
 // tool description and mesh_etiquette.ts for the operator-facing framing.
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { BytesOutput, JsonValue, Request, Served } from "@macula-io/ts";
 import { ownProcedure, serve as serveProcedure } from "./macula_ts_client.js";
 import { findLikelySecret } from "./secret_scan.js";
@@ -49,15 +49,37 @@ function serving(): string[] {
  * stdout is a thrown error, which goes back to that caller as a
  * handler_error with its message.
  */
+/** Ends a command and everything it started: its whole process group where there are groups, the process alone on Windows. */
+function killGroup(child: ChildProcess): void {
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch {
+      // The group is already gone; the child's own kill below is a no-op then.
+    }
+  }
+  child.kill("SIGKILL");
+}
+
 function runExec(execCmd: string, timeoutMs: number, request: Request): Promise<JsonValue> {
   return new Promise((resolve, reject) => {
-    const child = spawn(execCmd, { shell: true, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, MACULA_MCP_CALLER: request.caller } });
+    // Its own process group (detached), so a timeout ends everything the
+    // command started: a shell that forks (dash for any command, every shell
+    // for a pipeline or a sequence) would otherwise leave a child holding
+    // stdout open, and the caller waiting, after the shell itself is gone.
+    const child = spawn(execCmd, {
+      shell: true,
+      detached: process.platform !== "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, MACULA_MCP_CALLER: request.caller },
+    });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup(child);
     }, timeoutMs);
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString("utf8");

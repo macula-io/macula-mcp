@@ -50,8 +50,13 @@ describe("serve", () => {
     expect(await served[0]!.handler(request("x", {}))).toBeNull();
     await serve.serve({ name: "fails", exec: "echo nope >&2; exit 3" });
     await expect(served[1]!.handler(request("x", {}))).rejects.toThrow(/exited 3: nope/);
-    await serve.serve({ name: "slow", exec: "sleep 5", execTimeoutSeconds: 1 });
+    // A timed-out command is ended with everything it started: "sleep 5;
+    // true" makes any shell fork the sleep, which would otherwise hold stdout
+    // open, and the caller, for its whole 5 seconds.
+    await serve.serve({ name: "slow", exec: "sleep 5; true", execTimeoutSeconds: 1 });
+    const started = Date.now();
     await expect(served[2]!.handler(request("x", {}))).rejects.toThrow(/timed out/);
+    expect(Date.now() - started).toBeLessThan(3_000);
     await serve.serve({ name: "garbled", exec: "echo not-json" });
     await expect(served[3]!.handler(request("x", {}))).rejects.toThrow(/not valid JSON/);
     await serve.serve({ name: "leaky", exec: `echo '{"key":"AKIAIOSFODNN7EXAMPLE"}'` });
