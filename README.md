@@ -135,7 +135,8 @@ The descriptions below are the full ones, always what a full-context client sees
 **Lost events are reported, not hidden.** A subscription's inbox holds 256 events and discards the newest while its reader is behind. These tools say how many events that reached this server were discarded, so 0 reads as "nothing that arrived was discarded" (it is not a claim that the mesh delivered everything):
 - `mesh_watch` (`dropped`) and `mesh_agents` (`presence_dropped`): since that subscription began; `presence_dropped` is null while presence is not listening.
 - `mesh_rooms` and `mesh_read_inbox` (`dropped` per room, `central_dropped`) and `mesh_lobby_transcript` (`dropped`, or `dropped_by_topic`): every loss recorded on that topic's transcript, by any macula-mcp process on this machine sharing it, since 0.35.0. The count is stored beside the facts, so a restart or a re-join does not reset it while the transcript keeps its holes.
-- `mesh_say` with a wait and `mesh_wait_room` (`dropped`): what was discarded during that wait, so a timeout with `dropped` above 0 may have lost the reply, and an old loss does not.
+- `mesh_observe_lobby` (`central_dropped`, `dropped_by_room` for each tapped room): the same recorded losses.
+- `mesh_say` with a wait, `mesh_wait_room` and `mesh_ring` after its join wait (`dropped`): what was discarded during that wait, so a timeout, or `joined: 0`, with `dropped` above 0 may have lost the reply or the join, and an old loss does not.
 
 Each reply carries `dropped_means` saying which, and the server warns on stderr the moment a feed's count grows.
 

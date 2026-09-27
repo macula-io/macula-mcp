@@ -27,6 +27,8 @@ import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
 import { toolDescription } from "./tool_description.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
+import * as lobbyObserver from "./lobby_observer.js";
 
 // The callee's own handler (ring_service.ts, HANDLER_TIMEOUT_SECONDS=30,
 // plus the local relay's own 25 s budget) can legitimately take close to
@@ -63,7 +65,19 @@ export interface PlaceRingArgs {
 
 export type PlaceRingResult =
   | { ring_id: string; to: string; room_topic: string; unreachable: 1; reason: string; next_step: string }
-  | { ring_id: string; to: string; room_topic: string; answer: 1 | 2 | 3; answer_label: string; reason?: string; joined?: 0 | 1; next_step: string };
+  | {
+      ring_id: string;
+      to: string;
+      room_topic: string;
+      answer: 1 | 2 | 3;
+      answer_label: string;
+      reason?: string;
+      joined?: 0 | 1;
+      /** With a join wait: what the room's feed discarded from the ring to the end of the wait (DROPPED_MEANS.wait). */
+      dropped?: number;
+      dropped_means?: string;
+      next_step: string;
+    };
 
 /**
  * The whole ring, as one function the tool and the two-process check
@@ -89,6 +103,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   const procedure = ringProcedure(to);
   recordRing({ ...ring, self: me, direction: "out", peer: to });
   const cursor = lastFactId(roomTopic);
+  const lostBefore = lobbyObserver.dropped(roomTopic);
 
   let payload: unknown;
   try {
@@ -117,15 +132,19 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   answerRing(ring.ring_id, "out", reply.answer, reply.reason);
 
   let joined: 0 | 1 | undefined;
+  let dropped: number | undefined;
   if (reply.answer === ANSWER.accepted) {
     const seconds = args.waitJoinSeconds ?? DEFAULT_WAIT_JOIN_SECONDS;
     joined = seconds > 0 ? await waitForJoin({ room_topic: roomTopic, who: to, afterId: cursor, seconds }) : 0;
+    if (seconds > 0) dropped = lobbyObserver.dropped(roomTopic) - lostBefore;
   }
   const nextStep =
     reply.answer === ANSWER.accepted
       ? joined === 1
         ? "They are in the room. mesh_say on it; mesh_read_inbox to read."
-        : "Accepted, but their participant_joined was not seen in time. mesh_read_inbox will show it when it lands; you can mesh_say already."
+        : dropped !== undefined && dropped > 0
+          ? `Accepted, but their participant_joined was not seen, and the room's feed discarded ${dropped} event(s) while waiting: it may have been one of them, and then mesh_read_inbox will not show it. mesh_say on the room to check they are there.`
+          : "Accepted, but their participant_joined was not seen in time. mesh_read_inbox will show it when it lands; you can mesh_say already."
       : reply.answer === ANSWER.deferred
         ? "Their model will answer later. The room stays open; mesh_rooms shows the ring as awaiting. Do not write into the room until they join."
         : "Declined. Leave the room if you opened it for this.";
@@ -137,6 +156,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
     answer_label: answerLabel(reply.answer),
     ...(reply.reason !== undefined ? { reason: reply.reason } : {}),
     ...(joined !== undefined ? { joined } : {}),
+    ...(dropped !== undefined ? { dropped, dropped_means: DROPPED_MEANS.wait } : {}),
     next_step: nextStep,
   };
 }
@@ -151,14 +171,18 @@ const DESCRIPTION_FULL =
   "mesh_answer_ring carries the answer back to you; the room stays open), or unreachable: 1 (they are " +
   "not serving their ring endpoint right now). Every answer is signed by their key. purpose " +
   "is mandatory and short: a deferred ring is judged from it. This is the ONLY way to reach an agent " +
-  "that has not invited you; never write into a room they have not joined.";
+  "that has not invited you; never write into a room they have not joined. After a join wait the " +
+  "reply carries `dropped`, so joined: 0 after a loss is not read as a join that never happened: " +
+  DROPPED_MEANS.wait +
+  ".";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. A separately-authored summary, not a truncation: keeps the answer-code meanings and the "only way to reach an uninvited agent" rule, since both are load-bearing for correct use. */
 const DESCRIPTION_TERSE =
   "Ring another agent (an addressed invite to their ~<node_id>/ring, carrying a room to talk in). Reply is one of: " +
   "1 accepted (they joined the room), 2 declined (with reason), 3 deferred (their model answers " +
   "later via mesh_answer_ring), or unreachable. purpose is mandatory, short, and is what a deferred " +
-  "ring is judged on. The only way to reach an agent that hasn't invited you.";
+  "ring is judged on. The only way to reach an agent that hasn't invited you. After a join wait, " +
+  DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshRing(server: McpServer): void {
   server.tool(

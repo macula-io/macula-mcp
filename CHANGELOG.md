@@ -7,6 +7,15 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- `mesh_ring` reports `dropped` after its join wait: what the room's feed
+  discarded from the ring to the end of the wait. With `joined: 0` and
+  `dropped` above 0 the participant_joined may have been discarded, and the
+  next step says so instead of promising mesh_read_inbox will show it.
+- `mesh_observe_lobby` reports `central_dropped` and `dropped_by_room` (each
+  tapped room's recorded losses). Both close the gap 0.35.0 named.
+
 ## [0.35.0] - 2026-09-27
 
 ### Added

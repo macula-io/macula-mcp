@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER, closeRings, getRing } from "./rings.js";
 import { newRoomTopic } from "./envelope.js";
-import { closeTranscript } from "./lobby_transcript.js";
+import { closeTranscript, recordLoss } from "./lobby_transcript.js";
 import { closeRoster, upsertAgent } from "./roster.js";
 import { petname } from "./petname.js";
 
@@ -66,6 +66,20 @@ describe("placeRing", () => {
     const { placeRing } = await import("./mesh_ring.js");
     const res = await placeRing({ to: CALLEE, purpose: "p", room_topic: newRoomTopic(), waitJoinSeconds: 0 });
     expect(res).toMatchObject({ answer: 1, answer_label: "accepted", joined: 0 });
+  });
+
+  it("says what the room's feed discarded while it waited for the join, so an unseen join is not read as missing", async () => {
+    const room = newRoomTopic();
+    recordLoss({ topic: room, lost: 9, at: new Date().toISOString() }); // an old loss: not this wait's
+    mocks.call.mockImplementation(async (input: { callArgs: { ring_id: string } }) => {
+      recordLoss({ topic: room, lost: 2, at: new Date().toISOString() }); // lost during the ring
+      return { procedure: "x", payload: { ring_id: input.callArgs.ring_id, answer: ANSWER.accepted, room_topic: room }, duration_ms: 3 };
+    });
+    const { placeRing } = await import("./mesh_ring.js");
+    const res = await placeRing({ to: CALLEE, purpose: "p", room_topic: room, waitJoinSeconds: 0.05 });
+    expect(res).toMatchObject({ answer: 1, joined: 0, dropped: 2 });
+    expect(res.next_step).toMatch(/discarded 2 event\(s\)/);
+    expect((res as { dropped_means?: string }).dropped_means).toMatch(/0 means none were discarded/);
   });
 
   it("reports unreachable, recording why, when nobody serves the callee's ring", async () => {

@@ -54,12 +54,16 @@ const OBSERVE_DESCRIPTION_FULL =
   "default (20), or to restart the watch after mesh_unobserve_lobby without a full mesh_goodbye+" +
   "mesh_hello cycle. Idempotent: a second call just raises the cap if the new value is higher. Never " +
   "retroactive -- only sees facts published after this call. Read the transcript with " +
-  "mesh_lobby_transcript (instant, local, never blocks); stop with mesh_unobserve_lobby.";
+  "mesh_lobby_transcript (instant, local, never blocks); stop with mesh_unobserve_lobby. The reply " +
+  "carries `central_dropped` and, per tapped room, `dropped_by_room`: " +
+  DROPPED_MEANS.transcript +
+  ".";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "mesh_hello already does this" and "never retroactive". */
 const OBSERVE_DESCRIPTION_TERSE =
   "Start a standing read-only watch over central + every public room announced there, into a local " +
   "transcript. mesh_hello already starts this automatically -- use this to raise max_rooms (default 20) " +
-  "or restart after mesh_unobserve_lobby. Never retroactive. Read with mesh_lobby_transcript.";
+  "or restart after mesh_unobserve_lobby. Never retroactive. Read with mesh_lobby_transcript. " +
+  DROPPED_DESCRIPTION_TERSE;
 
 const TRANSCRIPT_DESCRIPTION_FULL =
   "Read what mesh_observe_lobby has recorded -- instant, a local SQLite read, never blocks and never " +
@@ -103,7 +107,13 @@ export function registerMeshLobbyObserver(server: McpServer): void {
     async ({ max_rooms }) => {
       try {
         const result = await lobbyObserver.start({ maxRooms: max_rooms });
-        return jsonContent(result);
+        const { room_topics } = lobbyObserver.status();
+        return jsonContent({
+          ...result,
+          central_dropped: lobbyObserver.dropped(lobbyObserver.LOBBY_TOPIC),
+          dropped_by_room: Object.fromEntries(room_topics.map((t) => [t, lobbyObserver.dropped(t)])),
+          dropped_means: DROPPED_MEANS.transcript,
+        });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));
       }

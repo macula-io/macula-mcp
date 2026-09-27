@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   waitRoom: vi.fn(),
   say: vi.fn(),
   dropped: vi.fn(),
+  observerStart: vi.fn(),
+  observerStatus: vi.fn(),
 }));
 vi.mock("./presence.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./presence.js")>()),
@@ -30,6 +32,8 @@ vi.mock("./rooms.js", async (importOriginal) => ({
 vi.mock("./lobby_observer.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./lobby_observer.js")>()),
   dropped: mocks.dropped,
+  start: mocks.observerStart,
+  status: mocks.observerStatus,
 }));
 vi.mock("./rings.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./rings.js")>()),
@@ -39,6 +43,7 @@ vi.mock("./rings.js", async (importOriginal) => ({
 
 import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
+import { registerMeshRing } from "./mesh_ring.js";
 import { registerMeshRooms } from "./mesh_rooms.js";
 import { registerMeshWaitRoom } from "./mesh_wait_room.js";
 
@@ -122,6 +127,17 @@ describe("feed tools report what their feed lost", () => {
   });
 });
 
+describe("mesh_observe_lobby", () => {
+  it("says what central and each tapped room lost", async () => {
+    mocks.observerStart.mockResolvedValue({ node_id: ME, connected_to: "x", lobby_topic: "agents.lobby", max_rooms: 20, already_active: true });
+    mocks.observerStatus.mockReturnValue({ active: true, lobby_topic: "agents.lobby", room_topics: [ROOM], joined_room_topics: [], max_rooms: 20, dropped_for_cap: 0 });
+    mocks.dropped.mockImplementation((topic: string) => (topic === ROOM ? 4 : 1));
+    const r = await reply(registerMeshLobbyObserver, "mesh_observe_lobby", {});
+    expect(r).toMatchObject({ already_active: true, central_dropped: 1, dropped_by_room: { [ROOM]: 4 } });
+    expect(r.dropped_means).toMatch(/0 means none were discarded/);
+  });
+});
+
 describe("feed tool descriptions say what dropped counts", () => {
   const cases: [string, (s: McpServer) => void][] = [
     ["mesh_rooms", registerMeshRooms],
@@ -129,6 +145,8 @@ describe("feed tool descriptions say what dropped counts", () => {
     ["mesh_wait_room", registerMeshWaitRoom],
     ["mesh_read_inbox", registerMeshReadInbox],
     ["mesh_lobby_transcript", registerMeshLobbyObserver],
+    ["mesh_observe_lobby", registerMeshLobbyObserver],
+    ["mesh_ring", registerMeshRing],
   ];
   it.each(cases)("%s, full and terse", (name, fn) => {
     expect(register(fn).descriptions.get(name)!).toMatch(/dropped.*0 means none were discarded/s);
