@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   tapRoom: vi.fn(),
   untapRoom: vi.fn(),
   isTapped: vi.fn(),
+  dropped: vi.fn(),
   isJoined: vi.fn(),
   actualIsJoined: undefined as ((topic: string) => boolean) | undefined,
 }));
@@ -35,6 +36,7 @@ vi.mock("./lobby_observer.js", () => ({
   tapRoom: mocks.tapRoom,
   untapRoom: mocks.untapRoom,
   isTapped: mocks.isTapped,
+  dropped: mocks.dropped,
 }));
 vi.mock("./rooms.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./rooms.js")>();
@@ -50,6 +52,7 @@ beforeEach(() => {
   mocks.selfNodeId.mockResolvedValue(ME);
   mocks.observerStart.mockResolvedValue({ already_active: true });
   mocks.isTapped.mockReturnValue(true);
+  mocks.dropped.mockReturnValue(0);
   mocks.isJoined.mockImplementation((topic: string) => mocks.actualIsJoined!(topic));
   // Same as rooms.test.ts's own: records the opener's own facts (room_opened,
   // participant_joined on re-tap) into the real local transcript, the way
