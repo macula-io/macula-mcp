@@ -40,7 +40,7 @@ jobs:
       - uses: actions/github-script@v7
         env:
           SPONSOR_CHECK_TOKEN: ${{ secrets.SPONSOR_CHECK_TOKEN }}
-          SPONSORABLE_LOGIN: rgfaber
+          SPONSORABLE_LOGIN: macula-io
           MODE: ${{ inputs.mode || 'close' }}
         with:
           script: |
@@ -73,7 +73,7 @@ jobs:
 
             const query = `
               query($login: String!, $cursor: String) {
-                user(login: $login) {
+                organization(login: $login) {
                   sponsorshipsAsMaintainer(first: 100, after: $cursor) {
                     nodes { sponsorEntity { ... on User { login } ... on Organization { login } } }
                     pageInfo { hasNextPage endCursor }
