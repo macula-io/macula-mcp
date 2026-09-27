@@ -125,13 +125,6 @@ export interface TranscriptPage {
   facts: ObservedFact[];
 }
 
-/**
- * The most recent `limit` facts, oldest-first within that window (a
- * transcript reads top-to-bottom like a chat log, not newest-first like
- * a roster). `topic` narrows to one topic; omitted, spans every topic
- * this observer has ever seen -- lobby invites and every session's chat
- * interleaved by observed_at.
- */
 /** Records that a listener on `topic` lost `lost` more events (it saw its drop count grow by that much). */
 export function recordLoss(rec: { topic: string; lost: number; at: string }): void {
   open().prepare("INSERT INTO feed_losses (topic, lost, observed_at) VALUES (?, ?, ?)").run(rec.topic, rec.lost, rec.at);
@@ -143,6 +136,13 @@ export function lostOn(topic: string): number {
   return Number(row.lost);
 }
 
+/**
+ * The most recent `limit` facts, oldest-first within that window (a
+ * transcript reads top-to-bottom like a chat log, not newest-first like
+ * a roster). `topic` narrows to one topic; omitted, spans every topic
+ * this observer has ever seen -- lobby invites and every session's chat
+ * interleaved by observed_at.
+ */
 export function recentFacts(args: { topic?: string; limit: number }): TranscriptPage {
   const d = open();
   const where = args.topic ? "WHERE topic = @topic" : "";

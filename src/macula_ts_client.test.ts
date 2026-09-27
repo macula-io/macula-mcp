@@ -209,6 +209,20 @@ describe("dropped events", () => {
     lost = 7;
     expect(droppedEvents("agents.lobby", sub)).toBe(7);
     expect(heardLosses).toEqual([2, 1]);
+    // A hook that fails leaves the growth unseen, so the next look retries it, cumulatively.
+    let failOnce = true;
+    onLoss(sub, (n) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error("database is locked");
+      }
+      heardLosses.push(n);
+    });
+    lost = 9;
+    expect(() => droppedEvents("agents.lobby", sub)).toThrow(/locked/);
+    lost = 10;
+    expect(droppedEvents("agents.lobby", sub)).toBe(10);
+    expect(heardLosses).toEqual([2, 1, 3]);
     warn.mockRestore();
   });
 });

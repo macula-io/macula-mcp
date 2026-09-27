@@ -77,6 +77,20 @@ describe("dropped()", () => {
     expect(lostOn(room)).toBe(7);
   });
 
+  it("takes a last look before ending a subscription, so a loss nobody noticed yet is kept", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const room = newRoomTopic();
+    await lobbyObserver.start({});
+    await lobbyObserver.tapRoom(room, { joined: 1 });
+    subscribedTo(room).lost = 5;
+    subscribedTo("agents.lobby").lost = 2;
+    lobbyObserver.untapRoom(room);
+    await vi.waitFor(() => expect(subscribedTo(room).stop).toHaveBeenCalled());
+    expect(lostOn(room)).toBe(5);
+    await lobbyObserver.stop();
+    expect(lostOn("agents.lobby")).toBe(2);
+  });
+
   it("records a loss whoever notices it, a reader or the next delivery", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { droppedEvents } = await import("./dropped_events.js");
@@ -165,8 +179,8 @@ describe("tapRoom() / untapRoom()", () => {
     vi.mocked(subscribe).mockImplementationOnce(async (args) => {
       await new Promise<void>((r) => (release = r));
       const stop = vi.fn().mockResolvedValue(undefined);
-      subs.push({ topic: args.topic, onEvent: args.onEvent, stop });
-      return { stop, closed: new Promise(() => {}) } as never;
+      subs.push({ topic: args.topic, onEvent: args.onEvent, stop, lost: 0 });
+      return { stop, closed: new Promise(() => {}), dropped: () => 0 } as never;
     });
     let tapped = false;
     const p = lobbyObserver.tapRoom(room, { joined: 1 }).then(() => (tapped = true));
@@ -202,8 +216,8 @@ describe("tapRoom() / untapRoom()", () => {
     vi.mocked(subscribe).mockImplementationOnce(async (args) => {
       await new Promise<void>((r) => (release = r));
       const stop = vi.fn().mockResolvedValue(undefined);
-      subs.push({ topic: args.topic, onEvent: args.onEvent, stop });
-      return { stop, closed: new Promise(() => {}) } as never;
+      subs.push({ topic: args.topic, onEvent: args.onEvent, stop, lost: 0 });
+      return { stop, closed: new Promise(() => {}), dropped: () => 0 } as never;
     });
     const p = lobbyObserver.tapRoom(room, { joined: 1 });
     lobbyObserver.untapRoom(room);

@@ -38,8 +38,9 @@ export function droppedEvents(topic: string, sub: Subscription): number {
   const dropped = sub.dropped();
   const before = warnedAt.get(sub) ?? 0;
   if (dropped > before) {
-    warnedAt.set(sub, dropped);
+    // The hook first: if recording fails, the growth is not marked seen, and the next look retries it.
     lossHooks.get(sub)?.(dropped - before);
+    warnedAt.set(sub, dropped);
     console.error(`macula-mcp: the subscription to ${topic} lost ${dropped - before} event(s), ${dropped} in all: its reader fell behind`);
   }
   return dropped;

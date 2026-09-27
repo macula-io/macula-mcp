@@ -111,7 +111,7 @@ describe("feed tools report what their feed lost", () => {
   });
 
   it("mesh_lobby_transcript: the topic's count, or every observed topic's", async () => {
-    mocks.dropped.mockImplementation((topic: string) => (topic === ROOM ? 4 : null));
+    mocks.dropped.mockImplementation((topic: string) => (topic === ROOM ? 4 : 0));
     const one = await reply(registerMeshLobbyObserver, "mesh_lobby_transcript", { topic: ROOM, limit: 10 });
     expect(one.dropped).toBe(4);
     expect(one.dropped_means).toMatch(/0 means none were discarded/);

@@ -170,12 +170,14 @@ export function untapRoom(roomTopic: string): void {
   const tap = state?.roomTaps.get(roomTopic);
   if (!tap || !state) return;
   state.roomTaps.delete(roomTopic);
-  void endTap(tap);
+  void endTap(roomTopic, tap);
 }
 
-async function endTap(tap: RoomTap): Promise<void> {
+async function endTap(topic: string, tap: RoomTap): Promise<void> {
   const sub = await tap.subscribed;
-  await sub?.stop().catch(() => {});
+  if (!sub) return;
+  droppedEvents(topic, sub); // a last look: a loss nobody noticed yet is recorded
+  await sub.stop().catch(() => {});
 }
 
 export function isTapped(roomTopic: string): boolean {
@@ -221,8 +223,9 @@ export async function stop(): Promise<StopResult> {
   const s = state;
   if (!s) return { was_active: false, rooms_stopped: 0 };
   state = undefined;
-  const taps = [...s.roomTaps.values()];
+  const taps = [...s.roomTaps.entries()].map(([topic, tap]) => ({ topic, tap }));
+  droppedEvents(LOBBY_TOPIC, s.central); // a last look: a loss nobody noticed yet is recorded
   await s.central.stop().catch(() => {});
-  await Promise.all(taps.map(endTap));
+  await Promise.all(taps.map(({ topic, tap }) => endTap(topic, tap)));
   return { was_active: true, rooms_stopped: taps.length };
 }
