@@ -36,7 +36,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";
@@ -69,7 +69,7 @@ const TRANSCRIPT_DESCRIPTION_FULL =
   "is the threaded view of the rooms you are actually in. Never retroactive: only contains what arrived after the watch started, " +
   "even if it's since been stopped -- the transcript persists like mesh_agents' roster does. With a topic " +
   "the reply carries `dropped` for it, without one `dropped_by_topic` for every topic observed. " +
-  DROPPED_DESCRIPTION;
+  "`dropped`: " + DROPPED_MEANS.transcript + ".";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
 const TRANSCRIPT_DESCRIPTION_TERSE =
   "Read what mesh_observe_lobby recorded -- instant local read, never blocks. Omit topic for " +
@@ -135,7 +135,7 @@ export function registerMeshLobbyObserver(server: McpServer): void {
           ...(topic
             ? { dropped: lobbyObserver.dropped(topic) }
             : { dropped_by_topic: Object.fromEntries(observed!.map((t) => [t, lobbyObserver.dropped(t)])) }),
-          dropped_means: DROPPED_MEANS,
+          dropped_means: DROPPED_MEANS.transcript,
           facts: facts.map((f) => ({
             topic: f.topic,
             sender: f.sender ?? undefined,

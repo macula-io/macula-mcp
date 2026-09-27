@@ -26,12 +26,12 @@ const DESCRIPTION_FULL =
   `call this again to keep watching. Realm defaults to io.macula. Presence heartbeats are ordinary facts on ` +
   `"${HELLO_TOPIC}"/"${GOODBYE_TOPIC}" -- watch those directly to react to an arrival/departure yourself ` +
   "instead of polling mesh_agents. Bytes in event payloads appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form. " +
-  "dropped: events the watch lost because it fell behind (0 means none were lost).";
+  "`dropped`: " + DROPPED_MEANS.subscription + ".";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "blocks, no standing subscription" -- easy to assume otherwise. */
 const DESCRIPTION_TERSE =
   `Watch a mesh topic for up to duration_seconds, return what arrived. BLOCKS for the duration ` +
   `(or until count events) -- no standing subscription, call again to keep watching. Realm defaults to io.macula. ` +
-  `Bytes appear as {"$bytes": "<base64>"}; pass them back in the same form. dropped: events lost (0 = none).`;
+  `Bytes appear as {"$bytes": "<base64>"}; pass them back in the same form. dropped: events discarded after arriving (0 = none).`;
 
 export function registerMeshWatch(server: McpServer): void {
   server.tool(
@@ -57,7 +57,7 @@ export function registerMeshWatch(server: McpServer): void {
       ensurePresence(server);
       try {
         const { events, dropped } = await watch({ topic, durationSeconds: duration_seconds, count, realm, bytes: "tagged" });
-        return jsonContent({ topic, event_count: events.length, events, dropped, dropped_means: DROPPED_MEANS });
+        return jsonContent({ topic, event_count: events.length, events, dropped, dropped_means: DROPPED_MEANS.subscription });
       } catch (e) {
         return errorContent(describeMeshError("mesh_watch failed", e));
       }

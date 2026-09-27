@@ -28,7 +28,7 @@ import {
   selfNodeId,
   watch,
 } from "./macula_ts_client.js";
-import { droppedEvents } from "./dropped_events.js";
+import { droppedEvents, onLoss } from "./dropped_events.js";
 import { DEFAULT_SEEDS, IO_MACULA_REALM_ID, IO_MACULA_REALM_KEY, MeshError } from "./mesh_config.js";
 
 const SELF = "00".repeat(31) + "01";
@@ -200,6 +200,15 @@ describe("dropped events", () => {
     expect(droppedEvents("agents.lobby", sub)).toBe(4);
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls[1]![0]).toMatch(/lost 1 event\(s\).*4 in all/);
+    // A loss hook hears each growth once, whoever notices it: a delivery or a read.
+    const heardLosses: number[] = [];
+    onLoss(sub, (n) => heardLosses.push(n));
+    lost = 6;
+    deliver({ seq: 9 });
+    expect(droppedEvents("agents.lobby", sub)).toBe(6);
+    lost = 7;
+    expect(droppedEvents("agents.lobby", sub)).toBe(7);
+    expect(heardLosses).toEqual([2, 1]);
     warn.mockRestore();
   });
 });

@@ -19,9 +19,9 @@
 
 import type { Event, Subscription } from "@macula-io/ts";
 import { primaryStation } from "./mesh_config.js";
-import { droppedEvents } from "./dropped_events.js";
+import { droppedEvents, onLoss } from "./dropped_events.js";
 import { selfNodeId, subscribe } from "./macula_ts_client.js";
-import { recordFact } from "./lobby_transcript.js";
+import { lostOn, recordFact, recordLoss } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "./envelope.js";
 
 export const LOBBY_TOPIC = CENTRAL_TOPIC;
@@ -93,7 +93,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
       tapPublicRoomIfNew(evt.payload);
     },
   });
-  state = { nodeId, central, roomTaps: new Map(), maxRooms, droppedForCap: 0 };
+  state = { nodeId, central: recordLossesOf(LOBBY_TOPIC, central), roomTaps: new Map(), maxRooms, droppedForCap: 0 };
   return { node_id: nodeId, connected_to: primaryStation(), lobby_topic: LOBBY_TOPIC, max_rooms: maxRooms, already_active: false };
 }
 
@@ -137,24 +137,32 @@ export async function tapRoom(roomTopic: string, opts: { joined: 0 | 1 }): Promi
   const tap: RoomTap = { joined: opts.joined, subscribed: subscribing.catch(() => undefined) };
   s.roomTaps.set(roomTopic, tap);
   try {
-    tap.sub = await subscribing;
+    tap.sub = recordLossesOf(roomTopic, await subscribing);
   } catch (e) {
     if (s.roomTaps.get(roomTopic) === tap) s.roomTaps.delete(roomTopic);
     throw e;
   }
 }
 
+/** Records each loss `sub` suffers on `topic` in the transcript, beside the facts it failed to record. */
+function recordLossesOf(topic: string, sub: Subscription): Subscription {
+  onLoss(sub, (lost) => recordLoss({ topic, lost, at: new Date().toISOString() }));
+  return sub;
+}
+
 /**
- * Events the observer's feed of `topic` (central, or a tapped room) lost
- * since it began listening (DROPPED_MEANS), or null when nothing listens to
- * it: the observer is not active, or the room is not tapped (yet).
+ * Every event lost on `topic` (central, or a room) by any listener sharing
+ * the transcript, since losses were first recorded (DROPPED_MEANS): as
+ * durable and as shared as the facts it is read against, so a restart or a
+ * re-join, which starts a fresh subscription counting from 0, does not
+ * report a transcript with holes as whole. Looks at the live subscription
+ * first, so a loss not yet noticed by a delivery is counted.
  */
-export function dropped(topic: string): number | null {
+export function dropped(topic: string): number {
   const s = state;
-  if (!s) return null;
-  if (topic === LOBBY_TOPIC) return droppedEvents(topic, s.central);
-  const sub = s.roomTaps.get(topic)?.sub;
-  return sub ? droppedEvents(topic, sub) : null;
+  const sub = s && (topic === LOBBY_TOPIC ? s.central : s.roomTaps.get(topic)?.sub);
+  if (sub) droppedEvents(topic, sub);
+  return lostOn(topic);
 }
 
 /** Stops watching `roomTopic`. No-op if it wasn't tapped. isTapped() reflects it at once; the subscription ends as soon as it exists. */

@@ -81,7 +81,7 @@ describe("feed tools report what their feed lost", () => {
     const r = await reply(registerMeshRooms, "mesh_rooms", {});
     expect((r.joined as { dropped: number }[])[0]!.dropped).toBe(2);
     expect(r.central_dropped).toBe(0);
-    expect(r.dropped_means).toMatch(/0 means none were lost/);
+    expect(r.dropped_means).toMatch(/0 means none were discarded/);
   });
 
   it("mesh_say: the room's count with a wait, nothing without one", async () => {
@@ -89,7 +89,7 @@ describe("feed tools report what their feed lost", () => {
     mocks.say.mockResolvedValue({ sent, reply: null, timed_out: 1, dropped: 3 });
     const waited = await reply(registerMeshRooms, "mesh_say", { room_topic: ROOM, text: "hi", wait_reply_seconds: 1 });
     expect(waited).toMatchObject({ timed_out: 1, dropped: 3 });
-    expect(waited.dropped_means).toMatch(/0 means none were lost/);
+    expect(waited.dropped_means).toMatch(/0 means none were discarded/);
     mocks.say.mockResolvedValue({ sent, reply: null });
     const unwaited = await reply(registerMeshRooms, "mesh_say", { room_topic: ROOM, text: "hi" });
     expect(unwaited.dropped).toBeUndefined();
@@ -100,21 +100,21 @@ describe("feed tools report what their feed lost", () => {
     mocks.waitRoom.mockResolvedValue({ reply: null, timed_out: 1, dropped: 5 });
     const r = await reply(registerMeshWaitRoom, "mesh_wait_room", { room_topic: ROOM, wait_seconds: 1 });
     expect(r).toMatchObject({ timed_out: 1, dropped: 5 });
-    expect(r.dropped_means).toMatch(/0 means none were lost/);
+    expect(r.dropped_means).toMatch(/0 means none were discarded/);
   });
 
   it("mesh_read_inbox: each room's count and central's", async () => {
     const r = await reply(registerMeshReadInbox, "mesh_read_inbox", { limit: 10 });
     expect((r.rooms as { dropped: number }[])[0]!.dropped).toBe(2);
     expect(r.central_dropped).toBe(0);
-    expect(r.dropped_means).toMatch(/0 means none were lost/);
+    expect(r.dropped_means).toMatch(/0 means none were discarded/);
   });
 
   it("mesh_lobby_transcript: the topic's count, or every observed topic's", async () => {
     mocks.dropped.mockImplementation((topic: string) => (topic === ROOM ? 4 : null));
     const one = await reply(registerMeshLobbyObserver, "mesh_lobby_transcript", { topic: ROOM, limit: 10 });
     expect(one.dropped).toBe(4);
-    expect(one.dropped_means).toMatch(/0 means none were lost/);
+    expect(one.dropped_means).toMatch(/0 means none were discarded/);
     const { recordFact } = await import("./lobby_transcript.js");
     recordFact({ topic: ROOM, payload: { text: "x" }, at: new Date().toISOString() });
     const all = await reply(registerMeshLobbyObserver, "mesh_lobby_transcript", { limit: 10 });
@@ -131,7 +131,7 @@ describe("feed tool descriptions say what dropped counts", () => {
     ["mesh_lobby_transcript", registerMeshLobbyObserver],
   ];
   it.each(cases)("%s, full and terse", (name, fn) => {
-    expect(register(fn).descriptions.get(name)!).toMatch(/dropped.*0 means none were lost/s);
+    expect(register(fn).descriptions.get(name)!).toMatch(/dropped.*0 means none were discarded/s);
     process.env.MACULA_MCP_TERSE_TOOLS = "1";
     try {
       expect(register(fn).descriptions.get(name)!).toMatch(/dropped.*0 = none/s);

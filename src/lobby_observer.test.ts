@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@macula-io/ts";
-import { closeTranscript, recentFacts } from "./lobby_transcript.js";
+import { closeTranscript, lostOn, recentFacts } from "./lobby_transcript.js";
 import { buildEnvelope, newRoomTopic } from "./envelope.js";
 
 // Boundary mock: the client layer the observer subscribes through.
@@ -54,22 +54,38 @@ afterEach(async () => {
 });
 
 describe("dropped()", () => {
-  it("is what central or a tapped room lost, and null for a feed nobody is listening to", async () => {
+  it("is every loss recorded on the topic's transcript, and outlives the subscription that saw it", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const room = newRoomTopic();
-    expect(lobbyObserver.dropped("agents.lobby")).toBeNull();
-    await lobbyObserver.start({});
-    expect(lobbyObserver.dropped("agents.lobby")).toBe(0);
-    expect(lobbyObserver.dropped(room)).toBeNull();
-    await lobbyObserver.tapRoom(room, { joined: 1 });
     expect(lobbyObserver.dropped(room)).toBe(0);
+    await lobbyObserver.start({});
+    await lobbyObserver.tapRoom(room, { joined: 1 });
     subscribedTo(room).lost = 6;
     subscribedTo("agents.lobby").lost = 2;
     expect(lobbyObserver.dropped(room)).toBe(6);
     expect(lobbyObserver.dropped("agents.lobby")).toBe(2);
+    // A re-tap is a fresh subscription counting from 0: the transcript's holes stay counted.
     lobbyObserver.untapRoom(room);
-    expect(lobbyObserver.dropped(room)).toBeNull();
+    expect(lobbyObserver.dropped(room)).toBe(6);
+    await lobbyObserver.tapRoom(room, { joined: 1 });
+    const fresh = subs.filter((s) => s.topic === room).at(-1)!;
+    expect(lobbyObserver.dropped(room)).toBe(6);
+    fresh.lost = 1;
+    expect(lobbyObserver.dropped(room)).toBe(7);
     await lobbyObserver.stop();
-    expect(lobbyObserver.dropped("agents.lobby")).toBeNull();
+    expect(lobbyObserver.dropped("agents.lobby")).toBe(2);
+    expect(lostOn(room)).toBe(7);
+  });
+
+  it("records a loss whoever notices it, a reader or the next delivery", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { droppedEvents } = await import("./dropped_events.js");
+    await lobbyObserver.start({});
+    subscribedTo("agents.lobby").lost = 4;
+    // What macula_ts_client.subscribe does after each delivery.
+    const central = await (vi.mocked(subscribe).mock.results[0]!.value as ReturnType<typeof subscribe>);
+    droppedEvents("agents.lobby", central);
+    expect(lostOn("agents.lobby")).toBe(4);
   });
 });
 

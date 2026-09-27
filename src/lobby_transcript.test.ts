@@ -1,5 +1,6 @@
+import { rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeTranscript, distinctTopics, factsAfter, lastFactId, pruneOld, recentFacts, recordFact } from "./lobby_transcript.js";
+import { closeTranscript, distinctTopics, factsAfter, lastFactId, lostOn, pruneOld, recentFacts, recordFact, recordLoss } from "./lobby_transcript.js";
 
 const FROM = "a".repeat(64);
 const ROOM = `agents.room.${"1".repeat(32)}`;
@@ -68,6 +69,25 @@ describe("recordFact / recentFacts", () => {
     const { total, facts } = recentFacts({ limit: 10 });
     expect(total).toBe(2);
     expect(facts.map((f) => f.topic)).toEqual(["agents.lobby", ROOM]);
+  });
+});
+
+describe("recordLoss / lostOn", () => {
+  it("sums what every listener recorded losing on a topic, beside its facts, and survives a reopen", () => {
+    process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB = `${process.env.TMPDIR ?? "/tmp"}/macula-mcp-losses-${process.pid}-${Date.now()}.sqlite3`;
+    try {
+      expect(lostOn(ROOM)).toBe(0);
+      recordLoss({ topic: ROOM, lost: 3, at: new Date().toISOString() });
+      recordLoss({ topic: ROOM, lost: 2, at: new Date().toISOString() });
+      recordLoss({ topic: "agents.lobby", lost: 7, at: new Date().toISOString() });
+      closeTranscript();
+      expect(lostOn(ROOM)).toBe(5);
+      expect(lostOn("agents.lobby")).toBe(7);
+    } finally {
+      closeTranscript();
+      for (const ext of ["", "-wal", "-shm"]) rmSync(`${process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB}${ext}`, { force: true });
+      process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB = ":memory:";
+    }
   });
 });
 

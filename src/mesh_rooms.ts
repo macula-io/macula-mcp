@@ -14,7 +14,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { selfNodeId } from "./macula_ts_client.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
@@ -183,7 +183,7 @@ const ROOMS_DESCRIPTION_FULL =
   "seen so far and how many facts arrived, plus public rooms announced on central that you have not " +
   "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks. " +
   "Each room carries `dropped`, and `central_dropped` is central's. " +
-  DROPPED_DESCRIPTION;
+  "`dropped`: " + DROPPED_MEANS.transcript + ".";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
 const ROOMS_DESCRIPTION_TERSE =
   "Rooms this agent is in, public rooms seen on central you haven't joined, and outgoing rings still " +
@@ -209,7 +209,7 @@ const SAY_DESCRIPTION_FULL =
   "unlike a publish-then-watch pair there is no gap for a fast reply to fall into. Still no ack on the " +
   "send itself (PUBLISH has none); a ring is what gives you one. With a wait the reply carries `dropped` " +
   "for that topic, so a timeout after a loss is not read as silence. " +
-  DROPPED_DESCRIPTION;
+  "`dropped`: " + DROPPED_MEANS.wait + ".";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the reply-kind pairing rules (which replies MUST carry in_reply_to) and the no-ack-on-publish fact -- both change how a caller must use this correctly. */
 const SAY_DESCRIPTION_TERSE =
   "Say something in a room, or broadcast on central. kind defaults to remark_made; question_asked wants " +
@@ -321,7 +321,7 @@ export function registerMeshRooms(server: McpServer): void {
           })),
           rings_awaiting_answer: awaiting,
           central_dropped,
-          dropped_means: DROPPED_MEANS,
+          dropped_means: DROPPED_MEANS.transcript,
         });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));
@@ -357,7 +357,7 @@ export function registerMeshRooms(server: McpServer): void {
         // unscanned path on an otherwise-wired tool.
         assertNoLikelySecret({ text, refs }, "text/refs");
         const res = await rooms.say({ room_topic, kind, text, in_reply_to, refs, waitReplySeconds: wait_reply_seconds });
-        return jsonContent(res.dropped === undefined ? res : { ...res, dropped_means: DROPPED_MEANS });
+        return jsonContent(res.dropped === undefined ? res : { ...res, dropped_means: DROPPED_MEANS.wait });
       } catch (e) {
         return failed("mesh_say failed", e);
       }

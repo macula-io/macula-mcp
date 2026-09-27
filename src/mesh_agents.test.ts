@@ -71,7 +71,7 @@ describe("mesh_agents: presence_dropped", () => {
     mocks.dropped.mockReturnValue(0);
     const res = await callMeshAgents();
     expect(res.presence_dropped).toBe(0);
-    expect(res.dropped_means).toMatch(/0 means none were lost/);
+    expect(res.dropped_means).toMatch(/0 means none were discarded/);
     mocks.dropped.mockReturnValue(4);
     expect((await callMeshAgents()).presence_dropped).toBe(4);
     mocks.dropped.mockReturnValue(null);

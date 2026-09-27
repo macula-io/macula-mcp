@@ -239,12 +239,12 @@ export interface RoomListing extends RoomState {
   messages_received: number;
   /** 0 if the observer is no longer tapping this room (crashed, restarted); say()/mesh_read_inbox will re-tap on next use. */
   watched: 0 | 1;
-  /** Events the room's feed lost since the observer began listening to it (DROPPED_MEANS); null while it is not tapped. */
-  dropped: number | null;
+  /** Events lost on the room's feed by any listener sharing the transcript (DROPPED_MEANS). */
+  dropped: number;
 }
 
-/** Rooms this agent is in, plus public rooms announced on central it hasn't joined, with what central's feed lost (DROPPED_MEANS; null while not listening). */
-export function listRooms(): { joined: RoomListing[]; seen_on_central: SeenRoom[]; central_dropped: number | null } {
+/** Rooms this agent is in, plus public rooms announced on central it hasn't joined, with what central's feed lost (DROPPED_MEANS). */
+export function listRooms(): { joined: RoomListing[]; seen_on_central: SeenRoom[]; central_dropped: number } {
   const joined: RoomListing[] = [];
   for (const room of rooms.values()) {
     const { total, facts } = recentFacts({ topic: room.room_topic, limit: CENTRAL_SCAN_LIMIT });
@@ -322,8 +322,8 @@ export interface WaitRoomArgs {
 export interface WaitRoomResult {
   reply: ObservedEnvelope | null;
   timed_out: 0 | 1;
-  /** Events the topic's feed lost since the observer began listening (DROPPED_MEANS): a timeout with dropped above 0 may have lost the reply. */
-  dropped: number | null;
+  /** Events the topic's feed lost during this wait: a timeout with dropped above 0 may have lost the reply. */
+  dropped: number;
 }
 
 /**
@@ -350,8 +350,9 @@ export async function waitRoom(args: WaitRoomArgs): Promise<WaitRoomResult> {
     await ensureTapped({ room_topic: topic });
   }
   const me = await selfNodeId();
+  const lostBefore = lobbyObserver.dropped(topic);
   const reply = await waitForReply({ topic, me, afterId: lastFactId(topic), deadline: Date.now() + args.waitSeconds * 1000 });
-  const dropped = lobbyObserver.dropped(topic);
+  const dropped = lobbyObserver.dropped(topic) - lostBefore;
   return reply ? { reply, timed_out: 0, dropped } : { reply: null, timed_out: 1, dropped };
 }
 
@@ -369,8 +370,8 @@ export interface SayResult {
   reply: ObservedEnvelope | null;
   /** 1 if a wait was requested and nothing came from another sender in time; 0 if a reply arrived; absent if no wait was requested. */
   timed_out?: 0 | 1;
-  /** With a wait: events the topic's feed lost since the observer began listening (DROPPED_MEANS). */
-  dropped?: number | null;
+  /** With a wait: events the topic's feed lost during it (from just before the send). */
+  dropped?: number;
 }
 
 /**
@@ -403,11 +404,12 @@ export async function say(args: SayArgs): Promise<SayResult> {
     refs: args.refs,
   });
   const cursor = lastFactId(topic);
+  const lostBefore = lobbyObserver.dropped(topic);
   await publish({ topic, fact: { ...sent } });
   if (!args.waitReplySeconds) return { sent, reply: null };
 
   const reply = await waitForReply({ topic, me, afterId: cursor, deadline: Date.now() + args.waitReplySeconds * 1000 });
-  const dropped = lobbyObserver.dropped(topic);
+  const dropped = lobbyObserver.dropped(topic) - lostBefore;
   return reply ? { sent, reply, timed_out: 0, dropped } : { sent, reply: null, timed_out: 1, dropped };
 }
 

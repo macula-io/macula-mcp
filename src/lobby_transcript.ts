@@ -64,6 +64,19 @@ function open(): DatabaseSync {
   const cols = new Set((db.prepare("PRAGMA table_info(observed_facts)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("publisher")) db.exec("ALTER TABLE observed_facts ADD COLUMN publisher TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS observed_facts_topic_idx ON observed_facts (topic, observed_at)`);
+  // What a listener lost on a topic: events that reached a subscription and
+  // were discarded while its reader was behind. Kept beside the facts, so a
+  // count read against the transcript is as durable and as shared as the
+  // transcript itself. Added in 0.35.0; losses before it were not recorded.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS feed_losses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic TEXT NOT NULL,
+      lost INTEGER NOT NULL,
+      observed_at TEXT NOT NULL
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS feed_losses_topic_idx ON feed_losses (topic)`);
   return db;
 }
 
@@ -119,6 +132,17 @@ export interface TranscriptPage {
  * this observer has ever seen -- lobby invites and every session's chat
  * interleaved by observed_at.
  */
+/** Records that a listener on `topic` lost `lost` more events (it saw its drop count grow by that much). */
+export function recordLoss(rec: { topic: string; lost: number; at: string }): void {
+  open().prepare("INSERT INTO feed_losses (topic, lost, observed_at) VALUES (?, ?, ?)").run(rec.topic, rec.lost, rec.at);
+}
+
+/** Every loss recorded on `topic`, by any listener sharing this transcript, since losses were first recorded (0.35.0). */
+export function lostOn(topic: string): number {
+  const row = open().prepare("SELECT COALESCE(SUM(lost), 0) AS lost FROM feed_losses WHERE topic = ?").get(topic) as { lost: number };
+  return Number(row.lost);
+}
+
 export function recentFacts(args: { topic?: string; limit: number }): TranscriptPage {
   const d = open();
   const where = args.topic ? "WHERE topic = @topic" : "";

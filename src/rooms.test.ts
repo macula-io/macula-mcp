@@ -221,17 +221,29 @@ describe("waitRoom", () => {
     expect(await pending).toEqual({ reply: null, timed_out: 1, dropped: 0 });
   });
 
-  it("says how many events the room's feed lost, so a timeout after a loss does not read as silence", async () => {
-    const { openRoom, waitRoom, say, listRooms } = await import("./rooms.js");
+  it("says what the room's feed lost during a wait, not before it, so an old loss does not read as a lost reply", async () => {
+    const { openRoom, waitRoom, say } = await import("./rooms.js");
     const { room_topic } = await openRoom({});
-    mocks.dropped.mockImplementation((topic: string) => (topic === room_topic ? 3 : topic === "agents.lobby" ? 1 : null));
+    let lostSoFar = 40;
+    mocks.dropped.mockImplementation(() => lostSoFar);
+    expect(await waitRoom({ room_topic, waitSeconds: 0 })).toEqual({ reply: null, timed_out: 1, dropped: 0 });
+    mocks.dropped.mockImplementation(() => {
+      const now = lostSoFar;
+      lostSoFar += 3; // lost while waiting: the next look sees 3 more
+      return now;
+    });
     expect(await waitRoom({ room_topic, waitSeconds: 0 })).toEqual({ reply: null, timed_out: 1, dropped: 3 });
     expect(await say({ room_topic, text: "anyone?", waitReplySeconds: 0.001 })).toMatchObject({ reply: null, timed_out: 1, dropped: 3 });
     expect((await say({ room_topic, text: "no wait" })).dropped).toBeUndefined();
+  });
+
+  it("lists each room's recorded losses and central's", async () => {
+    const { openRoom, listRooms } = await import("./rooms.js");
+    const { room_topic } = await openRoom({});
+    mocks.dropped.mockImplementation((topic: string) => (topic === room_topic ? 3 : 1));
     const listing = listRooms();
     expect(listing.joined[0]).toMatchObject({ room_topic, dropped: 3 });
     expect(listing.central_dropped).toBe(1);
-    expect(mocks.dropped).toHaveBeenCalledWith(room_topic);
   });
 
   it("refuses a topic that is neither a room nor central", async () => {

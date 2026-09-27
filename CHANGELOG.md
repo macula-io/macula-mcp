@@ -10,20 +10,33 @@ fires on a `v*` tag push, not on every commit to `main`).
 ### Added
 
 - Lost events are reported. Since @macula-io/ts 0.22 a subscription's inbox
-  holds 256 events and drops the newest while its reader is behind, and this
-  server never looked at the count, so presence, rooms, central and watches
-  could lose events silently. Every tool that reads such a feed now says how
-  many events it lost since this server began listening: `mesh_watch`
-  (`dropped`), `mesh_agents` (`presence_dropped`), `mesh_rooms` and
-  `mesh_read_inbox` (`dropped` per room, `central_dropped`), `mesh_say` with a
-  wait and `mesh_wait_room` (`dropped` for the topic, so a timeout after a
-  loss is not read as silence), and `mesh_lobby_transcript` (`dropped`, or
-  `dropped_by_topic`). 0 means none were lost; null means nothing is
-  listening to that feed. Each reply carries `dropped_means`, and each of
-  those tools' descriptions says the same.
+  holds 256 events and discards the newest while its reader is behind, and
+  this server never looked at the count, so presence, rooms, central and
+  watches could lose events silently. Counts are of events that reached this
+  server and were discarded, never of events the mesh did not deliver:
+  - `mesh_watch` (`dropped`) and `mesh_agents` (`presence_dropped`, null while
+    presence is not listening): since that subscription began.
+  - `mesh_rooms` and `mesh_read_inbox` (`dropped` per room, `central_dropped`)
+    and `mesh_lobby_transcript` (`dropped`, or `dropped_by_topic`): every loss
+    recorded on the topic's transcript by any macula-mcp process sharing it.
+    Losses are stored in the transcript database (a new `feed_losses` table,
+    created on open like the transcript's own), so a restart or a re-join,
+    which starts a fresh subscription, does not report a transcript with
+    holes as whole. Losses before 0.35.0 were not recorded.
+  - `mesh_say` with a wait and `mesh_wait_room` (`dropped`): what was discarded
+    during that wait, so an old loss does not read as a lost reply.
+  Each reply carries `dropped_means` saying which, and each of those tools'
+  descriptions says the same. `mesh_ring`'s wait for a join and
+  `mesh_observe_lobby`'s status carry no count.
 - A warning on stderr (`the subscription to <topic> lost N event(s), M in
-  all`) whenever a feed's count grows: checked on every delivery and every
+  all`) whenever a feed's count grows, checked on every delivery and every
   read, so it fires even when no tool reads the feed.
+
+### Fixed
+
+- `mesh_read_inbox`'s description said rooms show only what arrived while
+  this process watched them; the transcript is shared by every macula-mcp
+  process on the machine and persists, and the description now says so.
 
 ## [0.34.0] - 2026-09-27
 

@@ -20,7 +20,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as rooms from "./rooms.js";
@@ -43,7 +43,7 @@ const DESCRIPTION_FULL =
   "Never call this in a sleep-then-check loop -- one call with the full wait_seconds you actually want " +
   "does the same waiting server-side, for free. The reply carries `dropped` for that topic, so a timeout " +
   "after a loss is not read as silence. " +
-  DROPPED_DESCRIPTION;
+  "`dropped`: " + DROPPED_MEANS.wait + ".";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "still occupies your turn, no server push" honesty and the never-sleep-and-poll rule -- both change how a caller should actually use this. */
 const DESCRIPTION_TERSE =
@@ -65,7 +65,7 @@ export function registerMeshWaitRoom(server: McpServer): void {
       ensurePresence(server);
       try {
         const res = await rooms.waitRoom({ room_topic, waitSeconds: wait_seconds });
-        return jsonContent({ ...res, dropped_means: DROPPED_MEANS });
+        return jsonContent({ ...res, dropped_means: DROPPED_MEANS.wait });
       } catch (e) {
         if (e instanceof rooms.RoomError) return errorContent(`mesh_wait_room failed: ${e.message}`);
         return errorContent(describeMeshError("mesh_wait_room failed", e));

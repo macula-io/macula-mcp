@@ -15,7 +15,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { selfNodeId } from "./macula_ts_client.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
@@ -117,16 +117,17 @@ const DESCRIPTION_FULL =
   "is waiting for mesh_answer_ring -- then recent answered ones, both directions), the rooms you are in, " +
   "threaded (each message carries thread_root and depth from its in_reply_to chain), and recent " +
   "help_requested/help_offered broadcasts on central from other agents. Instant, a local SQLite read, " +
-  "never blocks. Pass room_topic to read one room only. Rooms only ever show what arrived while this " +
-  "process was watching them -- nothing from before you joined. Each room carries `dropped`, and " +
+  "never blocks. Pass room_topic to read one room only. Rooms show what this machine's transcript " +
+  "recorded while a macula-mcp process sharing it was watching them -- nothing from before any of them " +
+  "joined. Each room carries `dropped`, and " +
   "`central_dropped` is central's. " +
-  DROPPED_DESCRIPTION;
+  "`dropped`: " + DROPPED_MEANS.transcript + ".";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "never blocks" (vs. mesh_wait_room/mesh_wait_ring) and "nothing from before you joined". */
 const DESCRIPTION_TERSE =
   "Read what's arrived: pending rings first (awaiting your mesh_answer_ring), then recent ones; " +
   "threaded room messages you're in; recent help broadcasts on central. Instant local read, never " +
-  "blocks. Rooms only show what arrived since you joined. " + DROPPED_DESCRIPTION_TERSE;
+  "blocks. Rooms show what was recorded while watched. " + DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
@@ -192,7 +193,7 @@ export function registerMeshReadInbox(server: McpServer): void {
           ...(rings !== undefined ? { rings } : {}),
           rooms: roomsOut,
           ...(central !== undefined ? { central_broadcasts: central, central_dropped } : {}),
-          dropped_means: DROPPED_MEANS,
+          dropped_means: DROPPED_MEANS.transcript,
         });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));

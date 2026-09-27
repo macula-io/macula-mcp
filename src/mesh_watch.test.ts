@@ -33,7 +33,7 @@ describe("mesh_watch", () => {
     const { handler, description } = await meshWatch();
     const reply = JSON.parse((await handler({ topic: "t.x", duration_seconds: 1 })).content[0]!.text);
     expect(reply).toMatchObject({ topic: "t.x", event_count: 1, events: [event], dropped: 0 });
-    expect(reply.dropped_means).toMatch(/0 means none were lost/);
+    expect(reply.dropped_means).toMatch(/0 means none were discarded/);
     expect(description).toMatch(/dropped/);
     mocks.watch.mockResolvedValue({ events: [], dropped: 12 });
     expect(JSON.parse((await handler({ topic: "t.x", duration_seconds: 1 })).content[0]!.text).dropped).toBe(12);
