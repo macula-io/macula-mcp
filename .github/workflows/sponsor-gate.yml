@@ -103,7 +103,8 @@ jobs:
             }
 
             const what = pr ? "pull request" : "issue";
-            const body = `@${author}: macula-io gates ${what}s behind a minimal GitHub Sponsors subscription, at any tier, to keep the queues focused. Sponsor here: https://github.com/sponsors/${process.env.SPONSORABLE_LOGIN} and then reopen this ${what} and we will pick it up. Security vulnerabilities: please email contact@macula.io instead of opening a ${what}.`;
+            const article = pr ? "a" : "an";
+            const body = `@${author}: macula-io gates ${article} ${what} behind a minimal GitHub Sponsors subscription, at any tier, to keep the queues focused. Sponsor here: https://github.com/sponsors/${process.env.SPONSORABLE_LOGIN} and then reopen this ${what} and we will pick it up. Security vulnerabilities: please email contact@macula.io instead of opening ${article} ${what}.`;
 
             if (manual) {
               console.log(body);
