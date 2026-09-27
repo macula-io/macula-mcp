@@ -1,0 +1,138 @@
+# Sponsor gate: issues and pull requests require an active GitHub Sponsors
+# subscription (any tier) to the sponsorable account named in SPONSORABLE_LOGIN.
+# Org members and collaborators are exempt, as are bots.
+#
+# Safety notes:
+# - pull_request_target runs this workflow from the DEFAULT branch only and the
+#   script never checks out or executes any code from the PR, so a fork cannot
+#   run code or read the secret.
+# - The sponsorship query runs under SPONSOR_CHECK_TOKEN (a maintainer PAT),
+#   not GITHUB_TOKEN, because Sponsors data is not available to Actions tokens.
+# - MODE=close closes the item after commenting; MODE=label labels it instead.
+# - workflow_dispatch exists so a maintainer can test the check without opening
+#   a real issue or PR (pass `login` and optionally `mode`).
+
+name: sponsor-gate
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request_target:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      login:
+        description: Login to test the sponsorship check against
+        required: false
+      mode:
+        description: close or label (default close)
+        required: false
+        default: close
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          SPONSOR_CHECK_TOKEN: ${{ secrets.SPONSOR_CHECK_TOKEN }}
+          SPONSORABLE_LOGIN: rgfaber
+          MODE: ${{ inputs.mode || 'close' }}
+        with:
+          script: |
+            const issue = github.context.payload.issue ?? null;
+            const pr = github.context.payload.pull_request ?? null;
+            const manual = github.context.payload.inputs ?? null;
+
+            let author;
+            let assoc;
+            if (manual && manual.login) {
+              author = manual.login;
+              assoc = null;
+            } else if (issue) {
+              author = issue.user.login;
+              assoc = issue.author_association;
+            } else if (pr) {
+              author = pr.user.login;
+              assoc = pr.author_association;
+            } else {
+              return;
+            }
+
+            if (!manual && (["OWNER", "MEMBER", "COLLABORATOR"].includes(assoc) || author.endsWith("[bot]"))) {
+              console.log(`exempt: ${author} (${assoc})`);
+              return;
+            }
+
+            const token = process.env.SPONSOR_CHECK_TOKEN;
+            if (!token) throw new Error("SPONSOR_CHECK_TOKEN secret is not set");
+
+            const query = `
+              query($login: String!, $cursor: String) {
+                user(login: $login) {
+                  sponsorshipsAsMaintainer(first: 100, after: $cursor) {
+                    nodes { sponsorEntity { ... on User { login } ... on Organization { login } } }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }`;
+
+            const sponsors = [];
+            let cursor = null;
+            while (true) {
+              const res = await github.request("POST /graphql", {
+                headers: { authorization: `token ${token}` },
+                query,
+                variables: { login: process.env.SPONSORABLE_LOGIN, cursor },
+              });
+              const conn = res.data.data.user.sponsorshipsAsMaintainer;
+              for (const n of conn.nodes) {
+                if (n.sponsorEntity) sponsors.push(n.sponsorEntity.login);
+              }
+              if (!conn.pageInfo.hasNextPage) break;
+              cursor = conn.pageInfo.endCursor;
+            }
+
+            if (sponsors.includes(author)) {
+              console.log(`sponsor: ${author}`);
+              return;
+            }
+
+            const what = pr ? "pull request" : "issue";
+            const body = `@${author}: macula-io gates ${what}s behind a minimal GitHub Sponsors subscription, at any tier, to keep the queues focused. Sponsor here: https://github.com/sponsors/${process.env.SPONSORABLE_LOGIN} and then reopen this ${what} and we will pick it up. Security vulnerabilities: please email contact@macula.io instead of opening a ${what}.`;
+
+            if (manual) {
+              console.log(body);
+              return;
+            }
+
+            const params = {
+              owner: github.context.repo.owner,
+              repo: github.context.repo.repo,
+              issue_number: pr ? pr.number : issue.number,
+            };
+            await github.rest.issues.createComment({ ...params, body });
+
+            if (process.env.MODE === "close") {
+              if (pr) {
+                await github.rest.pulls.update({
+                  owner: params.owner,
+                  repo: params.repo,
+                  pull_number: pr.number,
+                  state: "closed",
+                });
+              } else {
+                await github.rest.issues.update({ ...params, state: "closed" });
+              }
+            } else {
+              await github.rest.issues.addLabels({
+                owner: params.owner,
+                repo: params.repo,
+                issue_number: params.issue_number,
+                labels: ["sponsor-required"],
+              });
+            }
