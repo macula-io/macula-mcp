@@ -15,6 +15,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { selfNodeId } from "./macula_ts_client.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
@@ -117,13 +118,15 @@ const DESCRIPTION_FULL =
   "threaded (each message carries thread_root and depth from its in_reply_to chain), and recent " +
   "help_requested/help_offered broadcasts on central from other agents. Instant, a local SQLite read, " +
   "never blocks. Pass room_topic to read one room only. Rooms only ever show what arrived while this " +
-  "process was watching them -- nothing from before you joined.";
+  "process was watching them -- nothing from before you joined. Each room carries `dropped`, and " +
+  "`central_dropped` is central's. " +
+  DROPPED_DESCRIPTION;
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "never blocks" (vs. mesh_wait_room/mesh_wait_ring) and "nothing from before you joined". */
 const DESCRIPTION_TERSE =
   "Read what's arrived: pending rings first (awaiting your mesh_answer_ring), then recent ones; " +
   "threaded room messages you're in; recent help broadcasts on central. Instant local read, never " +
-  "blocks. Rooms only show what arrived since you joined.";
+  "blocks. Rooms only show what arrived since you joined. " + DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshReadInbox(server: McpServer): void {
   server.tool(
@@ -149,7 +152,7 @@ export function registerMeshReadInbox(server: McpServer): void {
         // whole `rings` key because `me` was undefined, which a caller
         // treating a missing key as "no pending rings" reads as wrongly safe.
         const me = presence.currentNodeId() ?? (await selfNodeId());
-        const { joined } = rooms.listRooms();
+        const { joined, central_dropped } = rooms.listRooms();
         const selected = room_topic ? joined.filter((r) => r.room_topic === room_topic) : joined;
         if (room_topic && selected.length === 0) {
           return errorContent(`mesh_read_inbox: not in room ${room_topic} -- mesh_join_room it first, or see mesh_rooms.`);
@@ -170,6 +173,7 @@ export function registerMeshReadInbox(server: McpServer): void {
             returned: messages.length,
             unparsed,
             messages: messages.map(withFromPetname),
+            dropped: room.dropped,
             ...(hint ? { poll_hint: hint } : {}),
           };
         });
@@ -187,7 +191,8 @@ export function registerMeshReadInbox(server: McpServer): void {
         return jsonContent({
           ...(rings !== undefined ? { rings } : {}),
           rooms: roomsOut,
-          ...(central !== undefined ? { central_broadcasts: central } : {}),
+          ...(central !== undefined ? { central_broadcasts: central, central_dropped } : {}),
+          dropped_means: DROPPED_MEANS,
         });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));

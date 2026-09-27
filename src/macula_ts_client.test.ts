@@ -21,12 +21,14 @@ import {
   getContent,
   decodeRecord,
   discoverProcedureRealm,
+  subscribe,
   findRecordsByType,
   publish,
   resetForTests,
   selfNodeId,
   watch,
 } from "./macula_ts_client.js";
+import { droppedEvents } from "./dropped_events.js";
 import { DEFAULT_SEEDS, IO_MACULA_REALM_ID, IO_MACULA_REALM_KEY, MeshError } from "./mesh_config.js";
 
 const SELF = "00".repeat(31) + "01";
@@ -35,7 +37,7 @@ function fakePool() {
   return {
     call: vi.fn(async () => ({ ok: 1 })),
     publish: vi.fn(async () => {}),
-    subscribe: vi.fn(),
+    subscribe: vi.fn(async () => ({ stop: vi.fn(async () => {}), closed: new Promise(() => {}), dropped: () => 0 })),
     findRecordsByType: vi.fn(async () => ({ records: [], dropped: 0 })),
     serve: vi.fn(async () => ({ stop: vi.fn() })),
     shareContent: vi.fn(async () => "0255" + "ab".repeat(48)),
@@ -143,12 +145,62 @@ describe("publish and watch", () => {
       setTimeout(() => {
         for (const seq of [1, 2, 3]) onEvent({ publisher: "aa".repeat(32), topic: "t.x", seq, payload: { n: seq } });
       }, 5);
-      return { stop, closed: new Promise(() => {}) };
+      return { stop, closed: new Promise(() => {}), dropped: () => 0 };
     });
-    const events = await watch({ topic: "t.x", durationSeconds: 5, count: 2 });
+    const { events, dropped } = await watch({ topic: "t.x", durationSeconds: 5, count: 2 });
     expect(events.map((e) => e.seq)).toEqual([1, 2]);
     expect(events[0]).toEqual({ topic: "t.x", publisher: "aa".repeat(32), seq: 1, payload: { n: 1 } });
+    expect(dropped).toBe(0);
     expect(stop).toHaveBeenCalled();
+  });
+
+  it("reports what the watch's subscription dropped, read before it stops", async () => {
+    let lost = 0;
+    const stop = vi.fn(async () => {
+      lost = -1; // a read after stop would see this
+    });
+    pool.subscribe.mockImplementation(async (_realm: string, _topic: string, onEvent: (e: unknown) => void) => {
+      setTimeout(() => {
+        lost = 7;
+        onEvent({ publisher: "aa".repeat(32), topic: "t.x", seq: 1, payload: 1 });
+      }, 5);
+      return { stop, closed: new Promise(() => {}), dropped: () => lost };
+    });
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { events, dropped } = await watch({ topic: "t.x", durationSeconds: 5, count: 1 });
+    expect(events).toHaveLength(1);
+    expect(dropped).toBe(7);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/t\.x.*lost 7 event\(s\).*7 in all/);
+    warn.mockRestore();
+  });
+});
+
+describe("dropped events", () => {
+  it("are warned about on stderr when a delivery or a read finds the count grew, once per growth", async () => {
+    let lost = 0;
+    let deliver: (e: unknown) => void = () => {};
+    pool.subscribe.mockImplementation(async (_realm: string, _topic: string, onEvent: (e: unknown) => void) => {
+      deliver = onEvent;
+      return { stop: vi.fn(async () => {}), closed: new Promise(() => {}), dropped: () => lost };
+    });
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    const heard: unknown[] = [];
+    const sub = await subscribe({ topic: "agents.lobby", onEvent: (e) => heard.push(e) });
+    deliver({ seq: 1 });
+    expect(warn).not.toHaveBeenCalled();
+    lost = 3;
+    deliver({ seq: 5 });
+    expect(heard).toHaveLength(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/agents\.lobby.*lost 3 event\(s\).*3 in all/);
+    expect(droppedEvents("agents.lobby", sub)).toBe(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+    lost = 4;
+    expect(droppedEvents("agents.lobby", sub)).toBe(4);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[1]![0]).toMatch(/lost 1 event\(s\).*4 in all/);
+    warn.mockRestore();
   });
 });
 

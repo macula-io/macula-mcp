@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   tapRoom: vi.fn(),
   untapRoom: vi.fn(),
   isTapped: vi.fn(),
+  dropped: vi.fn(),
 }));
 // Boundary mock, same pattern as presence.test.ts's own: replace the module
 // rooms.ts talks to the mesh THROUGH (macula_ts_client.js), not mesh_config.js
@@ -22,6 +23,7 @@ vi.mock("./lobby_observer.js", () => ({
   tapRoom: mocks.tapRoom,
   untapRoom: mocks.untapRoom,
   isTapped: mocks.isTapped,
+  dropped: mocks.dropped,
 }));
 
 beforeEach(async () => {
@@ -30,6 +32,7 @@ beforeEach(async () => {
   mocks.selfNodeId.mockResolvedValue(ME);
   mocks.observerStart.mockResolvedValue({ already_active: true });
   mocks.isTapped.mockReturnValue(true);
+  mocks.dropped.mockReturnValue(0);
   mocks.publish.mockImplementation(async ({ topic, fact }: { topic: string; fact: Record<string, unknown> }) => {
     // the background watch would record this agent's own fact too, with the
     // its verified publisher (this server's one identity, so publisher ===
@@ -204,7 +207,7 @@ describe("waitRoom", () => {
     const { waitRoom, listRooms } = await import("./rooms.js");
     const topic = `agents.room.${"6".repeat(32)}`;
     const res = await waitRoom({ room_topic: topic, waitSeconds: 0 });
-    expect(res).toEqual({ reply: null, timed_out: 1 });
+    expect(res).toEqual({ reply: null, timed_out: 1, dropped: 0 });
     expect(listRooms().joined).toEqual([expect.objectContaining({ room_topic: topic })]);
   });
 
@@ -215,7 +218,20 @@ describe("waitRoom", () => {
     const { room_topic } = await openRoom({});
     const pending = waitRoom({ room_topic, waitSeconds: 1 });
     await vi.advanceTimersByTimeAsync(REPLY_POLL_MS * 6);
-    expect(await pending).toEqual({ reply: null, timed_out: 1 });
+    expect(await pending).toEqual({ reply: null, timed_out: 1, dropped: 0 });
+  });
+
+  it("says how many events the room's feed lost, so a timeout after a loss does not read as silence", async () => {
+    const { openRoom, waitRoom, say, listRooms } = await import("./rooms.js");
+    const { room_topic } = await openRoom({});
+    mocks.dropped.mockImplementation((topic: string) => (topic === room_topic ? 3 : topic === "agents.lobby" ? 1 : null));
+    expect(await waitRoom({ room_topic, waitSeconds: 0 })).toEqual({ reply: null, timed_out: 1, dropped: 3 });
+    expect(await say({ room_topic, text: "anyone?", waitReplySeconds: 0.001 })).toMatchObject({ reply: null, timed_out: 1, dropped: 3 });
+    expect((await say({ room_topic, text: "no wait" })).dropped).toBeUndefined();
+    const listing = listRooms();
+    expect(listing.joined[0]).toMatchObject({ room_topic, dropped: 3 });
+    expect(listing.central_dropped).toBe(1);
+    expect(mocks.dropped).toHaveBeenCalledWith(room_topic);
   });
 
   it("refuses a topic that is neither a room nor central", async () => {

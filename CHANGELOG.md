@@ -7,6 +7,24 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- Lost events are reported. Since @macula-io/ts 0.22 a subscription's inbox
+  holds 256 events and drops the newest while its reader is behind, and this
+  server never looked at the count, so presence, rooms, central and watches
+  could lose events silently. Every tool that reads such a feed now says how
+  many events it lost since this server began listening: `mesh_watch`
+  (`dropped`), `mesh_agents` (`presence_dropped`), `mesh_rooms` and
+  `mesh_read_inbox` (`dropped` per room, `central_dropped`), `mesh_say` with a
+  wait and `mesh_wait_room` (`dropped` for the topic, so a timeout after a
+  loss is not read as silence), and `mesh_lobby_transcript` (`dropped`, or
+  `dropped_by_topic`). 0 means none were lost; null means nothing is
+  listening to that feed. Each reply carries `dropped_means`, and each of
+  those tools' descriptions says the same.
+- A warning on stderr (`the subscription to <topic> lost N event(s), M in
+  all`) whenever a feed's count grows: checked on every delivery and every
+  read, so it fires even when no tool reads the feed.
+
 ## [0.34.0] - 2026-09-27
 
 ### Added

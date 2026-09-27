@@ -27,6 +27,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Event, Subscription } from "@macula-io/ts";
 import { primaryStation } from "./mesh_config.js";
+import { droppedEvents } from "./dropped_events.js";
 import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 import { petname } from "./petname.js";
@@ -125,6 +126,13 @@ export interface StartResult {
 }
 
 /** This agent's node_id while present, else undefined -- what rooms.ts stamps as `from` and mesh_agents uses for is_self. */
+/** Events presence's hello and goodbye subscriptions lost together since presence started (DROPPED_MEANS), or null while presence is not listening. */
+export function dropped(): number | null {
+  const s = state;
+  if (!s) return null;
+  return droppedEvents(HELLO_TOPIC, s.hello) + droppedEvents(GOODBYE_TOPIC, s.goodbye);
+}
+
 export function currentNodeId(): string | undefined {
   return state?.nodeId;
 }

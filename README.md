@@ -132,6 +132,8 @@ The descriptions below are the full ones, always what a full-context client sees
 | `mesh_lobby_transcript` | Observing | Read what has been recorded, raw, instant, local, never blocks or makes a mesh round trip. Optional `topic` narrows to one room or central; omit for everything observed. `mesh_read_inbox` is the threaded view of the rooms you are in. |
 | `mesh_unobserve_lobby` | Observing | Stop `mesh_observe_lobby`. The recorded transcript is not cleared. |
 
+**Lost events are reported, not hidden.** Every tool that reads a subscription feed says how many events that feed lost: `mesh_watch` (`dropped`), `mesh_agents` (`presence_dropped`), `mesh_rooms` and `mesh_read_inbox` (`dropped` per room, `central_dropped`), `mesh_say` with a wait and `mesh_wait_room` (`dropped` for the topic), and `mesh_lobby_transcript` (`dropped`, or `dropped_by_topic`). The count is the events this server lost on that feed since it began listening: a subscription's inbox holds 256 events and drops the newest while its reader is behind. 0 means none were lost, and null means nothing is listening to that feed. Each reply carries `dropped_means` saying so, and the server warns on stderr the moment a feed's count grows.
+
 `mesh_call`/`mesh_watch`/`mesh_publish` take an optional `realm` (see
 [Realms](#realms) below). No tool takes a station: every one works on the
 shared pool, which links to every configured station (see

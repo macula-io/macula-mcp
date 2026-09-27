@@ -19,6 +19,7 @@
 
 import type { Event, Subscription } from "@macula-io/ts";
 import { primaryStation } from "./mesh_config.js";
+import { droppedEvents } from "./dropped_events.js";
 import { selfNodeId, subscribe } from "./macula_ts_client.js";
 import { recordFact } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "./envelope.js";
@@ -31,6 +32,8 @@ const DEFAULT_MAX_ROOMS = 20;
 interface RoomTap {
   joined: 0 | 1;
   subscribed: Promise<Subscription | undefined>;
+  /** The subscription once it is in place. */
+  sub?: Subscription;
 }
 
 interface ObserverState {
@@ -134,11 +137,24 @@ export async function tapRoom(roomTopic: string, opts: { joined: 0 | 1 }): Promi
   const tap: RoomTap = { joined: opts.joined, subscribed: subscribing.catch(() => undefined) };
   s.roomTaps.set(roomTopic, tap);
   try {
-    await subscribing;
+    tap.sub = await subscribing;
   } catch (e) {
     if (s.roomTaps.get(roomTopic) === tap) s.roomTaps.delete(roomTopic);
     throw e;
   }
+}
+
+/**
+ * Events the observer's feed of `topic` (central, or a tapped room) lost
+ * since it began listening (DROPPED_MEANS), or null when nothing listens to
+ * it: the observer is not active, or the room is not tapped (yet).
+ */
+export function dropped(topic: string): number | null {
+  const s = state;
+  if (!s) return null;
+  if (topic === LOBBY_TOPIC) return droppedEvents(topic, s.central);
+  const sub = s.roomTaps.get(topic)?.sub;
+  return sub ? droppedEvents(topic, sub) : null;
 }
 
 /** Stops watching `roomTopic`. No-op if it wasn't tapped. isTapped() reflects it at once; the subscription ends as soon as it exists. */

@@ -74,7 +74,7 @@ describe("agent tools ask for tagged bytes", () => {
   });
 
   it("mesh_watch asks for tagged bytes in event payloads", async () => {
-    mocks.watch.mockResolvedValue([]);
+    mocks.watch.mockResolvedValue({ events: [], dropped: 0 });
     const { handlers } = register(registerMeshWatch);
 
     const res = await handlers.get("mesh_watch")!({ topic: "some.topic", duration_seconds: 1 });

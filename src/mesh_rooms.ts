@@ -14,6 +14,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { selfNodeId } from "./macula_ts_client.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
@@ -180,11 +181,13 @@ const LEAVE_ROOM_DESCRIPTION_TERSE =
 const ROOMS_DESCRIPTION_FULL =
   "Rooms this agent is in (opened or joined this session, still being watched), with the participants " +
   "seen so far and how many facts arrived, plus public rooms announced on central that you have not " +
-  "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks.";
+  "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks. " +
+  "Each room carries `dropped`, and `central_dropped` is central's. " +
+  DROPPED_DESCRIPTION;
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
 const ROOMS_DESCRIPTION_TERSE =
   "Rooms this agent is in, public rooms seen on central you haven't joined, and outgoing rings still " +
-  "awaiting the callee's model. Instant local read, never blocks.";
+  "awaiting the callee's model. Instant local read, never blocks. " + DROPPED_DESCRIPTION_TERSE;
 
 const SAY_DESCRIPTION_FULL =
   "Say something in a room, or broadcast on central: publishes one conversation envelope " +
@@ -204,14 +207,16 @@ const SAY_DESCRIPTION_FULL =
   "Pass wait_reply_seconds to also wait, in this same call, for the first envelope from another sender " +
   "on that topic: the background watch on the room was already running before your message went out, so " +
   "unlike a publish-then-watch pair there is no gap for a fast reply to fall into. Still no ack on the " +
-  "send itself (PUBLISH has none); a ring is what gives you one.";
+  "send itself (PUBLISH has none); a ring is what gives you one. With a wait the reply carries `dropped` " +
+  "for that topic, so a timeout after a loss is not read as silence. " +
+  DROPPED_DESCRIPTION;
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the reply-kind pairing rules (which replies MUST carry in_reply_to) and the no-ack-on-publish fact -- both change how a caller must use this correctly. */
 const SAY_DESCRIPTION_TERSE =
   "Say something in a room, or broadcast on central. kind defaults to remark_made; question_asked wants " +
   "an answer_given, task_handed_over wants a result_reported, lane_claimed wants a lane_released when " +
   "done -- each of those replies MUST carry in_reply_to (lane_claimed itself doesn't need one). Joins " +
   "the room first if you're not in it. wait_reply_seconds waits, in this call, for the next reply -- no " +
-  "gap to miss a fast one. No ack on the send itself; a ring is what gives you one.";
+  "gap to miss a fast one. No ack on the send itself; a ring is what gives you one. With a wait, " + DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshRooms(server: McpServer): void {
   server.tool(
@@ -302,7 +307,7 @@ export function registerMeshRooms(server: McpServer): void {
               rang_at: r.recorded_at,
             }))
           : [];
-        const { joined, seen_on_central } = rooms.listRooms();
+        const { joined, seen_on_central, central_dropped } = rooms.listRooms();
         return jsonContent({
           joined: joined.map((r) => ({
             ...r,
@@ -315,6 +320,8 @@ export function registerMeshRooms(server: McpServer): void {
             ...(r.participants !== undefined ? { participants_petnames: r.participants.map(petname) } : {}),
           })),
           rings_awaiting_answer: awaiting,
+          central_dropped,
+          dropped_means: DROPPED_MEANS,
         });
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));
@@ -350,7 +357,7 @@ export function registerMeshRooms(server: McpServer): void {
         // unscanned path on an otherwise-wired tool.
         assertNoLikelySecret({ text, refs }, "text/refs");
         const res = await rooms.say({ room_topic, kind, text, in_reply_to, refs, waitReplySeconds: wait_reply_seconds });
-        return jsonContent(res);
+        return jsonContent(res.dropped === undefined ? res : { ...res, dropped_means: DROPPED_MEANS });
       } catch (e) {
         return failed("mesh_say failed", e);
       }

@@ -43,6 +43,7 @@ interface FakeSub {
   topic: string;
   onEvent: (e: Event) => void;
   stop: ReturnType<typeof vi.fn>;
+  lost: number;
 }
 let subs: FakeSub[];
 
@@ -64,8 +65,9 @@ beforeEach(() => {
   vi.mocked(publish).mockResolvedValue({ topic: "x", duration_ms: 1 });
   vi.mocked(subscribe).mockImplementation(async (args) => {
     const stop = vi.fn().mockResolvedValue(undefined);
-    subs.push({ topic: args.topic, onEvent: args.onEvent, stop });
-    return { stop, closed: new Promise(() => {}) } as never;
+    const sub = { topic: args.topic, onEvent: args.onEvent, stop, lost: 0 };
+    subs.push(sub);
+    return { stop, closed: new Promise(() => {}), dropped: () => sub.lost } as never;
   });
 });
 
@@ -175,6 +177,19 @@ describe("heartbeat", () => {
     expect(publish).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(publish).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("dropped()", () => {
+  it("is null while presence is not listening, and otherwise what hello and goodbye lost together", async () => {
+    expect(presence.dropped()).toBeNull();
+    await presence.start({});
+    expect(presence.dropped()).toBe(0);
+    subs.find((s) => s.topic === presence.HELLO_TOPIC)!.lost = 2;
+    subs.find((s) => s.topic === presence.GOODBYE_TOPIC)!.lost = 3;
+    expect(presence.dropped()).toBe(5);
+    await presence.stop();
+    expect(presence.dropped()).toBeNull();
   });
 });
 

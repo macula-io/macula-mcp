@@ -14,9 +14,10 @@ const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   pruneStale: vi.fn(),
   currentNodeId: vi.fn(),
+  dropped: vi.fn(),
 }));
 vi.mock("./roster.js", () => ({ listAgents: mocks.listAgents, pruneStale: mocks.pruneStale }));
-vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, DEFAULT_INTERVAL_SECONDS: 60 }));
+vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, dropped: mocks.dropped, DEFAULT_INTERVAL_SECONDS: 60 }));
 
 type Handler = (args: Record<string, unknown>) => Promise<{ content: { text: string }[]; isError?: boolean }>;
 
@@ -63,6 +64,20 @@ async function callMeshAgents(): Promise<Record<string, unknown>> {
   const res = await handlers.get("mesh_agents")!({ page: 1, page_size: 20 });
   return JSON.parse(res.content[0]!.text);
 }
+
+describe("mesh_agents: presence_dropped", () => {
+  it("is what presence's feed lost, said what it counts, and null while presence is not listening", async () => {
+    mocks.listAgents.mockReturnValue({ total: 0, agents: [] });
+    mocks.dropped.mockReturnValue(0);
+    const res = await callMeshAgents();
+    expect(res.presence_dropped).toBe(0);
+    expect(res.dropped_means).toMatch(/0 means none were lost/);
+    mocks.dropped.mockReturnValue(4);
+    expect((await callMeshAgents()).presence_dropped).toBe(4);
+    mocks.dropped.mockReturnValue(null);
+    expect((await callMeshAgents()).presence_dropped).toBeNull();
+  });
+});
 
 // macula-io/macula-mcp#3: below the 15-minute hard prune, every entry used
 // to look identical regardless of how long it had actually been silent.

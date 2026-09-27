@@ -36,6 +36,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as lobbyObserver from "./lobby_observer.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";
@@ -66,12 +67,14 @@ const TRANSCRIPT_DESCRIPTION_FULL =
   "chat, interleaved by arrival time) plus the list of distinct topics seen, so you can narrow into " +
   "one. Pass topic (agents.lobby, or a room_topic) to read just that conversation, raw; mesh_read_inbox " +
   "is the threaded view of the rooms you are actually in. Never retroactive: only contains what arrived after the watch started, " +
-  "even if it's since been stopped -- the transcript persists like mesh_agents' roster does.";
+  "even if it's since been stopped -- the transcript persists like mesh_agents' roster does. With a topic " +
+  "the reply carries `dropped` for it, without one `dropped_by_topic` for every topic observed. " +
+  DROPPED_DESCRIPTION;
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
 const TRANSCRIPT_DESCRIPTION_TERSE =
   "Read what mesh_observe_lobby recorded -- instant local read, never blocks. Omit topic for " +
   "everything observed + the list of topics seen; pass one to read just it, raw. Never retroactive; " +
-  "persists even after the watch is stopped.";
+  "persists even after the watch is stopped. " + DROPPED_DESCRIPTION_TERSE;
 
 const UNOBSERVE_DESCRIPTION_FULL =
   "Stop mesh_observe_lobby: kills the central watch and every room tap, including rooms you are in " +
@@ -123,11 +126,16 @@ export function registerMeshLobbyObserver(server: McpServer): void {
     async ({ topic, limit }) => {
       try {
         const { total, facts } = recentFacts({ topic, limit });
+        const observed = topic ? undefined : distinctTopics();
         return jsonContent({
           topic: topic ?? null,
           total_in_topic: total,
           returned: facts.length,
-          topics_observed: topic ? undefined : distinctTopics(),
+          topics_observed: observed,
+          ...(topic
+            ? { dropped: lobbyObserver.dropped(topic) }
+            : { dropped_by_topic: Object.fromEntries(observed!.map((t) => [t, lobbyObserver.dropped(t)])) }),
+          dropped_means: DROPPED_MEANS,
           facts: facts.map((f) => ({
             topic: f.topic,
             sender: f.sender ?? undefined,

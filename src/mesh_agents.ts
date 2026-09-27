@@ -8,6 +8,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { DROPPED_MEANS } from "./dropped_events.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import { listAgents, pruneStale } from "./roster.js";
@@ -36,13 +37,15 @@ const DESCRIPTION_FULL =
   "process, but only reflects agents this identity has ever heard a hello from (entries unseen for " +
   "15 minutes are pruned). Sorted most-recently-seen first. `stale: true` flags an entry that has " +
   `missed roughly ${STALE_AFTER_MISSED_BEATS}+ of its own reported heartbeats -- probably gone, ` +
-  "well before the 15-minute hard prune.";
+  "well before the 15-minute hard prune. `presence_dropped`: heartbeats this server's presence " +
+  "feed lost since presence started (0 means none were lost, null means presence is not listening), " +
+  "so an agent missing from the roster may be one whose hello was lost.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the local-cache-not-live-query caveat and the stale field's meaning. */
 const DESCRIPTION_TERSE =
   "List agents seen via agent.hello heartbeats. A local cache, not a live mesh query -- only reflects " +
   `who this identity has heard from. \`stale: true\` means ${STALE_AFTER_MISSED_BEATS}+ missed ` +
-  "heartbeats, probably gone (well before the 15-min hard prune).";
+  "heartbeats, probably gone (well before the 15-min hard prune). presence_dropped: heartbeats lost (0 = none, null = not listening).";
 
 export function registerMeshAgents(server: McpServer): void {
   server.tool(
@@ -72,6 +75,8 @@ export function registerMeshAgents(server: McpServer): void {
           total,
           page,
           page_size,
+          presence_dropped: presence.dropped(),
+          dropped_means: DROPPED_MEANS,
           agents: agents.map((a) => {
             const secondsSinceSeen = Math.round((Date.now() - Date.parse(a.last_seen_at)) / 1000);
             // null/unparseable interval_seconds means either a pre-#3 peer

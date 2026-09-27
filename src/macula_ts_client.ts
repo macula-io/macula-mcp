@@ -33,6 +33,7 @@ import {
   type Served,
   type Subscription,
 } from "@macula-io/ts";
+import { droppedEvents } from "./dropped_events.js";
 import { IO_MACULA_REALM_ID, MeshError, nodeKeyPath, realmTrust, seeds } from "./mesh_config.js";
 
 /** The fleet's crypto profile, which macula-realm verifies key-possession proofs under too. */
@@ -172,7 +173,12 @@ export async function publish(args: { topic: string; fact: Record<string, unknow
   return { topic: args.topic, duration_ms: Date.now() - start };
 }
 
-/** Subscribes to `topic` in `realm` (io.macula by default) until the returned subscription is stopped or the pool closes. */
+/**
+ * Subscribes to `topic` in `realm` (io.macula by default) until the returned
+ * subscription is stopped or the pool closes. Each delivery looks at the
+ * drop count, so a loss is warned about on stderr as soon as the next event
+ * arrives, whether or not a tool reads the feed.
+ */
 export async function subscribe(args: {
   topic: string;
   realm?: string;
@@ -180,11 +186,17 @@ export async function subscribe(args: {
   bytes?: BytesOutput;
 }): Promise<Subscription> {
   const pool = await sharedPool();
+  let sub: Subscription | undefined;
+  const onEvent = (event: Event): void => {
+    args.onEvent(event);
+    if (sub) droppedEvents(args.topic, sub);
+  };
   try {
-    return await pool.subscribe(realmOf(args.realm), args.topic, args.onEvent, { bytes: args.bytes });
+    sub = await pool.subscribe(realmOf(args.realm), args.topic, onEvent, { bytes: args.bytes });
   } catch (e) {
     throw toMeshError(e);
   }
+  return sub;
 }
 
 export interface WatchedEvent {
@@ -194,14 +206,14 @@ export interface WatchedEvent {
   payload: JsonValue;
 }
 
-/** Hears `topic` for `durationSeconds`, or until `count` events arrived, and returns them. */
+/** Hears `topic` for `durationSeconds`, or until `count` events arrived, and returns them with how many its subscription dropped (DROPPED_MEANS). */
 export async function watch(args: {
   topic: string;
   durationSeconds: number;
   count?: number;
   realm?: string;
   bytes?: BytesOutput;
-}): Promise<WatchedEvent[]> {
+}): Promise<{ events: WatchedEvent[]; dropped: number }> {
   const events: WatchedEvent[] = [];
   let done: () => void = () => {};
   const finished = new Promise<void>((resolve) => (done = resolve));
@@ -216,13 +228,15 @@ export async function watch(args: {
     },
   });
   const timer = setTimeout(done, Math.max(1, Math.round(args.durationSeconds * 1000)));
+  let dropped = 0;
   try {
     await Promise.race([finished, sub.closed.then(() => undefined)]);
+    dropped = droppedEvents(args.topic, sub);
   } finally {
     clearTimeout(timer);
     await sub.stop().catch(() => {});
   }
-  return events;
+  return { events, dropped };
 }
 
 // ---- serving ---------------------------------------------------------------

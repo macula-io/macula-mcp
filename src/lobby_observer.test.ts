@@ -20,6 +20,7 @@ interface FakeSub {
   topic: string;
   onEvent: (e: Event) => void;
   stop: ReturnType<typeof vi.fn>;
+  lost: number;
 }
 let subs: FakeSub[];
 
@@ -39,8 +40,9 @@ beforeEach(() => {
   vi.mocked(selfNodeId).mockResolvedValue(NODE_ID);
   vi.mocked(subscribe).mockImplementation(async (args) => {
     const stop = vi.fn().mockResolvedValue(undefined);
-    subs.push({ topic: args.topic, onEvent: args.onEvent, stop });
-    return { stop, closed: new Promise(() => {}) } as never;
+    const sub: FakeSub = { topic: args.topic, onEvent: args.onEvent, stop, lost: 0 };
+    subs.push(sub);
+    return { stop, closed: new Promise(() => {}), dropped: () => sub.lost } as never;
   });
 });
 
@@ -49,6 +51,26 @@ afterEach(async () => {
   vi.resetAllMocks();
   closeTranscript();
   delete process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB;
+});
+
+describe("dropped()", () => {
+  it("is what central or a tapped room lost, and null for a feed nobody is listening to", async () => {
+    const room = newRoomTopic();
+    expect(lobbyObserver.dropped("agents.lobby")).toBeNull();
+    await lobbyObserver.start({});
+    expect(lobbyObserver.dropped("agents.lobby")).toBe(0);
+    expect(lobbyObserver.dropped(room)).toBeNull();
+    await lobbyObserver.tapRoom(room, { joined: 1 });
+    expect(lobbyObserver.dropped(room)).toBe(0);
+    subscribedTo(room).lost = 6;
+    subscribedTo("agents.lobby").lost = 2;
+    expect(lobbyObserver.dropped(room)).toBe(6);
+    expect(lobbyObserver.dropped("agents.lobby")).toBe(2);
+    lobbyObserver.untapRoom(room);
+    expect(lobbyObserver.dropped(room)).toBeNull();
+    await lobbyObserver.stop();
+    expect(lobbyObserver.dropped("agents.lobby")).toBeNull();
+  });
 });
 
 describe("start()", () => {

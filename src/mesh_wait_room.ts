@@ -20,6 +20,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { DROPPED_DESCRIPTION, DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as rooms from "./rooms.js";
@@ -40,14 +41,17 @@ const DESCRIPTION_FULL =
   "its own; if you would rather free this turn entirely and check back later, use your own harness's " +
   "scheduler (see mesh://etiquette) instead of a manual sleep and re-calling this or mesh_read_inbox. " +
   "Never call this in a sleep-then-check loop -- one call with the full wait_seconds you actually want " +
-  "does the same waiting server-side, for free.";
+  "does the same waiting server-side, for free. The reply carries `dropped` for that topic, so a timeout " +
+  "after a loss is not read as silence. " +
+  DROPPED_DESCRIPTION;
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "still occupies your turn, no server push" honesty and the never-sleep-and-poll rule -- both change how a caller should actually use this. */
 const DESCRIPTION_TERSE =
   "Block up to wait_seconds (max 3600) for the next envelope from someone else in a room (or central), " +
   "saying nothing yourself. Reads the room's existing background tap -- nothing new to watch. Still " +
   "occupies your own turn for the wait (MCP has no server-push); use your harness's scheduler instead " +
-  "if you'd rather free the turn. Never sleep-then-poll -- one call does the same wait server-side.";
+  "if you'd rather free the turn. Never sleep-then-poll -- one call does the same wait server-side. " +
+  DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshWaitRoom(server: McpServer): void {
   server.tool(
@@ -61,7 +65,7 @@ export function registerMeshWaitRoom(server: McpServer): void {
       ensurePresence(server);
       try {
         const res = await rooms.waitRoom({ room_topic, waitSeconds: wait_seconds });
-        return jsonContent(res);
+        return jsonContent({ ...res, dropped_means: DROPPED_MEANS });
       } catch (e) {
         if (e instanceof rooms.RoomError) return errorContent(`mesh_wait_room failed: ${e.message}`);
         return errorContent(describeMeshError("mesh_wait_room failed", e));

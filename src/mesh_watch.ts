@@ -11,6 +11,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { DROPPED_MEANS } from "./dropped_events.js";
 import { watch } from "./macula_ts_client.js";
 import { HELLO_TOPIC, GOODBYE_TOPIC, ensurePresence } from "./presence.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
@@ -24,12 +25,13 @@ const DESCRIPTION_FULL =
   "events arrive, whichever is first) -- there is no standing subscription to poll later; " +
   `call this again to keep watching. Realm defaults to io.macula. Presence heartbeats are ordinary facts on ` +
   `"${HELLO_TOPIC}"/"${GOODBYE_TOPIC}" -- watch those directly to react to an arrival/departure yourself ` +
-  "instead of polling mesh_agents. Bytes in event payloads appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form.";
+  "instead of polling mesh_agents. Bytes in event payloads appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form. " +
+  "dropped: events the watch lost because it fell behind (0 means none were lost).";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "blocks, no standing subscription" -- easy to assume otherwise. */
 const DESCRIPTION_TERSE =
   `Watch a mesh topic for up to duration_seconds, return what arrived. BLOCKS for the duration ` +
   `(or until count events) -- no standing subscription, call again to keep watching. Realm defaults to io.macula. ` +
-  `Bytes appear as {"$bytes": "<base64>"}; pass them back in the same form.`;
+  `Bytes appear as {"$bytes": "<base64>"}; pass them back in the same form. dropped: events lost (0 = none).`;
 
 export function registerMeshWatch(server: McpServer): void {
   server.tool(
@@ -54,8 +56,8 @@ export function registerMeshWatch(server: McpServer): void {
     async ({ topic, duration_seconds, count, realm }) => {
       ensurePresence(server);
       try {
-        const events = await watch({ topic, durationSeconds: duration_seconds, count, realm, bytes: "tagged" });
-        return jsonContent({ topic, event_count: events.length, events });
+        const { events, dropped } = await watch({ topic, durationSeconds: duration_seconds, count, realm, bytes: "tagged" });
+        return jsonContent({ topic, event_count: events.length, events, dropped, dropped_means: DROPPED_MEANS });
       } catch (e) {
         return errorContent(describeMeshError("mesh_watch failed", e));
       }
