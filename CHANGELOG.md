@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-09-27
+
 ### Added
 
 - `mesh_ring` reports `dropped` after its join wait: what the room's feed
