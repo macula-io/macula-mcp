@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-09-27
+
 ### Added
 
 - Lost events are reported. Since @macula-io/ts 0.22 a subscription's inbox
