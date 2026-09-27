@@ -89,7 +89,7 @@ jobs:
                 query,
                 variables: { login: process.env.SPONSORABLE_LOGIN, cursor },
               });
-              const conn = res.data.data.user.sponsorshipsAsMaintainer;
+              const conn = res.data.data.organization.sponsorshipsAsMaintainer;
               for (const n of conn.nodes) {
                 if (n.sponsorEntity) sponsors.push(n.sponsorEntity.login);
               }
