@@ -44,9 +44,9 @@ jobs:
           MODE: ${{ inputs.mode || 'close' }}
         with:
           script: |
-            const issue = github.context.payload.issue ?? null;
-            const pr = github.context.payload.pull_request ?? null;
-            const manual = github.context.payload.inputs ?? null;
+            const issue = context.payload.issue ?? null;
+            const pr = context.payload.pull_request ?? null;
+            const manual = context.payload.inputs ?? null;
 
             let author;
             let assoc;
@@ -111,8 +111,8 @@ jobs:
             }
 
             const params = {
-              owner: github.context.repo.owner,
-              repo: github.context.repo.repo,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
               issue_number: pr ? pr.number : issue.number,
             };
             await github.rest.issues.createComment({ ...params, body });
