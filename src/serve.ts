@@ -160,7 +160,8 @@ export async function serve(args: ServeArgs): Promise<ServeResult> {
   if (existing) {
     if ((existing.confidential ?? "preferred") !== (args.confidential ?? "preferred")) {
       throw new Error(`${args.name} is served confidential ${existing.confidential ?? "preferred"}; ` +
-        `mesh_unserve it first to serve it ${args.confidential ?? "preferred"}`);
+        `mesh_unserve it first to serve it ${args.confidential ?? "preferred"}, or pass confidential ` +
+        `${existing.confidential ?? "preferred"} to change only its command`);
     }
     existing.exec = args.exec;
     existing.execTimeoutMs = execTimeoutMs;
