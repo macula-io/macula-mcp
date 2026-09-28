@@ -8,14 +8,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 // pin what the tools ask for and what they tell agents. The encoding itself
 // is @macula-io/ts's, covered by its own Go and live tests.
 const mocks = vi.hoisted(() => ({
-  call: vi.fn(),
+  callWithReport: vi.fn(),
   watch: vi.fn(),
   publish: vi.fn(),
   serve: vi.fn(),
 }));
 vi.mock("./macula_ts_client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./macula_ts_client.js")>()),
-  call: mocks.call,
+  callWithReport: mocks.callWithReport,
   watch: mocks.watch,
   publish: mocks.publish,
 }));
@@ -63,13 +63,14 @@ beforeEach(() => {
 
 describe("agent tools ask for tagged bytes", () => {
   it("mesh_call passes $bytes args through and asks for tagged bytes in the result", async () => {
-    mocks.call.mockResolvedValue({ procedure: "tube.lookup_channel", payload: { channel_id: { $bytes: "AQID" } }, duration_ms: 1 });
+    mocks.callWithReport.mockResolvedValue({ procedure: "tube.lookup_channel", payload: { channel_id: { $bytes: "AQID" } }, duration_ms: 1,
+      seal: { sealed: 0, provider: "cd".repeat(32) } });
     const { handlers } = register(registerMeshCall);
 
     const res = await handlers.get("mesh_call")!({ procedure: "tube.lookup_channel", args: { channel_id: CHANNEL_ID } });
 
     expect(res.isError).toBeFalsy();
-    expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ callArgs: { channel_id: CHANNEL_ID }, bytes: "tagged" }));
+    expect(mocks.callWithReport).toHaveBeenCalledWith(expect.objectContaining({ callArgs: { channel_id: CHANNEL_ID }, bytes: "tagged" }));
     expect(res.content.map((c) => c.text).join("")).toMatch(/"\$bytes":\s*"AQID"/);
   });
 
