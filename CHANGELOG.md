@@ -7,6 +7,24 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- **`mesh_call` says whether the call went sealed.** Its result gains `seal`,
+  the caller's seal report through @macula-io/ts 0.25.0 (macula-go v0.19.0):
+  `sealed` 1 with `seal_key_id` when the exchange behind the result was
+  sealed to the provider's advertised key and its answer opened under that
+  key, 0 when it went in the clear; `provider`, the node the call was
+  addressed to; and `means`, which says it in words, so `sealed: 0` never
+  reads as a success signal. `result` and `duration_ms` are unchanged. The
+  report states that sealing ran on that exchange, nothing more. An error
+  carries no report.
+
+### Changed
+
+- `prove_ownership`'s description no longer says the transport may retry a
+  call with the same proof: since @macula-io/ts 0.24.1 a call reaches a
+  provider at most once (macula-go#8).
+
 ## [0.36.0] - 2026-09-28
 
 ### Added

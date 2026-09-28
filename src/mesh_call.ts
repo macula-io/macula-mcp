@@ -13,7 +13,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MeshError, splitRealmPrefix } from "./mesh_config.js";
-import { call } from "./macula_ts_client.js";
+import { callWithReport, type Seal } from "./macula_ts_client.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
@@ -23,7 +23,9 @@ const DESCRIPTION_FULL =
   "Invoke a procedure advertised on the mesh (build, test, search, deploy on commons hardware). " +
   "The call reaches a provider directly: its signed advertisement is found in the DHT and trusted " +
   "only when the realm's key authorizes it. The provider sees this agent's identity as the caller. " +
-  "Returns the provider's result plus duration_ms. Defaults to the io.macula realm. " +
+  "Returns the provider's result plus duration_ms, and seal: whether this exchange went sealed " +
+  "(sealed 1: sealed to the provider's advertised key, seal_key_id names it; sealed 0: in the clear), " +
+  "the provider it was addressed to, and in means what that says. Defaults to the io.macula realm. " +
   "Bytes: send a byte string in args as {\"$bytes\": \"<standard base64>\"}, e.g. " +
   "{\"channel_id\": {\"$bytes\": \"AQID\"}}; a plain string is always text. Bytes in the result " +
   "appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form. " +
@@ -37,7 +39,7 @@ const DESCRIPTION_FULL =
   "means it could not open the sealed call even after one reseal to the key it named.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form. prove_ownership: 1 signs args with an ownership proof, for a provider that reads one. Sealed to a provider that names a KEM key; confidential "required" refuses one that names none.`;
+const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form. prove_ownership: 1 signs args with an ownership proof, for a provider that reads one. Sealed to a provider that names a KEM key; confidential "required" refuses one that names none. The result's seal says whether this call went sealed (1) or in the clear (0), and means spells it out.`;
 
 /**
  * A UCAN attaches to a call only once macula-go signs post-quantum UCANs
@@ -51,6 +53,20 @@ export function refuseUcan(): void {
         "macula-io/macula-go#2. Unset it to call ungated procedures.",
     );
   }
+}
+
+/** The seal report with what it says, in words an agent cannot mistake: sealed
+ * 0 is never a success signal. It states that sealing ran on this exchange,
+ * nothing more (macula's DESIGN_E2E_SEAL_REPORT). */
+export function withMeaning(seal: Seal): Seal & { means: string } {
+  return {
+    ...seal,
+    means: seal.sealed === 1
+      ? "This request was sealed to the provider's advertised key (seal_key_id) and its answer opened under " +
+        "that key. That is all it says: nothing about what the provider does with the payload."
+      : "This request was NOT sealed: it went in the clear, because the provider names no KEM key. Stations " +
+        "on the path could read it. Pass confidential \"required\" to refuse such a call instead.",
+  };
 }
 
 export function registerMeshCall(server: McpServer): void {
@@ -75,10 +91,9 @@ export function registerMeshCall(server: McpServer): void {
         .describe(
           "1 attaches an ownership proof v2 (mcl-om#7) to args, under asserted_by: this agent's key vouches " +
             "for every field, for this procedure in this realm, once, and the proof verifies for nothing else. " +
-            "What a provider does with a proof that does not verify is its own policy. The call may be retried " +
-            "at another station with the same proof, which the provider then answers replayed although the " +
-            "first delivery may have been handled (macula-io/macula-go#8). 0 or omitted: none. args must not " +
-            "carry \"caller\".",
+            "What a provider does with a proof that does not verify is its own policy. The call reaches a " +
+            "provider at most once, so the proof is never replayed by the transport. 0 or omitted: none. args " +
+            "must not carry \"caller\".",
         ),
       confidential: z
         .enum(["preferred", "required"])
@@ -108,9 +123,9 @@ export function registerMeshCall(server: McpServer): void {
         refuseUcan();
         assertNoLikelySecret(args, "args");
         const { procedure, realm } = splitRealmPrefix(rawProcedure, rawRealm);
-        const res = await call({ procedure, callArgs: args, timeoutMs: timeout_ms, realm, bytes: "tagged",
+        const res = await callWithReport({ procedure, callArgs: args, timeoutMs: timeout_ms, realm, bytes: "tagged",
           proveOwnership: prove_ownership === 1, confidential });
-        return jsonContent({ result: res.payload, duration_ms: res.duration_ms });
+        return jsonContent({ result: res.payload, duration_ms: res.duration_ms, seal: withMeaning(res.seal) });
       } catch (e) {
         return errorContent(describeMeshError("mesh_call failed", e));
       }

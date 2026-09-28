@@ -141,12 +141,13 @@ export interface CallResult {
  * proof v2 (mcl-om#7) this server's key made for that procedure in that realm,
  * signed right before the call. It verifies for exactly those fields, that
  * procedure and realm, once; what a provider does with one that does not is
- * its own policy. The transport may retry another station with the same
- * proof (macula-io/macula-go#8). The call is sealed to the provider's
+ * its own policy. The call reaches a provider at most once (@macula-io/ts
+ * 0.24.1, macula-go#8), so a proof is never replayed by the transport. The
+ * call is sealed to the provider's
  * advertised KEM key whenever its advertisement names one (`confidential`
  * "preferred", the default); "required" never calls one that names none.
  */
-export async function call(args: {
+export interface CallArgs {
   procedure: string;
   callArgs?: Record<string, unknown>;
   realm?: string;
@@ -155,16 +156,54 @@ export async function call(args: {
   bytes?: BytesOutput;
   proveOwnership?: boolean;
   confidential?: Confidential;
-}): Promise<CallResult> {
+}
+
+export async function call(args: CallArgs): Promise<CallResult> {
   const start = Date.now();
+  const { pool, realm, payload } = await prepared(args);
+  try {
+    const result = await pool.call(realm, args.procedure, payload,
+      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential });
+    return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
+  } catch (e) {
+    throw toMeshError(e);
+  }
+}
+
+/** The caller's seal report on the wire's shape: `sealed` 0 or 1, `provider`
+ * (the node the call was addressed to, hex), `seal_key_id` (hex) only when
+ * sealed. It states that sealing ran on that exchange, nothing more. */
+export interface Seal {
+  sealed: 0 | 1;
+  provider: string;
+  seal_key_id?: string;
+}
+
+/** call, with the seal report of the exchange behind the result
+ * (@macula-io/ts callReport). An error is a MeshError as call's, with no report. */
+export async function callWithReport(args: CallArgs): Promise<CallResult & { seal: Seal }> {
+  const start = Date.now();
+  const { pool, realm, payload } = await prepared(args);
+  try {
+    const { result, report } = await pool.callReport(realm, args.procedure, payload,
+      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential });
+    const seal: Seal = report.sealKeyId === undefined ? { sealed: report.sealed, provider: report.provider }
+      : { sealed: report.sealed, provider: report.provider, seal_key_id: report.sealKeyId };
+    return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start, seal };
+  } catch (e) {
+    throw toMeshError(e);
+  }
+}
+
+/** The pool, the realm and the payload a call sends: the args as the wire's
+ * values, with an ownership proof when asked. */
+async function prepared(args: CallArgs): Promise<{ pool: Pool; realm: string; payload: JsonValue }> {
   const realm = realmOf(args.realm);
   const fields = toJsonValue(args.callArgs ?? {}) as { [field: string]: JsonValue };
   const pool = await sharedPool();
   try {
     const payload = args.proveOwnership ? await (await nodeKey()).ownershipProof(realm, args.procedure, fields) : fields;
-    const result = await pool.call(realm, args.procedure, payload,
-      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential });
-    return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
+    return { pool, realm, payload };
   } catch (e) {
     throw toMeshError(e);
   }
