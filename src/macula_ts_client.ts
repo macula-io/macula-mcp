@@ -135,18 +135,7 @@ export interface CallResult {
   duration_ms: number;
 }
 
-/**
- * Calls `procedure` in `realm` (io.macula by default) at any trusted provider,
- * by direct dial. With `proveOwnership`, the payload carries an ownership
- * proof v2 (mcl-om#7) this server's key made for that procedure in that realm,
- * signed right before the call. It verifies for exactly those fields, that
- * procedure and realm, once; what a provider does with one that does not is
- * its own policy. The call reaches a provider at most once (@macula-io/ts
- * 0.24.1, macula-go#8), so a proof is never replayed by the transport. The
- * call is sealed to the provider's
- * advertised KEM key whenever its advertisement names one (`confidential`
- * "preferred", the default); "required" never calls one that names none.
- */
+/** What a call takes: see call. */
 export interface CallArgs {
   procedure: string;
   callArgs?: Record<string, unknown>;
@@ -158,6 +147,18 @@ export interface CallArgs {
   confidential?: Confidential;
 }
 
+/**
+ * Calls `procedure` in `realm` (io.macula by default) at any trusted provider,
+ * by direct dial. With `proveOwnership`, the payload carries an ownership
+ * proof v2 (mcl-om#7) this server's key made for that procedure in that realm,
+ * signed right before the call. It verifies for exactly those fields, that
+ * procedure and realm, once; what a provider does with one that does not is
+ * its own policy. A provider's handler runs at most once per call
+ * (@macula-io/ts 0.24.1, macula-go#8), so a proof is never replayed by the
+ * transport. The call is sealed to the provider's advertised KEM key whenever
+ * its advertisement names one (`confidential` "preferred", the default);
+ * "required" never calls one that names none.
+ */
 export async function call(args: CallArgs): Promise<CallResult> {
   const start = Date.now();
   const { pool, realm, payload } = await prepared(args);
@@ -187,8 +188,10 @@ export async function callWithReport(args: CallArgs): Promise<CallResult & { sea
   try {
     const { result, report } = await pool.callReport(realm, args.procedure, payload,
       { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential });
-    const seal: Seal = report.sealKeyId === undefined ? { sealed: report.sealed, provider: report.provider }
-      : { sealed: report.sealed, provider: report.provider, seal_key_id: report.sealKeyId };
+    // A key id only on a sealed report, held here rather than trusted from below.
+    const seal: Seal = report.sealed === 1 && report.sealKeyId !== undefined
+      ? { sealed: 1, provider: report.provider, seal_key_id: report.sealKeyId }
+      : { sealed: report.sealed, provider: report.provider };
     return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start, seal };
   } catch (e) {
     throw toMeshError(e);

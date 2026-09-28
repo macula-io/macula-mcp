@@ -25,7 +25,7 @@ const DESCRIPTION_FULL =
   "only when the realm's key authorizes it. The provider sees this agent's identity as the caller. " +
   "Returns the provider's result plus duration_ms, and seal: whether this exchange went sealed " +
   "(sealed 1: sealed to the provider's advertised key, seal_key_id names it; sealed 0: in the clear), " +
-  "the provider it was addressed to, and in means what that says. Defaults to the io.macula realm. " +
+  "the provider it was addressed to, and means, which says it in words. Defaults to the io.macula realm. " +
   "Bytes: send a byte string in args as {\"$bytes\": \"<standard base64>\"}, e.g. " +
   "{\"channel_id\": {\"$bytes\": \"AQID\"}}; a plain string is always text. Bytes in the result " +
   "appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form. " +
@@ -64,8 +64,8 @@ export function withMeaning(seal: Seal): Seal & { means: string } {
     means: seal.sealed === 1
       ? "This request was sealed to the provider's advertised key (seal_key_id) and its answer opened under " +
         "that key. That is all it says: nothing about what the provider does with the payload."
-      : "This request was NOT sealed: it went in the clear, because the provider names no KEM key. Stations " +
-        "on the path could read it. Pass confidential \"required\" to refuse such a call instead.",
+      : "This request was NOT sealed: it and its answer went in the clear, because the provider names no KEM " +
+        "key. Stations on the path could read them. Pass confidential \"required\" to refuse such a call instead.",
   };
 }
 
@@ -91,9 +91,9 @@ export function registerMeshCall(server: McpServer): void {
         .describe(
           "1 attaches an ownership proof v2 (mcl-om#7) to args, under asserted_by: this agent's key vouches " +
             "for every field, for this procedure in this realm, once, and the proof verifies for nothing else. " +
-            "What a provider does with a proof that does not verify is its own policy. The call reaches a " +
-            "provider at most once, so the proof is never replayed by the transport. 0 or omitted: none. args " +
-            "must not carry \"caller\".",
+            "What a provider does with a proof that does not verify is its own policy. A provider's handler " +
+            "runs at most once per call, so the proof is never replayed by the transport. 0 or omitted: none. " +
+            "args must not carry \"caller\".",
         ),
       confidential: z
         .enum(["preferred", "required"])
@@ -102,7 +102,8 @@ export function registerMeshCall(server: McpServer): void {
           "\"preferred\" (default): sealed to the provider's advertised KEM key when its advertisement names one, " +
             "in the clear when it names none. \"required\": never called in the clear; a provider that names no key " +
             "fails with code=confidentiality (reason=no_kem_key). A sealed call never falls back to the clear. " +
-            "Success of \"required\" is how you know the call went sealed.",
+            "The result's seal reports whether it went sealed either way; \"required\" is how you refuse a clear " +
+            "call before it is sent.",
         ),
       timeout_ms: z.number().int().positive().optional().describe("How long to wait for the result, in milliseconds (5000 by default)."),
       realm: z

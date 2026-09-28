@@ -143,6 +143,8 @@ describe("call", () => {
     expect(pool.callReport).toHaveBeenLastCalledWith(IO_MACULA_REALM_ID, "x/y", { a: 1 }, expect.objectContaining({ confidential: "required" }));
     expect(res.payload).toEqual({ ok: 1 });
     expect(res.seal).toStrictEqual({ sealed: 1, provider: "cd".repeat(32), seal_key_id: "0123456789abcdef" });
+    await callWithReport({ procedure: "x/y", realm: "AB".repeat(32), timeoutMs: 900, bytes: "tagged" });
+    expect(pool.callReport).toHaveBeenLastCalledWith("ab".repeat(32), "x/y", {}, { timeoutMs: 900, bytes: "tagged" });
     pool.callReport.mockResolvedValueOnce({ result: 2, report: { sealed: 0, provider: "ef".repeat(32) } });
     expect((await callWithReport({ procedure: "x/y" })).seal).toStrictEqual({ sealed: 0, provider: "ef".repeat(32) });
     pool.callReport.mockRejectedValueOnce(new ProviderError("handler_error", "no"));

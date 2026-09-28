@@ -22,8 +22,11 @@ fires on a `v*` tag push, not on every commit to `main`).
 ### Changed
 
 - `prove_ownership`'s description no longer says the transport may retry a
-  call with the same proof: since @macula-io/ts 0.24.1 a call reaches a
-  provider at most once (macula-go#8).
+  call with the same proof: since @macula-io/ts 0.24.1 a provider's handler
+  runs at most once per call (macula-go#8).
+- `confidential`'s description no longer says a `"required"` success is how
+  you learn a call went sealed: `seal` reports it either way; `"required"` is
+  how you refuse a clear call before it is sent.
 
 ## [0.36.0] - 2026-09-28
 
