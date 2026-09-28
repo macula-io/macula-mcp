@@ -53,11 +53,23 @@ describe("serve", () => {
     expect(await served[0]!.handler(request("x", {}))).toBe("0");
   });
 
-  it("refuses to change a served name's confidential in place: its advertisement would not follow", async () => {
+  it("refuses to change a served name's confidential in place, and leaves its command as it was", async () => {
     const serve = await import("./serve.js");
-    await serve.serve({ name: "twice", exec: "true" });
-    await expect(serve.serve({ name: "twice", exec: "true", confidential: "required" })).rejects.toThrow(/mesh_unserve/);
-    await serve.serve({ name: "twice", exec: "cat", confidential: "preferred" });
+    await serve.serve({ name: "twice", exec: `echo '"first"'` });
+    await expect(serve.serve({ name: "twice", exec: `echo '"second"'`, confidential: "required" })).rejects.toThrow(/mesh_unserve/);
+    expect(served).toHaveLength(1);
+    expect(await served[0]!.handler(request("x", {}))).toBe("first");
+    await serve.serve({ name: "twice", exec: `echo '"third"'`, confidential: "preferred" });
+    expect(await served[0]!.handler(request("x", {}))).toBe("third");
+  });
+
+  it("leaves a name whose serve was refused unregistered, so it can be served again", async () => {
+    const serve = await import("./serve.js");
+    mocks.serve.mockRejectedValueOnce(new Error("kem_advertise_disabled"));
+    await expect(serve.serve({ name: "strict", exec: "true", confidential: "required" })).rejects.toThrow(/kem_advertise_disabled/);
+    await serve.serve({ name: "strict", exec: "true", confidential: "off" });
+    expect(served).toHaveLength(1);
+    expect(served[0]).toMatchObject({ confidential: "off" });
   });
 
   it("answers null for empty stdout, and refuses a failing command, a timeout, bad JSON and a likely secret", async () => {

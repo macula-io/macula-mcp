@@ -115,13 +115,14 @@ export function realmTrust(): RealmTrust[] {
  * serves, so callers seal to it: MACULA_MCP_KEM_ADVERTISE=1. Off (0) by
  * default: turning it on is this provider's decision, once every station it
  * serves through runs macula 12.11 or later and its callers run macula 13,
- * macula-go 0.18 or @macula-io/ts 0.24. Any other value is refused by name.
+ * macula-go 0.18 or @macula-io/ts 0.24. Unset or empty is 0; any other
+ * value is refused by name.
  */
 export function kemAdvertise(): 0 | 1 {
   const value = process.env.MACULA_MCP_KEM_ADVERTISE;
   if (value === undefined || value === "" || value === "0") return 0;
   if (value === "1") return 1;
-  throw new MeshError(`MACULA_MCP_KEM_ADVERTISE is "${value}": it is 0 or 1`);
+  throw new MeshError(`MACULA_MCP_KEM_ADVERTISE is "${value}": set it to 0 or 1`);
 }
 
 /**

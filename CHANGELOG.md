@@ -15,12 +15,15 @@ fires on a `v*` tag push, not on every commit to `main`).
     provider's advertisement names a KEM key; `"required"` never calls one
     that names none. A failure comes back with `code=confidentiality` and its
     `reason` (and `named`/`found` key ids when there are any).
-  - `mesh_serve` `confidential`: `"preferred"` (the default), `"required"` or
-    `"off"`. The command sees `MACULA_MCP_SEALED=1|0`. Changing a served
+  - `mesh_serve` `confidential`: `"preferred"` (the default: with
+    `MACULA_MCP_KEM_ADVERTISE=1` a clear call is taken only while the last
+    keyless advertisement could still be served, then refused
+    `sealed_required`), `"required"` or `"off"`. The command sees `MACULA_MCP_SEALED=1|0`. Changing a served
     name's `confidential` in place is refused: `mesh_unserve` it first, since
     its advertisement would not follow.
-  - `MACULA_MCP_KEM_ADVERTISE=1` names this server's KEM key in what it
-    serves. **Off by default**: turning it on is each operator's decision,
+  - `MACULA_MCP_KEM_ADVERTISE=1` names this server's KEM key in everything it
+    serves that is not `"off"`, `~<node_id>/ring` included, so a caller that
+    cannot seal is refused there too after one advertisement lifetime. **Off by default**: turning it on is each operator's decision,
     once every station it serves through runs macula 12.11 or later and its
     callers run macula 13, macula-go 0.18 or @macula-io/ts 0.24. Any other
     value is refused by name.

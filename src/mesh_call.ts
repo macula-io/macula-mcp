@@ -33,7 +33,8 @@ const DESCRIPTION_FULL =
   "repeated one). args must not carry \"caller\". " +
   "The call is sealed to the provider's advertised KEM key whenever its advertisement names one " +
   "(confidential \"preferred\", the default); confidential \"required\" never calls a provider that names " +
-  "none and fails with code=confidentiality and its reason instead.";
+  "none and fails with code=confidentiality and its reason instead. code=sealed_refused from the provider " +
+  "means it could not open the sealed call even after one reseal to the key it named.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
 const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form. prove_ownership: 1 signs args with an ownership proof, for a provider that reads one. Sealed to a provider that names a KEM key; confidential "required" refuses one that names none.`;

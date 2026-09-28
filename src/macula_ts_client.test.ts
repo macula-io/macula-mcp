@@ -79,15 +79,18 @@ describe("the shared pool", () => {
     expect(opts.kemAdvertise).toBe(0);
   });
 
-  it("names its KEM key only with MACULA_MCP_KEM_ADVERTISE=1, and refuses any other value by name", async () => {
-    process.env.MACULA_MCP_KEM_ADVERTISE = "1";
-    await selfNodeId();
-    await call({ procedure: "mcl-echo/echo" });
-    expect(poolConnect.mock.calls[0]![2].kemAdvertise).toBe(1);
-    await resetForTests();
-    process.env.MACULA_MCP_KEM_ADVERTISE = "yes";
-    await expect(call({ procedure: "mcl-echo/echo" })).rejects.toThrow(/MACULA_MCP_KEM_ADVERTISE.*"yes".*0 or 1/);
-    delete process.env.MACULA_MCP_KEM_ADVERTISE;
+  it("names its KEM key only with MACULA_MCP_KEM_ADVERTISE=1, and refuses any other value by name before connecting", async () => {
+    vi.stubEnv("MACULA_MCP_KEM_ADVERTISE", "1");
+    try {
+      await call({ procedure: "mcl-echo/echo" });
+      expect(poolConnect.mock.calls[0]![2].kemAdvertise).toBe(1);
+      await resetForTests();
+      vi.stubEnv("MACULA_MCP_KEM_ADVERTISE", "yes");
+      await expect(call({ procedure: "mcl-echo/echo" })).rejects.toThrow(/MACULA_MCP_KEM_ADVERTISE.*"yes".*set it to 0 or 1/);
+      expect(poolConnect).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("is connected again after a failed connect, not stuck with the rejection", async () => {
@@ -127,7 +130,10 @@ describe("call", () => {
     const e = await call({ procedure: "x/y", confidential: "required" }).catch((err) => err);
     expect(e).toBeInstanceOf(MeshError);
     expect(e.code).toBe("confidentiality");
-    expect(e.message).toMatch(/reason=no_kem_key/);
+    expect(e.message).toMatch(/reason=no_kem_key\)/);
+    pool.call.mockRejectedValueOnce(new ConfidentialityError("key_mismatch", "aa", "bb", "the provider names another key"));
+    const mismatch = await call({ procedure: "x/y" }).catch((err) => err);
+    expect(mismatch.message).toMatch(/reason=key_mismatch, named=aa, found=bb\)/);
   });
 
   it("brings a station's relay error back as a MeshError with its code", async () => {

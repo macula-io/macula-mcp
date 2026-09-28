@@ -73,7 +73,9 @@ export function registerMeshServe(server: McpServer): void {
         .optional()
         .describe(
           "\"preferred\" (default): with MACULA_MCP_KEM_ADVERTISE=1 this agent's KEM key is named so callers seal, " +
-            "and a clear call is still taken. \"required\": every clear call is refused (sealed_required); needs " +
+            "and a clear call is taken only while its last keyless advertisement could still be served, then refused " +
+            "sealed_required, so a caller older than macula 13 / macula-go 0.18 / @macula-io/ts 0.24 cannot call it " +
+            "after that; without it, served in the clear. \"required\": every clear call is refused (sealed_required); needs " +
             "MACULA_MCP_KEM_ADVERTISE=1, else code=confidentiality (reason=kem_advertise_disabled), and a caller " +
             "older than macula 13 / macula-go 0.18 / @macula-io/ts 0.24 cannot call it. \"off\": served in the clear. " +
             "To change it on a served name, mesh_unserve it first.",
