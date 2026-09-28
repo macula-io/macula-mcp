@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-09-28
+
 ### Added
 
 - Sealed calls and serving, through @macula-io/ts 0.24.0 (macula 13's E2E
