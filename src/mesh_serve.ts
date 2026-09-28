@@ -34,14 +34,16 @@ const DESCRIPTION_FULL =
   "registered, any mesh caller can trigger the command repeatedly until mesh_unserve is called or " +
   "this process exits. Never register a command you would not want a stranger able to run " +
   "repeatedly on this machine. Pair with mesh_unserve to stop serving deliberately. " +
-  "Bytes in the caller's payload appear on stdin as {\"$bytes\": \"<base64>\"}; write bytes to stdout in the same form.";
+  "Bytes in the caller's payload appear on stdin as {\"$bytes\": \"<base64>\"}; write bytes to stdout in the same form. " +
+  "MACULA_MCP_SEALED is 1 when the call came sealed to this agent's KEM key, 0 when it came in the clear; " +
+  "callers seal only when this server runs with MACULA_MCP_KEM_ADVERTISE=1.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The standing-inbound-surface warning is the single most safety-critical caveat this whole server has -- kept in full force, not shortened away. */
 const DESCRIPTION_TERSE =
   "Serve ~<your node_id>/<name>, answered by a local shell command run once per inbound call (stdin = " +
   "caller's JSON, stdout = reply). THIS IS A STANDING INBOUND SURFACE: any mesh caller can trigger it " +
   "repeatedly until mesh_unserve or process exit. Never register a command you wouldn't want a " +
-  "stranger running repeatedly on this machine. Bytes appear as {\"$bytes\": \"<base64>\"} on stdin; reply with bytes in the same form.";
+  "stranger running repeatedly on this machine. Bytes appear as {\"$bytes\": \"<base64>\"} on stdin; reply with bytes in the same form. MACULA_MCP_SEALED=1|0 says whether the call came sealed.";
 
 export function registerMeshServe(server: McpServer): void {
   server.tool(
@@ -66,11 +68,21 @@ export function registerMeshServe(server: McpServer): void {
         .positive()
         .optional()
         .describe(`How long one invocation may run before it's killed (default ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}).`),
+      confidential: z
+        .enum(["preferred", "required", "off"])
+        .optional()
+        .describe(
+          "\"preferred\" (default): with MACULA_MCP_KEM_ADVERTISE=1 this agent's KEM key is named so callers seal, " +
+            "and a clear call is still taken. \"required\": every clear call is refused (sealed_required); needs " +
+            "MACULA_MCP_KEM_ADVERTISE=1, else code=confidentiality (reason=kem_advertise_disabled), and a caller " +
+            "older than macula 13 / macula-go 0.18 / @macula-io/ts 0.24 cannot call it. \"off\": served in the clear. " +
+            "To change it on a served name, mesh_unserve it first.",
+        ),
     },
-    async ({ name, exec, exec_timeout_seconds }) => {
+    async ({ name, exec, exec_timeout_seconds, confidential }) => {
       try {
         const execTimeoutSeconds = Math.min(MAX_TIMEOUT_SECONDS, exec_timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS);
-        return jsonContent(await serveModule.serve({ name, exec, execTimeoutSeconds, bytes: "tagged" }));
+        return jsonContent(await serveModule.serve({ name, exec, execTimeoutSeconds, bytes: "tagged", confidential }));
       } catch (e) {
         return errorContent(describeMeshError("mesh_serve failed", e));
       }

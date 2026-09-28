@@ -13,6 +13,7 @@
 // one pool.
 
 import {
+  ConfidentialityError,
   ContentUnavailableError,
   JOIN_SESSION_PROCEDURE,
   MaculaError,
@@ -24,6 +25,7 @@ import {
   RecordType,
   RelayError,
   type BytesOutput,
+  type Confidential,
   type DeviceRequestProof,
   type DeviceRequestRule,
   type DhtRecord,
@@ -31,10 +33,11 @@ import {
   type JsonValue,
   type Request,
   type Served,
+  type ServedConfidential,
   type Subscription,
 } from "@macula-io/ts";
 import { droppedEvents } from "./dropped_events.js";
-import { IO_MACULA_REALM_ID, MeshError, nodeKeyPath, realmTrust, seeds } from "./mesh_config.js";
+import { IO_MACULA_REALM_ID, MeshError, kemAdvertise, nodeKeyPath, realmTrust, seeds } from "./mesh_config.js";
 
 /** The fleet's crypto profile, which macula-realm verifies key-possession proofs under too. */
 export const KEY_PROFILE = "pq_hybrid";
@@ -62,7 +65,8 @@ export async function selfNodeId(): Promise<string> {
  * inheriting the rejection forever.
  */
 export function sharedPool(): Promise<Pool> {
-  poolPromise ??= (async () => Pool.connect(await nodeKey(), seeds(), { realmTrust: realmTrust() }))().catch((e) => {
+  poolPromise ??= (async () =>
+    Pool.connect(await nodeKey(), seeds(), { realmTrust: realmTrust(), kemAdvertise: kemAdvertise() }))().catch((e) => {
     poolPromise = undefined;
     throw toMeshError(e);
   });
@@ -89,6 +93,10 @@ export function toMeshError(e: unknown): MeshError {
   if (e instanceof RelayError) return new MeshError(e.message, e.code, "station");
   if (e instanceof NotSharedError) return new MeshError(e.message, "not_shared");
   if (e instanceof ContentUnavailableError) return new MeshError(e.message, "unavailable");
+  if (e instanceof ConfidentialityError) {
+    const keys = e.named === null && e.found === null ? "" : `, named=${e.named ?? "none"}, found=${e.found ?? "none"}`;
+    return new MeshError(`${e.message} (reason=${e.reason}${keys})`, "confidentiality");
+  }
   if (e instanceof MaculaError) return new MeshError(e.message, e.kind);
   return new MeshError(messageOf(e));
 }
@@ -134,7 +142,9 @@ export interface CallResult {
  * signed right before the call. It verifies for exactly those fields, that
  * procedure and realm, once; what a provider does with one that does not is
  * its own policy. The transport may retry another station with the same
- * proof (macula-io/macula-go#8).
+ * proof (macula-io/macula-go#8). The call is sealed to the provider's
+ * advertised KEM key whenever its advertisement names one (`confidential`
+ * "preferred", the default); "required" never calls one that names none.
  */
 export async function call(args: {
   procedure: string;
@@ -144,6 +154,7 @@ export async function call(args: {
   /** How bytes in the result come back: "hex" (default) or "tagged" ({"$bytes": base64}). */
   bytes?: BytesOutput;
   proveOwnership?: boolean;
+  confidential?: Confidential;
 }): Promise<CallResult> {
   const start = Date.now();
   const realm = realmOf(args.realm);
@@ -151,7 +162,8 @@ export async function call(args: {
   const pool = await sharedPool();
   try {
     const payload = args.proveOwnership ? await (await nodeKey()).ownershipProof(realm, args.procedure, fields) : fields;
-    const result = await pool.call(realm, args.procedure, payload, { timeoutMs: args.timeoutMs, bytes: args.bytes });
+    const result = await pool.call(realm, args.procedure, payload,
+      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential });
     return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
   } catch (e) {
     throw toMeshError(e);
@@ -267,10 +279,12 @@ export async function serve(args: {
   realm?: string;
   handler: (request: Request) => JsonValue | Promise<JsonValue>;
   bytes?: BytesOutput;
+  confidential?: ServedConfidential;
 }): Promise<Served> {
   const pool = await sharedPool();
   try {
-    return await pool.serve(realmOf(args.realm), args.procedure, args.handler, { bytes: args.bytes });
+    return await pool.serve(realmOf(args.realm), args.procedure, args.handler,
+      { bytes: args.bytes, confidential: args.confidential });
   } catch (e) {
     throw toMeshError(e);
   }

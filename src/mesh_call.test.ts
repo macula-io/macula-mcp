@@ -26,7 +26,7 @@ describe("mesh_call", () => {
   it("splits a realm-prefixed procedure, calls it, and asks for tagged bytes back", async () => {
     mocks.call.mockResolvedValue({ procedure: "mcl-echo/echo", payload: { echoed: "hi" }, duration_ms: 12 });
     const res = await (await meshCall())({ procedure: `${REALM}/mcl-echo/echo`, args: { text: "hi" } });
-    expect(mocks.call).toHaveBeenCalledWith({ procedure: "mcl-echo/echo", callArgs: { text: "hi" }, timeoutMs: undefined, realm: REALM, bytes: "tagged", proveOwnership: false });
+    expect(mocks.call).toHaveBeenCalledWith({ procedure: "mcl-echo/echo", callArgs: { text: "hi" }, timeoutMs: undefined, realm: REALM, bytes: "tagged", proveOwnership: false, confidential: undefined });
     expect(JSON.parse(res.content[0]!.text)).toEqual({ result: { echoed: "hi" }, duration_ms: 12 });
   });
 
@@ -39,6 +39,12 @@ describe("mesh_call", () => {
     expect(mocks.call).toHaveBeenLastCalledWith(expect.objectContaining({ proveOwnership: false }));
     await handler({ procedure: "mcl-graph/learn_link", args: { subject: "a" } });
     expect(mocks.call).toHaveBeenLastCalledWith(expect.objectContaining({ proveOwnership: false }));
+  });
+
+  it("passes confidential through", async () => {
+    mocks.call.mockResolvedValue({ procedure: "mcl-echo/echo", payload: 1, duration_ms: 3 });
+    await (await meshCall())({ procedure: "mcl-echo/echo", confidential: "required" });
+    expect(mocks.call).toHaveBeenLastCalledWith(expect.objectContaining({ confidential: "required" }));
   });
 
   it("refuses by name while MACULA_MCP_UCAN is set, rather than dropping the token silently", async () => {

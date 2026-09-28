@@ -27,7 +27,8 @@ afterEach(async () => {
 });
 
 function request(procedure: string, payload: unknown): Request {
-  return { caller: CALLER, realm: "00".repeat(32), procedure, payload: payload as never, deadlineMs: Date.now() + 5_000 };
+  return { caller: CALLER, realm: "00".repeat(32), procedure, payload: payload as never, deadlineMs: Date.now() + 5_000,
+    sealed: 0 };
 }
 
 describe("serve", () => {
@@ -42,6 +43,21 @@ describe("serve", () => {
     const serve = await import("./serve.js");
     await serve.serve({ name: "whoami", exec: `node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify({got:JSON.parse(s),caller:process.env.MACULA_MCP_CALLER})))'` });
     expect(await served[0]!.handler(request(`~${SELF}/whoami`, { n: 1 }))).toEqual({ got: { n: 1 }, caller: CALLER });
+  });
+
+  it("serves confidential as asked, and tells the command whether the call came sealed in MACULA_MCP_SEALED", async () => {
+    const serve = await import("./serve.js");
+    await serve.serve({ name: "sealed", exec: "echo \"\\\"$MACULA_MCP_SEALED\\\"\"", confidential: "required" });
+    expect(served[0]).toMatchObject({ confidential: "required" });
+    expect(await served[0]!.handler({ ...request("x", {}), sealed: 1 })).toBe("1");
+    expect(await served[0]!.handler(request("x", {}))).toBe("0");
+  });
+
+  it("refuses to change a served name's confidential in place: its advertisement would not follow", async () => {
+    const serve = await import("./serve.js");
+    await serve.serve({ name: "twice", exec: "true" });
+    await expect(serve.serve({ name: "twice", exec: "true", confidential: "required" })).rejects.toThrow(/mesh_unserve/);
+    await serve.serve({ name: "twice", exec: "cat", confidential: "preferred" });
   });
 
   it("answers null for empty stdout, and refuses a failing command, a timeout, bad JSON and a likely secret", async () => {

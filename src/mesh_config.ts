@@ -111,6 +111,20 @@ export function realmTrust(): RealmTrust[] {
 }
 
 /**
+ * Whether this server names its KEM key in the advertisements of what it
+ * serves, so callers seal to it: MACULA_MCP_KEM_ADVERTISE=1. Off (0) by
+ * default: turning it on is this provider's decision, once every station it
+ * serves through runs macula 12.11 or later and its callers run macula 13,
+ * macula-go 0.18 or @macula-io/ts 0.24. Any other value is refused by name.
+ */
+export function kemAdvertise(): 0 | 1 {
+  const value = process.env.MACULA_MCP_KEM_ADVERTISE;
+  if (value === undefined || value === "" || value === "0") return 0;
+  if (value === "1") return 1;
+  throw new MeshError(`MACULA_MCP_KEM_ADVERTISE is "${value}": it is 0 or 1`);
+}
+
+/**
  * Stable within one logical session, distinct from any other concurrent
  * one: CLAUDE_CODE_SESSION_ID when the harness sets it (it survives a
  * --resume), else the parent process id (it survives a restart of just

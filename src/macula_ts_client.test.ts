@@ -12,7 +12,15 @@ vi.mock("@macula-io/ts", async (importOriginal) => {
   return { ...actual, Pool: { connect: poolConnect }, NodeKey: { loadOrCreate } };
 });
 
-import { ContentUnavailableError, MaculaError, NotSharedError, ProviderError, RelayError, RecordType } from "@macula-io/ts";
+import {
+  ConfidentialityError,
+  ContentUnavailableError,
+  MaculaError,
+  NotSharedError,
+  ProviderError,
+  RelayError,
+  RecordType,
+} from "@macula-io/ts";
 import {
   call,
   ownProcedure,
@@ -68,6 +76,18 @@ describe("the shared pool", () => {
     expect(seeds).toEqual(DEFAULT_SEEDS);
     expect(opts.realmTrust).toEqual([{ realm: IO_MACULA_REALM_ID, key: IO_MACULA_REALM_KEY }]);
     expect(loadOrCreate.mock.calls[0]![1]).toBe("pq_hybrid");
+    expect(opts.kemAdvertise).toBe(0);
+  });
+
+  it("names its KEM key only with MACULA_MCP_KEM_ADVERTISE=1, and refuses any other value by name", async () => {
+    process.env.MACULA_MCP_KEM_ADVERTISE = "1";
+    await selfNodeId();
+    await call({ procedure: "mcl-echo/echo" });
+    expect(poolConnect.mock.calls[0]![2].kemAdvertise).toBe(1);
+    await resetForTests();
+    process.env.MACULA_MCP_KEM_ADVERTISE = "yes";
+    await expect(call({ procedure: "mcl-echo/echo" })).rejects.toThrow(/MACULA_MCP_KEM_ADVERTISE.*"yes".*0 or 1/);
+    delete process.env.MACULA_MCP_KEM_ADVERTISE;
   });
 
   it("is connected again after a failed connect, not stuck with the rejection", async () => {
@@ -98,6 +118,16 @@ describe("call", () => {
     expect(e).toBeInstanceOf(MeshError);
     expect(e).toMatchObject({ code: "handler_error", from: "provider" });
     expect(e.message).toMatch(/no such mailbox/);
+  });
+
+  it("passes confidential through, and brings a confidentiality failure back with its reason", async () => {
+    await call({ procedure: "x/y", confidential: "required" });
+    expect(pool.call).toHaveBeenLastCalledWith(IO_MACULA_REALM_ID, "x/y", {}, expect.objectContaining({ confidential: "required" }));
+    pool.call.mockRejectedValueOnce(new ConfidentialityError("no_kem_key", null, null, "the provider names no KEM key"));
+    const e = await call({ procedure: "x/y", confidential: "required" }).catch((err) => err);
+    expect(e).toBeInstanceOf(MeshError);
+    expect(e.code).toBe("confidentiality");
+    expect(e.message).toMatch(/reason=no_kem_key/);
   });
 
   it("brings a station's relay error back as a MeshError with its code", async () => {
@@ -288,6 +318,9 @@ describe("serving in this node's own namespace", () => {
     const handler = vi.fn();
     await serve({ procedure: `~${SELF}/ring`, handler });
     expect(pool.serve).toHaveBeenCalledWith(IO_MACULA_REALM_ID, `~${SELF}/ring`, handler, { bytes: undefined });
+    await serve({ procedure: `~${SELF}/ring2`, handler, confidential: "required" });
+    expect(pool.serve).toHaveBeenLastCalledWith(IO_MACULA_REALM_ID, `~${SELF}/ring2`, handler,
+      { bytes: undefined, confidential: "required" });
   });
 
   it("refuses a name that is not one segment", async () => {

@@ -16,7 +16,7 @@
 // tool description and mesh_etiquette.ts for the operator-facing framing.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import type { BytesOutput, JsonValue, Request, Served } from "@macula-io/ts";
+import type { BytesOutput, JsonValue, Request, Served, ServedConfidential } from "@macula-io/ts";
 import { ownProcedure, serve as serveProcedure } from "./macula_ts_client.js";
 import { findLikelySecret } from "./secret_scan.js";
 
@@ -25,6 +25,7 @@ interface Registration {
   procedure: string;
   exec: string;
   execTimeoutMs: number;
+  confidential: ServedConfidential | undefined;
   served: Served;
 }
 
@@ -72,7 +73,7 @@ function runExec(execCmd: string, timeoutMs: number, request: Request): Promise<
       shell: true,
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, MACULA_MCP_CALLER: request.caller },
+      env: { ...process.env, MACULA_MCP_CALLER: request.caller, MACULA_MCP_SEALED: String(request.sealed) },
     });
     let stdout = "";
     let stderr = "";
@@ -136,6 +137,8 @@ export interface ServeArgs {
   execTimeoutSeconds?: number;
   /** How bytes in each inbound payload reach the command's stdin, "hex" when omitted. mesh_serve asks for "tagged" ({"$bytes": "<base64>"}), the same form a command's stdout may use to send bytes back. */
   bytes?: BytesOutput;
+  /** "preferred" (the default), "required" or "off", as @macula-io/ts serves it. */
+  confidential?: ServedConfidential;
 }
 
 export interface ServeResult {
@@ -148,21 +151,27 @@ export interface ServeResult {
 /**
  * Serves `name` in this node's own namespace, answered by `exec`.
  * Registering a name that is already served changes its command and
- * timeout in place: the advertisement stays as it is.
+ * timeout in place: the advertisement stays as it is, so a different
+ * confidential is refused (the advertisement would not follow it).
  */
 export async function serve(args: ServeArgs): Promise<ServeResult> {
   const execTimeoutMs = (args.execTimeoutSeconds ?? DEFAULT_EXEC_TIMEOUT_SECONDS) * 1000;
   const existing = registrations.get(args.name);
   if (existing) {
+    if ((existing.confidential ?? "preferred") !== (args.confidential ?? "preferred")) {
+      throw new Error(`${args.name} is served confidential ${existing.confidential ?? "preferred"}; ` +
+        `mesh_unserve it first to serve it ${args.confidential ?? "preferred"}`);
+    }
     existing.exec = args.exec;
     existing.execTimeoutMs = execTimeoutMs;
     return { name: args.name, procedure: existing.procedure, registered: true, serving: serving() };
   }
   const procedure = await ownProcedure(args.name);
-  const registration = { name: args.name, procedure, exec: args.exec, execTimeoutMs } as Registration;
+  const registration = { name: args.name, procedure, exec: args.exec, execTimeoutMs, confidential: args.confidential } as Registration;
   registration.served = await serveProcedure({
     procedure,
     bytes: args.bytes,
+    confidential: args.confidential,
     handler: (request) => runExec(registration.exec, registration.execTimeoutMs, request),
   });
   registrations.set(args.name, registration);
