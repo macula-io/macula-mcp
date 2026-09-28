@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-09-29
+
 ### Added
 
 - **`mesh_call` says whether the call went sealed.** Its result gains `seal`,
@@ -18,6 +20,8 @@ fires on a `v*` tag push, not on every commit to `main`).
   reads as a success signal. `result` and `duration_ms` are unchanged. The
   report states that sealing ran on that exchange, nothing more. An error
   carries no report.
+  A sealed report that names no key id breaks the SDK's contract and is
+  refused by name rather than shown as sealed.
 
 ### Changed
 
