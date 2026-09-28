@@ -23,6 +23,7 @@ import {
 } from "@macula-io/ts";
 import {
   call,
+  callWithReport,
   ownProcedure,
   serve,
   shareContent,
@@ -44,6 +45,7 @@ const SELF = "00".repeat(31) + "01";
 function fakePool() {
   return {
     call: vi.fn(async () => ({ ok: 1 })),
+    callReport: vi.fn(async () => ({ result: { ok: 1 }, report: { sealed: 1, provider: "cd".repeat(32), sealKeyId: "0123456789abcdef" } })),
     publish: vi.fn(async () => {}),
     subscribe: vi.fn(async () => ({ stop: vi.fn(async () => {}), closed: new Promise(() => {}), dropped: () => 0 })),
     findRecordsByType: vi.fn(async () => ({ records: [], dropped: 0 })),
@@ -134,6 +136,17 @@ describe("call", () => {
     pool.call.mockRejectedValueOnce(new ConfidentialityError("key_mismatch", "aa", "bb", "the provider names another key"));
     const mismatch = await call({ procedure: "x/y" }).catch((err) => err);
     expect(mismatch.message).toMatch(/reason=key_mismatch, named=aa, found=bb\)/);
+  });
+
+  it("callWithReport asks the pool for the seal report and hands it on in the wire's shape", async () => {
+    const res = await callWithReport({ procedure: "x/y", callArgs: { a: 1 }, confidential: "required" });
+    expect(pool.callReport).toHaveBeenLastCalledWith(IO_MACULA_REALM_ID, "x/y", { a: 1 }, expect.objectContaining({ confidential: "required" }));
+    expect(res.payload).toEqual({ ok: 1 });
+    expect(res.seal).toStrictEqual({ sealed: 1, provider: "cd".repeat(32), seal_key_id: "0123456789abcdef" });
+    pool.callReport.mockResolvedValueOnce({ result: 2, report: { sealed: 0, provider: "ef".repeat(32) } });
+    expect((await callWithReport({ procedure: "x/y" })).seal).toStrictEqual({ sealed: 0, provider: "ef".repeat(32) });
+    pool.callReport.mockRejectedValueOnce(new ProviderError("handler_error", "no"));
+    await expect(callWithReport({ procedure: "x/y" })).rejects.toMatchObject({ code: "handler_error", from: "provider" });
   });
 
   it("brings a station's relay error back as a MeshError with its code", async () => {
