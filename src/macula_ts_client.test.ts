@@ -149,6 +149,12 @@ describe("call", () => {
     expect((await callWithReport({ procedure: "x/y" })).seal).toStrictEqual({ sealed: 0, provider: "ef".repeat(32) });
     pool.callReport.mockRejectedValueOnce(new ProviderError("handler_error", "no"));
     await expect(callWithReport({ procedure: "x/y" })).rejects.toMatchObject({ code: "handler_error", from: "provider" });
+    // A key id only on a sealed report, held here whatever arrives from below.
+    pool.callReport.mockResolvedValueOnce({ result: 3, report: { sealed: 0, provider: "ef".repeat(32), sealKeyId: "0123456789abcdef" } });
+    expect((await callWithReport({ procedure: "x/y" })).seal).toStrictEqual({ sealed: 0, provider: "ef".repeat(32) });
+    // A sealed report naming no key breaks the SDK's contract: refused by name, never shown as sealed.
+    pool.callReport.mockResolvedValueOnce({ result: 4, report: { sealed: 1, provider: "ef".repeat(32) } });
+    await expect(callWithReport({ procedure: "x/y" })).rejects.toThrow(/sealed report names no seal key id/);
   });
 
   it("brings a station's relay error back as a MeshError with its code", async () => {
