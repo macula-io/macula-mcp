@@ -32,6 +32,7 @@ import {
   type Event,
   type JsonValue,
   type Request,
+  type SealReport,
   type Served,
   type ServedConfidential,
   type Subscription,
@@ -188,14 +189,21 @@ export async function callWithReport(args: CallArgs): Promise<CallResult & { sea
   try {
     const { result, report } = await pool.callReport(realm, args.procedure, payload,
       { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential });
-    // A key id only on a sealed report, held here rather than trusted from below.
-    const seal: Seal = report.sealed === 1 && report.sealKeyId !== undefined
-      ? { sealed: 1, provider: report.provider, seal_key_id: report.sealKeyId }
-      : { sealed: report.sealed, provider: report.provider };
-    return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start, seal };
+    return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start, seal: sealOf(report) };
   } catch (e) {
     throw toMeshError(e);
   }
+}
+
+/** The report on the wire's shape. A key id goes out only on a sealed report,
+ * held here rather than trusted from below; a sealed report naming no key
+ * breaks the SDK's contract and is refused by name, never shown as sealed. */
+function sealOf(report: SealReport): Seal {
+  if (report.sealed === 0) return { sealed: 0, provider: report.provider };
+  if (report.sealKeyId === undefined) {
+    throw new MeshError(`the call's sealed report names no seal key id (provider ${report.provider}): refusing to report it as sealed`);
+  }
+  return { sealed: 1, provider: report.provider, seal_key_id: report.sealKeyId };
 }
 
 /** The pool, the realm and the payload a call sends: the args as the wire's
