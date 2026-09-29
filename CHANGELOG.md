@@ -5,7 +5,21 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.38.0] - 2026-09-29
+
+### Changed
+
+- **@macula-io/ts 0.26.0** (macula-go v0.20.0). Links speak handshake v5 (the
+  session bound to the connection's TLS exporter), fall back to v4 once for a
+  station that has not moved to v5, and refuse a downgrade from a station
+  already seen on v5.
+
+### Fixed
+
+- **Loads on Debian 12 and Ubuntu 22.04.** 0.37.0 failed to start on bookworm:
+  its @macula-io/ts 0.25.0 linux-x64 prebuild needed libstdc++'s
+  `GLIBCXX_3.4.31` (macula-ts#12). 0.26.0's Linux prebuilds are built on
+  Ubuntu 22.04 and loaded on Debian 12 in its CI.
 
 ## [0.37.0] - 2026-09-29
 
