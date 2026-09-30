@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,6 +113,46 @@ describe("mesh_recall", () => {
       expect.objectContaining({ procedure: "mcl-rag/answer_query", realm: REALM, callArgs: { query_text: "vertical slicing", top_k: undefined } }),
     );
     expect(body).toEqual({ realm: REALM, hits: [{ score: 0.9 }] });
+  });
+
+  // The RAG service contract: an answer names its corpus (corpus_hash), every
+  // hit its provenance. mesh_recall passes both through and checks each hit's
+  // text against its content_sha256 itself: content_verified 1 or 0.
+  it("returns the corpus_hash and each hit's provenance, and checks each hit's text against its hash", async () => {
+    const good = "Pangolins roll into a ball.";
+    const hash = createHash("sha256").update(good, "utf8").digest("hex");
+    const provenance = { kind: "corpus", repo_id: "alpha", path: "alpha/README.md", commit: "a".repeat(40),
+                         start_line: 1, end_line: 3, content_sha256: hash };
+    mocks.discoverProcedureRealm.mockResolvedValue(REALM);
+    mocks.call.mockResolvedValue({
+      procedure: "mcl-rag/answer_query", duration_ms: 5,
+      payload: { corpus_hash: "c".repeat(64),
+                 hits: [{ chunk_id: "1", score: 0.9, content: good, provenance },
+                        { chunk_id: "2", score: 0.8, content: "Pangolins fly.", provenance }] },
+    });
+
+    const { registerMeshMemory } = await import("./mesh_memory.js");
+    const { server, getHandler } = fakeServer();
+    registerMeshMemory(server);
+    const res = (await getHandler("mesh_recall")({ query_text: "pangolins" })) as { content: { text: string }[] };
+    const body = JSON.parse(res.content[0]!.text);
+
+    expect(body.corpus_hash).toBe("c".repeat(64));
+    expect(body.hits[0]).toEqual({ chunk_id: "1", score: 0.9, content: good, provenance, content_verified: 1 });
+    expect(body.hits[1].content_verified).toBe(0);
+    expect(body.hits[1].provenance).toEqual(provenance);
+  });
+
+  // No signature field until a signature is actually verified here.
+  it("says nothing about a signature", async () => {
+    mocks.discoverProcedureRealm.mockResolvedValue(REALM);
+    mocks.call.mockResolvedValue({ procedure: "mcl-rag/answer_query", payload: { corpus_hash: "c".repeat(64), hits: [] }, duration_ms: 5 });
+
+    const { registerMeshMemory } = await import("./mesh_memory.js");
+    const { server, getHandler } = fakeServer();
+    registerMeshMemory(server);
+    const res = (await getHandler("mesh_recall")({ query_text: "x" })) as { content: { text: string }[] };
+    expect(Object.keys(JSON.parse(res.content[0]!.text)).sort()).toEqual(["corpus_hash", "hits", "realm"]);
   });
 
   it("errors clearly, without ever calling answer_query, when mcl-rag isn't advertised", async () => {
