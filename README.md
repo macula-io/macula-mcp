@@ -205,6 +205,16 @@ only the calling agent has), and `mesh_remember` needs *authored content*
 or the human's messages; it cannot decide what's worth remembering on its
 own). Both stay tools an agent calls deliberately.
 
+**Where an answer came from.** `mcl-rag` follows the RAG service contract
+(`macula_rag`'s guide, *The RAG service contract*). `mesh_recall` returns
+the reply's `corpus_hash`, which names the corpus that answered, and each
+hit's `provenance`: `kind` (`corpus` or `deposit`), `path`, `content_sha256`,
+and `repo_id` + `commit` for corpus content or `deposited_by` for a deposit.
+It checks each hit's text against its `content_sha256` itself and adds
+`content_verified` (1 or 0). That proves the text is what the provider
+hashed, not that the repo or commit are true. No signature is shown: the
+operator's signature over the corpus is not verified here yet.
+
 `mesh_remember` calls `mcl-rag`'s `add_knowledge`: one mesh RPC;
 chunking and embedding happen entirely on `mcl-rag`'s side, and it
 derives its own chunk ids, so there is no `document_id` to supply.

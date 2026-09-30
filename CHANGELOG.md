@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.39.0] - 2026-10-01
+
+### Added
+
+- **`mesh_recall` says where an answer came from** (the RAG service
+  contract, mcl-rag >= 0.2.0): it returns the reply's `corpus_hash` and
+  each hit's `provenance` (corpus repo, path, commit and lines, or who
+  deposited it), and checks each hit's text against its `content_sha256`,
+  adding `content_verified` (1 or 0). No signature is reported: the
+  operator's corpus signature is not verified here yet.
+
 ## [0.38.0] - 2026-09-29
 
 ### Changed

@@ -111,13 +111,16 @@ const RECALL_DESCRIPTION_FULL =
   "query_text -- semantic retrieval, not keyword match. Auto-discovers which realm mcl-rag is " +
   "currently advertised under, then calls its answer_query capability. Returns whatever chunks other " +
   "agents (or you, earlier) deposited via mesh_remember that are semantically close to the query, " +
-  "each with a similarity score, source_path, and chunk metadata. Empty results mean nothing relevant " +
+  "each with a similarity score, source_path, chunk metadata and its provenance (corpus repo, path, " +
+  "commit and lines, or who deposited it) plus content_verified (1 when the text matches the hash its " +
+  "provenance names, 0 when not). The reply's corpus_hash names the corpus that answered. Empty results mean nothing relevant " +
   "has been deposited yet, not an error. Not automatic -- call this deliberately when you actually " +
   "want to check shared memory, e.g. early in a session working on a repo others may have touched.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "empty is not an error" and "not automatic". */
 const RECALL_DESCRIPTION_TERSE =
   "Query the mesh's shared memory (mcl-rag) for anything relevant to query_text -- semantic, not " +
-  "keyword match. Returns chunks anyone deposited via mesh_remember, scored. Empty means nothing " +
+  "keyword match. Returns chunks anyone deposited via mesh_remember, scored, each with its provenance " +
+  "and content_verified (1/0), plus the answering corpus_hash. Empty means nothing " +
   "relevant yet, not an error. Not automatic -- call deliberately, e.g. early in a session on a shared repo.";
 
 const REMEMBER_DESCRIPTION_FULL =
@@ -152,6 +155,30 @@ const REMEMBER_DIRECTORY_DESCRIPTION_TERSE =
   "those). Re-running the same directory updates existing documents, doesn't duplicate. Sequential, " +
   "one file at a time -- a large directory takes a while; response is a summary, not a per-file log.";
 
+/** The RAG service contract (macula_rag's guide): an answer names the corpus
+ * that gave it (corpus_hash) and every hit its provenance, both passed through.
+ * Each hit's text is checked here against its provenance.content_sha256:
+ * content_verified 1 or 0. That proves the text is what the provider hashed,
+ * not that the repo or commit are true. No signature is reported: none is
+ * verified here yet. */
+function recalled(realm: string, payload: unknown): Record<string, unknown> {
+  const p = isRecord(payload) ? payload : {};
+  const hits = Array.isArray(p.hits) ? p.hits.map(checkedHit) : [];
+  return typeof p.corpus_hash === "string" ? { realm, corpus_hash: p.corpus_hash, hits } : { realm, hits };
+}
+
+function checkedHit(hit: unknown): unknown {
+  if (!isRecord(hit) || typeof hit.content !== "string" || !isRecord(hit.provenance)) return hit;
+  const claimed = hit.provenance.content_sha256;
+  if (typeof claimed !== "string") return hit;
+  const actual = createHash("sha256").update(hit.content, "utf8").digest("hex");
+  return { ...hit, content_verified: actual === claimed ? 1 : 0 };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 export function registerMeshMemory(server: McpServer): void {
   server.tool(
     "mesh_recall",
@@ -170,8 +197,7 @@ export function registerMeshMemory(server: McpServer): void {
           callArgs: { query_text, top_k },
           realm: discovery.realm,
         });
-        const payload = res.payload as { hits?: unknown[] } | undefined;
-        return jsonContent({ realm: discovery.realm, hits: payload?.hits ?? [] });
+        return jsonContent(recalled(discovery.realm, res.payload));
       } catch (e) {
         return errorContent(describeMeshError("mesh_recall failed", e));
       }
