@@ -12,8 +12,8 @@ exist yet.
 
 `macula-cli call`'s `-args` flag only accepts an inline JSON string, and
 `macula-mcp`'s `call()` always builds one. That's fine for the vast
-majority of mesh procedures, but `hecate-rag.upload_knowledge` and
-`hecate-rag.add_knowledge` expect a document's raw text inline in the
+majority of mesh procedures, but `mcl-rag.upload_knowledge` and
+`mcl-rag.add_knowledge` expect a document's raw text inline in the
 JSON payload, and a real document can be large enough on its own to
 exceed a safe command-line length on any platform. This plan makes any
 mesh call with a large payload work the same way a small one does,
@@ -25,7 +25,7 @@ difference.
 - **`macula-cli call -args <json>` is inline-only.** `cmd/macula-cli/call.go`
   defines `-args` as `fs.String("args", "null", ...)` — no file or stdin
   alternative exists for it today.
-- **`hecate-rag.upload_knowledge` and `hecate-rag.add_knowledge` expect
+- **`mcl-rag.upload_knowledge` and `mcl-rag.add_knowledge` expect
   raw bytes in the payload.** `upload_knowledge_v1.erl`'s `raw_bytes`
   field is a required part of the command; the server chunks, embeds,
   and stores it, but the caller still has to get the bytes there in the
@@ -73,7 +73,7 @@ difference.
   model never needs to know a payload was "large," the same way it
   doesn't know today whether a call went out inline or not.
 - **`add_knowledge`'s short-text path** (under 80 bytes, per
-  `hecate-rag`'s own chunker skip) will basically never hit this
+  `mcl-rag`'s own chunker skip) will basically never hit this
   threshold — this plan matters almost entirely for `upload_knowledge`.
 
 None of the above blocks starting.

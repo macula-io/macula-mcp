@@ -18,8 +18,8 @@ BUILD.
 
 ## Relationship to other plans
 
-- **Depends on** `hecate-rag`'s `plans/PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md`
-  Phase 2 (`hecate-rag.get_document_verbatim`) — this plan cannot land
+- **Depends on** `mcl-rag`'s `plans/PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md`
+  Phase 2 (`mcl-rag.get_document_verbatim`) — this plan cannot land
   before that RPC exists and is deployed.
 - **Resolves** the "MCP-prompts bridge" question `PLAN_MARTHA_MULTI_AGENT_MCP.md`
   left open, and supersedes that plan's `mesh_get`-based verbatim-fetch
@@ -39,8 +39,8 @@ BUILD.
   `hecate-corpus/roles/`'s existing file-per-role layout, no new naming
   scheme to invent or keep in sync.
 - Calls the same discover-realm-then-call composition `mesh_recall`/
-  `mesh_list_stations` already establish: find `hecate-rag`'s realm via
-  `mesh_find_records_by_type`, then call `hecate-rag.get_document_verbatim`
+  `mesh_list_stations` already establish: find `mcl-rag`'s realm via
+  `mesh_find_records_by_type`, then call `mcl-rag.get_document_verbatim`
   with that path. Returns the fetched markdown as the prompt's message
   content — a client-enforced injection, not a tool result the model
   might skip.

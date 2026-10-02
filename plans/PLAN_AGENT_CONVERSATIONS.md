@@ -9,7 +9,7 @@ commits, not a gate). Nothing here is in production, so the wire is broken, not
 versioned.
 
 Owner repos: `macula-io/macula-mcp` (both ends of every conversation today),
-`hecate-services/hecate-citizens` (directory and contact policy).
+`macula-services/mcl-citizens` (directory and contact policy).
 Related: `PLAN_AGENT_IDENTITY_UCAN.md` (per-agent delegated authority, later),
 `macula-architecture/plans/PLAN_CITIZEN_IDENTITY_AUTHN_AUTHZ.md` (carry the citizen
 identity when it exists), `PLAN_MARTHA_MULTI_AGENT_MCP.md` (a crew is a room with
@@ -30,7 +30,7 @@ said: refine the protocol. What that keypress would have done, read from the sou
 | The fact carries only `sender` and `text` (`mesh_chat.ts`) | No message id, no reply reference, no conversation, no timestamp, no kind. No threads, no dedupe, and a harness cannot react without spending a model call. |
 | `sender` is a self-claim; the station-reported `publisher` rides alongside | Identity is asserted, not proven. |
 | Delivery is fire and forget; the inbox is whatever arrived while presence was active (`inbox.ts`, `mesh_etiquette.ts`) | A message sent before presence started, or in a watch gap, never existed. `wait_reply_seconds` narrows the race and admits it cannot close it. |
-| Presence is a 60 s `agents.hello` heartbeat; the roster is a per-process cache (`presence.ts`, `roster.ts`) | A fresh session knows only the agents it has personally heard. Presence is also registered in hecate-citizens (`register_presence`) since 0.13.0, but nothing reads it back. |
+| Presence is a 60 s `agents.hello` heartbeat; the roster is a per-process cache (`presence.ts`, `roster.ts`) | A fresh session knows only the agents it has personally heard. Presence is also registered in mcl-citizens (`register_presence`) since 0.13.0, but nothing reads it back. |
 | The lobby is `agents.lobby` plus unguessable `agents.session.<32 hex>` topics; presence keeps a standing background watch on both (`mesh_lobby.ts`, `lobby_observer.ts`) | This is the "chat central" model in embryo: one central topic everyone listens to, private session topics for the actual talk. It lacks an addressed invite and an answer. |
 | Nothing wakes the receiving model | A message is seen only if that agent's harness polls. |
 
@@ -143,7 +143,7 @@ a deferred ring can be judged from the inbox without a round trip.
 
 ## 5. Presence and the directory
 
-`register_presence` in hecate-citizens gains fields, and `list_citizens` returns
+`register_presence` in mcl-citizens gains fields, and `list_citizens` returns
 them, so the roster is a directory query rather than an ear:
 
 | Field | Type | Source |
@@ -188,7 +188,7 @@ README change in the same commits.
 
 - No booleans anywhere: `answer`, `public`, `contact_policy` are integers.
 - Ids in payloads, never in topic names; the room topic's hex is a secret, not an id.
-- hecate-citizens is Erlang: pubsub payload keys arrive `{text, Bin}`-tagged, RPC
+- mcl-citizens is Erlang: pubsub payload keys arrive `{text, Bin}`-tagged, RPC
   args arrive atom-keyed, and a reply carrying prose must be `{text, Bin}` on the way
   out, or the caller sees hex.
 - Negative integers on pubsub are dropped by stations; `sent_at` and `answer` are
@@ -279,16 +279,16 @@ This exists so the receiving operator has the veto the sending one already has.
   participant_joined. Citizen ids are node ids today, so "by citizen id" is
   the same match until the citizen plan lands.
 
-### WP4. Directory roster (hecate-citizens, macula-mcp)
+### WP4. Directory roster (mcl-citizens, macula-mcp)
 
 This exists so a new session sees who is present without waiting to overhear them.
 
-- hecate-citizens `register_presence` accepts `contact_policy`, `offers`, `needs`,
+- mcl-citizens `register_presence` accepts `contact_policy`, `offers`, `needs`,
   `ring_procedure`; the read model stores them plus `last_seen` from the heartbeat
   listener; `list_citizens` and `get_citizen` return them. New desk only if a filter
   is needed (`list_citizens` with `needs`/`offers` match).
 - `mesh_agents` merges directory and heard rows; `mesh_hello` sends the new fields.
-- Deploy hecate-citizens through the normal image path.
+- Deploy mcl-citizens through the normal image path.
 - Size: one day Erlang, half a day TypeScript.
 
 ### WP5. Attention (macula-mcp, per harness)
@@ -302,18 +302,18 @@ This exists so a ring is noticed, not just stored.
   harness actually surfaces to the model. Record the matrix in the README.
 - Size: one day, open-ended on the harness side; stop at the matrix.
 
-### WP6. The offline path through hecate-mail
+### WP6. The offline path through mcl-mail
 
 This exists so a ring to an agent that is not present now still reaches it later.
 
 Rooms are live: a message exists only for whoever was tapping the room when it
-was published. `hecate-services/hecate-mail` is the asynchronous counterpart the
+was published. `macula-services/mcl-mail` is the asynchronous counterpart the
 mesh already has ("lets an agent delegate work to a citizen who is not online
 right now"): per-citizen mailboxes with `initiate_mailbox`, `open_mailbox`,
 `deposit_letter`, `reply_to_letter`, `mark_letter_read`, `archive_letter`, all
 real desks under `guide_mailbox_lifecycle`, seven of them advertised as
-`hecate_mail.*` capabilities, ownership-proof gated the same way
-`hecate_citizens.register_presence` is.
+`mcl_mail.*` capabilities, ownership-proof gated the same way
+`mcl_citizens.register_presence` is.
 
 - A ring that comes back unreachable (WP2) is deposited as a letter in the
   callee's mailbox: `{kind: ring_missed, ring_id, from, purpose, room_topic}`.
@@ -326,7 +326,7 @@ real desks under `guide_mailbox_lifecycle`, seven of them advertised as
   deliberate `mark_letter_read`, not a side effect of listing.
 - Before any of this: the deployment on beam01/beam02 predates the domain code
   (README says scaffold; the memory note says nine real desks). Redeploy and
-  verify `hecate_mail.open_mailbox` live before WP6 starts, not during.
+  verify `mcl_mail.open_mailbox` live before WP6 starts, not during.
 - Size: one day, after WP2 and WP3, since both ends of a letter are rings.
 
 ## 9b. Post-review live-verification status

@@ -23,7 +23,7 @@ infrastructure that needs to be built and run.
 
 - **The roster is a real, current, `stage: stable` doc**:
   `hecate-corpus/roles/AGENT_ARCHITECTURE.md` defines 6 roles — **Domain
-  Expert** (research-first, via `hecate-rag`/web, before opining),
+  Expert** (research-first, via `mcl-rag`/web, before opining),
   **Architect**, **DevOps** (development through deployment — one role,
   not three coders plus a separate delivery role), **QA** (test execution
   + code review + release-readiness), **Reporter** (continuous
@@ -33,13 +33,13 @@ infrastructure that needs to be built and run.
 - **Role content is already externalized as plain markdown**:
   `hecate-corpus/roles/*.md`, one file per role, each with its own
   front matter. Nothing to author — the personas exist today.
-- **A retrieval backend already exists for corpus content**: `hecate-rag`
+- **A retrieval backend already exists for corpus content**: `mcl-rag`
   is a real, running Layer-2 service (confirmed on the beam cluster this
-  session) exposing `hecate-rag.answer_query` over the mesh.
+  session) exposing `mcl-rag.answer_query` over the mesh.
   `macula-mcp`'s own existing generic `mesh_call` tool already reaches
   it. A code-generation role never needs a bespoke `martha_*` tool to
   retrieve corpus patterns; it needs its prompt to say "call `mesh_call`
-  against `hecate-rag.answer_query`."
+  against `mcl-rag.answer_query`."
 - **Planning-as-git-artifact is already this org's own convention, not
   a new idea**: every repo in this workspace already tracks its planning
   documents as `plans/PLAN_*.md` files, versioned in git, read at session
@@ -52,7 +52,7 @@ infrastructure that needs to be built and run.
   its own README and `PLAN_MACULA_MCP.md`, it shells out to `macula-cli`
   as a subprocess per call, carries no daemon of its own, and works with
   any MCP harness.
-- **Per-agent identity already has a design**: `HECATE_AUTH_MODEL.md`
+- **Per-agent identity already has a design**: `AUTH_MODEL.md`
   channel (b) proposes a `macula-cli --identity` separate from the
   human's own, delegated a narrower UCAN — exactly what "multiple
   agents collaborating with individual attribution" needs.
@@ -83,11 +83,11 @@ Two pieces, not three — there is no `hecate-martha` backend service:
   a commit (or a merged PR) that marks the relevant section approved —
   the commit itself is the audit-worthy fact; git log is the history,
   free.
-- **`hecate-rag`** — all corpus content, personas included. Two
-  retrieval shapes, not one: `hecate-rag.answer_query` (semantic,
+- **`mcl-rag`** — all corpus content, personas included. Two
+  retrieval shapes, not one: `mcl-rag.answer_query` (semantic,
   `top_k`) for "find me the relevant template/antipattern list," and
-  `hecate-rag.get_document_verbatim` (path-keyed exact fetch, new — see
-  `hecate-rag`'s own `PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md`) for
+  `mcl-rag.get_document_verbatim` (path-keyed exact fetch, new — see
+  `mcl-rag`'s own `PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md`) for
   "give me `domain_expert.md` verbatim" — a role's persona has to be
   exact, not a RAG-reranked approximation of itself. Not `mesh_get`:
   content-addressing has no answer for "what's the current MCID for
@@ -96,7 +96,7 @@ Two pieces, not three — there is no `hecate-martha` backend service:
   already discovers by realm has neither problem.
 - **`macula-mcp`** — new code, scoped and small: a `role` MCP Prompt
   (`macula-mcp`'s own `PLAN_MACULA_ROLE_PROMPT.md`) that resolves a role
-  name to `hecate-rag.get_document_verbatim` and injects the result as a
+  name to `mcl-rag.get_document_verbatim` and injects the result as a
   client-enforced prompt rather than a plain tool result an agent might
   not attend to. No new daemon, no new storage — one new prompt callback
   doing a discover-then-call the same way `mesh_recall`/`mesh_list_stations`
@@ -123,7 +123,7 @@ Two pieces, not three — there is no `hecate-martha` backend service:
                         Macula mesh
                              │
                              ▼
-                        hecate-rag
+                        mcl-rag
               (ALL corpus content: role personas
                AND templates/antipatterns — exact
                fetch via get_document_verbatim, fuzzy
@@ -138,7 +138,7 @@ Two pieces, not three — there is no `hecate-martha` backend service:
 ## Where inference actually happens
 
 There is exactly **one** execution context, not two: **an agent —
-someone's harness, channel (b) of `HECATE_AUTH_MODEL.md` — does the
+someone's harness, channel (b) of `AUTH_MODEL.md` — does the
 reasoning, on its own already-configured model, always.** A role is a
 persona only: whatever surfaces a role's markdown to a harness (see
 "MCP surface" below) hands it a system prompt, nothing more. No service
@@ -152,7 +152,7 @@ exactly like the interactive case.
 
 When a phase needs something the harness's model can't do alone —
 retrieve corpus patterns, search the web — the role's own prompt names
-the capability (`hecate-rag.answer_query`, a web-search tool) and the
+the capability (`mcl-rag.answer_query`, a web-search tool) and the
 harness calls `mesh_call` (or its own native tool) to reach it.
 `macula-mcp` never chooses a model on anyone's behalf — it has no
 visibility into what models a harness even has configured.
@@ -174,8 +174,8 @@ Checked against what `macula-mcp` already exposes:
 | Martha need | Already covered by | New code needed? |
 |---|---|---|
 | Discover available roles/capabilities | `mesh_find_records_by_type` (`record_type: "procedure_advertisement"`), filtered client-side | No |
-| Fetch a role's exact persona content | New `role` MCP Prompt → `hecate-rag.get_document_verbatim` | Yes — `PLAN_MACULA_ROLE_PROMPT.md` (macula-mcp) + `PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md` (hecate-rag) |
-| Retrieve a template/antipattern list mid-task | `mesh_call` → `hecate-rag.answer_query` | No |
+| Fetch a role's exact persona content | New `role` MCP Prompt → `mcl-rag.get_document_verbatim` | Yes — `PLAN_MACULA_ROLE_PROMPT.md` (macula-mcp) + `PLAN_VERBATIM_RETRIEVAL_AND_FRESHNESS.md` (mcl-rag) |
+| Retrieve a template/antipattern list mid-task | `mesh_call` → `mcl-rag.answer_query` | No |
 | Read/edit a division's planning or design doc | Ordinary git/filesystem access — the harness's own tools | No |
 | Announce a gate was just crossed | `mesh_publish`, called by whichever harness made the commit | No |
 | Get notified a gate unlocked the next stage | `mesh_watch` on that published fact | No |
@@ -192,7 +192,7 @@ could use the same bridge — so it lives in `macula-mcp` as a generic
 
 **`macula-mcp`, and the question is close to moot now.** There is no
 Martha-specific backend to own — no service, no new mesh logic. What
-Martha needs from the MCP layer is `hecate-rag` retrieval and generic
+Martha needs from the MCP layer is `mcl-rag` retrieval and generic
 mesh pub/sub — generic capabilities (existing or, for verbatim fetch,
 newly built as generic) any future role-based system would also want,
 never Martha-specific ones. A separate repo would have nothing of its

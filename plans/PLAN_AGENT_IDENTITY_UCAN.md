@@ -16,7 +16,7 @@ but NOT yet functional against any macula-cli a real user can install**
 claim about *existing* infrastructure below was verified against the
 actual source, not assumed — see "What's already real."
 
-**Update, 2026-09-03**: this plan's own blocker (no hecate-service verifies
+**Update, 2026-09-03**: this plan's own blocker (no mcl-* service verifies
 `ucan_token`) is now sequenced as Phase 4 of
 `macula-io/macula-architecture/plans/PLAN_CLOSE_SERVICE_AUTH_GAPS.md`, and a
 DEEPER blocker was found the same day: no client SDK's direct-dial call
@@ -57,17 +57,17 @@ doesn't accept. Item 3 (manual provisioning) needed no code, as
 designed. This plan is still not *useful* end-to-end for TWO
 independent reasons now, not one — the "What's open" items below (no
 tagged macula-cli release contains the composability fix; no
-hecate-service verifies an incoming `ucan_token` at all) are both
+mcl-* service verifies an incoming `ucan_token` at all) are both
 untouched by this work and both gate everything downstream of it.
 
 ## Goal
 
 An agent session acting through `macula-mcp` should carry its own
 delegated, independently-revocable authority, distinct from the human's
-own root identity — so a gated hecate-service call is attributable to
+own root identity — so a gated mcl-* service call is attributable to
 the agent that made it, and a misbehaving agent session can be shut off
 without rotating the human's own key. This is channel (b) of
-`hecate-corpus/philosophy/HECATE_AUTH_MODEL.md`.
+`hecate-corpus/philosophy/AUTH_MODEL.md`.
 
 ## What's already real (verified against source, not assumed)
 
@@ -77,7 +77,7 @@ without rotating the human's own key. This is channel (b) of
   decodes one; `call -ucan <file>` attaches a pre-minted token to a
   plain (non-direct) call, alongside `-identity <path>` to pick which
   keypair signs the call itself (`cmd/macula-cli/call.go`). None of this
-  needed building — the corpus's own `HECATE_AUTH_MODEL.md` claimed
+  needed building — the corpus's own `AUTH_MODEL.md` claimed
   otherwise and was wrong; fixed there.
 - **`macula-mcp` already mints per-concern identities, but never a UCAN.**
   `src/macula_cli.ts` mints a fresh, throwaway Ed25519 identity per
@@ -90,14 +90,14 @@ without rotating the human's own key. This is channel (b) of
   file — `call`, `publish`, `watch`, `findRecord`, `artifactPut`, ... —
   ever passes `-ucan`. The identity-pinning plumbing exists; the
   UCAN-attachment plumbing doesn't.
-- **`hecate_om_capabilities`'s `verify => true` checks the wrong side of
+- **`mcl_om_capabilities`'s `verify => true` checks the wrong side of
   the call for this purpose.** It verifies the *provider's* org-rooted
   service-cert chain before a consumer dials it
   (`keep_chain_verified` → `macula_record:verify_advertisement_cert_chain/3`)
   and forwards a caller's `ucan_token` to that provider opaquely. It does
   not check that the token resolves to a human's realm membership —
   that check, if it exists at all, would live on the *receiving*
-  hecate-service's side, and this plan does not know whether it does.
+  mcl-* service's side, and this plan does not know whether it does.
   See "What's open."
 
 ## What this plan builds
@@ -186,12 +186,12 @@ zero-new-code provisioning step for a human to run once per agent:
   cut. Whoever cuts that release should also bump
   `MIN_MACULA_CLI_VERSION` (`macula_cli.ts`) to name it and delete
   `assertUcanDirectComposable()` in favor of a real version check.
-- **Confirmed, not just unconfirmed now**: no hecate-service verifies an
+- **Confirmed, not just unconfirmed now**: no mcl-* service verifies an
   incoming `ucan_token` at all today — `macula:advertise/5`'s
   `{ucan_required, Issuer}` policy exists and works, but every
-  hecate-service (hecate-rag included) hand-rolls its own advertise loop
+  mcl-* service (mcl-rag included) hand-rolls its own advertise loop
   with a hardcoded open policy, and nothing calls into it. See
-  `hecate-om/plans/PLAN_UCAN_GATED_CAPABILITIES.md` for the scoped fix —
+  `mcl-om/plans/PLAN_UCAN_GATED_CAPABILITIES.md` for the scoped fix —
   and its own confirmed boundary: that policy checks one exact issuer's
   direct signature, not a human-membership-rooted delegation chain of
   arbitrary depth. This plan's own work has nothing to attach to until
@@ -199,7 +199,7 @@ zero-new-code provisioning step for a human to run once per agent:
 - **Expiry and refresh.** A manually-minted, manually-placed token file
   doesn't refresh itself. Nothing here re-mints it before `-expires-in`
   runs out; a session just starts failing gated calls at that point.
-- **Revocation.** `HECATE_AUTH_MODEL.md`'s premise is that a compromised
+- **Revocation.** `AUTH_MODEL.md`'s premise is that a compromised
   agent session is "revocable on its own." Nothing checks a revocation
   list anywhere in this design — only expiry stops a token, and an
   actively-revoked-but-not-yet-expired one still works.
@@ -210,7 +210,7 @@ zero-new-code provisioning step for a human to run once per agent:
   human's own identity file — but not decided.
 
 None of the above blocks starting; the first two items (the missing
-macula-cli release, then the missing hecate-service-side verification)
+macula-cli release, then the missing mcl-* service-side verification)
 each independently block the whole plan being *useful*, not just
 finishing — both must clear before a UCAN attached by this repo's own
 code ever reaches a capability that actually checks it.
