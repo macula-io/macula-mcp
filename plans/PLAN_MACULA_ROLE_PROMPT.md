@@ -1,4 +1,4 @@
-# Plan: `role` prompt — load a Hecate role skill from the mesh
+# Plan: `role` prompt — load a Macula role skill from the mesh
 
 **Status:** Planning
 **Created:** 2026-09-01
@@ -26,7 +26,7 @@ BUILD.
   sketch (content-addressing has no answer for "what's the current MCID
   for role X," and cross-station `mesh_get` delivery is only
   best-effort — see that plan's updated Architecture section). Not
-  Martha-specific: any mesh-served markdown can use this prompt, role
+  crew-specific: any mesh-served markdown can use this prompt, role
   files are just the first consumer.
 
 ## Design
