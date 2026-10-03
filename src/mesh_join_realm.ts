@@ -19,7 +19,30 @@ function pinHint(identityPath: string): string | undefined {
         `set MACULA_MCP_IDENTITY=${identityPath} in the client's MCP server environment.`;
 }
 
-function pendingContent(began: realm.BeginResult, identityPath: string): Content[] {
+/**
+ * The block a model must relay for a pending join. It goes FIRST in the
+ * result, before the JSON and the QR, because relaying the link is the
+ * operator's only way to confirm -- and a summarized-away join_url is a
+ * join that never completes: the pending link is a bearer link, redacted
+ * everywhere else (see realm.ts's status()/redactPending). Exported for
+ * its own test.
+ */
+export function operatorActionText(began: realm.BeginResult): string {
+  return (
+    "OPERATOR ACTION REQUIRED -- mesh_join_realm is waiting for the person you are helping.\n" +
+    "\n" +
+    `Show this link to the operator in your reply, verbatim, and ask them to open it, sign in at the realm, ` +
+    `and confirm that agent ${began.node_id} may join their account. Do not summarize, shorten or omit the ` +
+    "link: it is the only way the join can complete (it is redacted everywhere else), and the session expires " +
+    `at ${began.expires_at}.\n` +
+    "\n" +
+    `${began.join_url}\n` +
+    "\n" +
+    "After they confirm, call mesh_join_realm again with wait_seconds (up to 600) to pick up the result."
+  );
+}
+
+export function pendingContent(began: realm.BeginResult, identityPath: string): Content[] {
   const hint = pinHint(identityPath);
   const text = {
     status: "pending",
@@ -35,6 +58,7 @@ function pendingContent(began: realm.BeginResult, identityPath: string): Content
     ...(hint ? { identity_note: hint } : {}),
   };
   return [
+    { type: "text", text: operatorActionText(began) },
     { type: "text", text: JSON.stringify(text, null, 2) },
     { type: "text", text: `Scan to join:\n${began.qr_terminal}\n${began.join_url}` },
     { type: "image", data: began.qr_png_base64, mimeType: "image/png" },

@@ -128,8 +128,10 @@ your identity and the provider sees your node_id as the caller, so capabilities 
 (mcl-mail/open_mailbox, mcl-graph/learn_link) need nothing extra in the args.
 - mesh_join_realm binds this identity to a PERSON's account in the io.macula realm: it returns a link and a \
 QR code, the person opens or scans it, signs in at the portal and confirms; call it again with wait_seconds \
-to pick up the result (mesh://identity shows it too, under "realm"). Show the link and the QR to the person \
-in the conversation -- only they can confirm. Membership is attribution today, not extra permissions.
+to pick up the result (mesh://identity shows it too, under "realm"). When its result opens with an OPERATOR \
+ACTION REQUIRED block, relay its join_url verbatim in your reply, as its own line -- never summarize, shorten \
+or omit it: that link is the only way the join can complete, and it is redacted everywhere else. Membership \
+is attribution today, not extra permissions.
 - Read mesh://identity first so you know which node ID you're acting as. Read mesh://etiquette \
 for the full reasoning behind these rules. A person in this conversation can also ask for \
 help directly (/mcp__macula__help and friends -- help_identity, help_wire_format, help_watch, \
