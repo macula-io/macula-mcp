@@ -1,0 +1,41 @@
+{
+  "label": "macula-rag corpus v1",
+  "label_hex": "6d6163756c612d72616720636f72707573207631",
+  "jcs": [
+    {
+      "input": {
+        "b": {
+          "c": "q\"b\\s\n\u0001é/"
+        },
+        "a": [
+          1,
+          "x"
+        ]
+      },
+      "canonical": "{\"a\":[1,\"x\"],\"b\":{\"c\":\"q\\\"b\\\\s\\n\\u0001é/\"}}"
+    }
+  ],
+  "corpus_hash": [
+    {
+      "description": {
+        "model": "macula/multilingual-e5-small:f16",
+        "dim": 384,
+        "repos": [
+          {
+            "id": "alpha",
+            "url": "https://example.org/alpha.git",
+            "branch": "main",
+            "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "id": "beta",
+            "url": "/srv/mirrors/beta.git",
+            "branch": "trunk",
+            "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ]
+      },
+      "corpus_hash": "0d5f037bfa41e1bce262d87098576102063fa084f63441a348d2a7648b4b2644"
+    }
+  ]
+}
