@@ -5,6 +5,22 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.40.0] - 2026-10-05
+
+### Added
+
+- **`mesh_recall` checks who vouches for the corpus that answered.** It asks
+  the provider that answered, pinned by node id, to `describe_corpus`, and
+  adds `corpus`: `corpus_hash`, `provider` and `signature`: `verified` (with
+  `signed_by`, the provider whose key signed the recomputed hash), `unsigned`,
+  `refused` (with the reason) or `unchecked` (with the reason). macula_rag's
+  rules, against its frozen vectors; a copied signature is refused, and the
+  description's own `signed_by` is never evidence.
+
+### Changed
+
+- **@macula-io/ts ^0.27.1** (macula-go v0.22.0; 0.27.0 never reached npm), for `verifySignedObject`.
+
 ## [0.39.0] - 2026-10-01
 
 ### Added

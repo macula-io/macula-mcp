@@ -55,13 +55,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 // Same as mesh_stations.ts: mcl-rag is called in the realm its own
 // advertisement names, discovered first.
-import { call, discoverProcedureRealm } from "./macula_ts_client.js";
+import { KEY_PROFILE, call, callWithReport, discoverProcedureRealm } from "./macula_ts_client.js";
+import { verifyCorpus, type CorpusCheck, type Description } from "./rag_corpus.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret, findLikelySecret, isExcludedPath } from "./secret_scan.js";
 import { toolDescription } from "./tool_description.js";
 
 const SEARCH_PROCEDURE = "mcl-rag/answer_query";
+const DESCRIBE_PROCEDURE = "mcl-rag/describe_corpus";
 const ADD_KNOWLEDGE_PROCEDURE = "mcl-rag/add_knowledge";
 const UPLOAD_KNOWLEDGE_PROCEDURE = "mcl-rag/upload_knowledge";
 
@@ -113,14 +115,16 @@ const RECALL_DESCRIPTION_FULL =
   "agents (or you, earlier) deposited via mesh_remember that are semantically close to the query, " +
   "each with a similarity score, source_path, chunk metadata and its provenance (corpus repo, path, " +
   "commit and lines, or who deposited it) plus content_verified (1 when the text matches the hash its " +
-  "provenance names, 0 when not). The reply's corpus_hash names the corpus that answered. Empty results mean nothing relevant " +
+  "provenance names, 0 when not). The reply's corpus_hash names the corpus that answered, and corpus says " +
+  "who vouches for it, checked against the provider that answered: signature verified (with signed_by), " +
+  "unsigned, refused or unchecked (with a reason). Empty results mean nothing relevant " +
   "has been deposited yet, not an error. Not automatic -- call this deliberately when you actually " +
   "want to check shared memory, e.g. early in a session working on a repo others may have touched.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "empty is not an error" and "not automatic". */
 const RECALL_DESCRIPTION_TERSE =
   "Query the mesh's shared memory (mcl-rag) for anything relevant to query_text -- semantic, not " +
   "keyword match. Returns chunks anyone deposited via mesh_remember, scored, each with its provenance " +
-  "and content_verified (1/0), plus the answering corpus_hash. Empty means nothing " +
+  "and content_verified (1/0), plus the answering corpus_hash and whether its signature verified. Empty means nothing " +
   "relevant yet, not an error. Not automatic -- call deliberately, e.g. early in a session on a shared repo.";
 
 const REMEMBER_DESCRIPTION_FULL =
@@ -159,12 +163,25 @@ const REMEMBER_DIRECTORY_DESCRIPTION_TERSE =
  * that gave it (corpus_hash) and every hit its provenance, both passed through.
  * Each hit's text is checked here against its provenance.content_sha256:
  * content_verified 1 or 0. That proves the text is what the provider hashed,
- * not that the repo or commit are true. No signature is reported: none is
- * verified here yet. */
+ * not that the repo or commit are true. */
 function recalled(realm: string, payload: unknown): Record<string, unknown> {
   const p = isRecord(payload) ? payload : {};
   const hits = Array.isArray(p.hits) ? p.hits.map(checkedHit) : [];
   return typeof p.corpus_hash === "string" ? { realm, corpus_hash: p.corpus_hash, hits } : { realm, hits };
+}
+
+/** The corpus that answered, checked: describe_corpus asked of the provider
+ * that answered (pinned), then macula_rag's rules (rag_corpus.ts). A provider
+ * that cannot describe its corpus leaves the signature unchecked. */
+async function checkedCorpus(realm: string, provider: string, answered: string): Promise<CorpusCheck> {
+  let description: unknown;
+  try {
+    description = (await call({ procedure: DESCRIBE_PROCEDURE, realm, provider, bytes: "tagged" })).payload;
+  } catch (e) {
+    return { corpus_hash: answered, provider, signature: "unchecked",
+             reason: e instanceof Error ? e.message : String(e) };
+  }
+  return verifyCorpus(description as Description, provider, answered, KEY_PROFILE);
 }
 
 function checkedHit(hit: unknown): unknown {
@@ -192,12 +209,15 @@ export function registerMeshMemory(server: McpServer): void {
       try {
         const discovery = await discoverRagRealm();
         if ("error" in discovery) return errorContent(discovery.error);
-        const res = await call({
+        const res = await callWithReport({
           procedure: SEARCH_PROCEDURE,
           callArgs: { query_text, top_k },
           realm: discovery.realm,
         });
-        return jsonContent(recalled(discovery.realm, res.payload));
+        const answer = recalled(discovery.realm, res.payload);
+        const hash = answer.corpus_hash;
+        if (typeof hash !== "string") return jsonContent(answer);
+        return jsonContent({ ...answer, corpus: await checkedCorpus(discovery.realm, res.seal.provider, hash) });
       } catch (e) {
         return errorContent(describeMeshError("mesh_recall failed", e));
       }

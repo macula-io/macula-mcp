@@ -212,8 +212,27 @@ hit's `provenance`: `kind` (`corpus` or `deposit`), `path`, `content_sha256`,
 and `repo_id` + `commit` for corpus content or `deposited_by` for a deposit.
 It checks each hit's text against its `content_sha256` itself and adds
 `content_verified` (1 or 0). That proves the text is what the provider
-hashed, not that the repo or commit are true. No signature is shown: the
-operator's signature over the corpus is not verified here yet.
+hashed, not that the repo or commit are true.
+
+**Who vouches for the corpus.** When the answer names its corpus,
+`mesh_recall` asks the provider that answered, and only that provider
+(pinned by node id), to `describe_corpus`, and adds `corpus`: its
+`corpus_hash`, that `provider` and `signature`, which is one of:
+
+- `verified`, with `signed_by`: the description hashes to the answer's
+  corpus, and the operator's signature over it verified under this
+  server's profile to a key whose node id IS the provider that answered;
+- `unsigned`: the corpus checks out and carries no signature;
+- `refused`, with `reason` (`signer_not_provider`, `corpus_hash_mismatch`,
+  `not_the_answering_corpus`, `signature_hash_mismatch`, or the signature's
+  own: `malformed`, `signature_invalid`, `alg_mismatch`): something does not
+  hold, and nothing is claimed;
+- `unchecked`, with `reason`: the provider could not describe its corpus.
+
+These are macula_rag's rules (`macula_rag:verify_corpus/3`); the check runs
+against its frozen vectors. A signature is static, so a copied one is
+refused: only the key of the provider that answered counts, never the
+description's own `signed_by`. A signature says who vouched, not when.
 
 `mesh_remember` calls `mcl-rag`'s `add_knowledge`: one mesh RPC;
 chunking and embedding happen entirely on `mcl-rag`'s side, and it
