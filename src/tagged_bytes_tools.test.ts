@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // The agent-facing tools hand agents bytes as {"$bytes": "<base64>"} instead
 // of "0x" hex, so an id that came back from one call can go straight into the
-// next (hecate-tube's channel ids, for one), and each tool's description says
+// next (a channel id, for one), and each tool's description says
 // so. The wire layer is mocked at macula_ts_client.js/serve.js: these tests
 // pin what the tools ask for and what they tell agents. The encoding itself
 // is @macula-io/ts's, covered by its own Go and live tests.

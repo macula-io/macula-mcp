@@ -42,7 +42,7 @@ describe("ring procedure name", () => {
   it("is ring in the node's own namespace, and parses back out of it", () => {
     expect(ringProcedure(THEM)).toBe(`~${THEM}/ring`);
     expect(nodeIdFromRingProcedure(`~${THEM}/ring`)).toBe(THEM);
-    expect(nodeIdFromRingProcedure("hecate_citizens.register_presence")).toBeUndefined();
+    expect(nodeIdFromRingProcedure("example_citizens.register_presence")).toBeUndefined();
   });
 });
 

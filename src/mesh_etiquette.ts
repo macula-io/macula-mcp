@@ -5,9 +5,8 @@
 // field (src/index.ts), read by every client at connect time whether or
 // not the model ever thinks to look for a resource. This is the fuller
 // version, for a model that wants to `consult` the reasoning behind the
-// rules rather than just the rules themselves -- same two-tier shape
-// hecate-spartan uses for its L1 genesis core (always-on, compiled in)
-// vs. on-demand knowledge (`consult`/`fetch`).
+// rules rather than just the rules themselves: an always-on core plus on-demand
+// knowledge (`consult`/`fetch`).
 //
 // Every rule below was found live, not designed up front: the bool one
 // from a real mesh_publish failure, the identity one from concurrent

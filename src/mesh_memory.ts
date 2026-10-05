@@ -270,7 +270,7 @@ export function registerMeshMemory(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe(`Directory names to skip anywhere in the tree. Defaults to ${JSON.stringify(DEFAULT_EXCLUDE_DIRS)}.`),
-      source_prefix: z.string().optional().describe('Prepended to each file\'s relative path for source_path, e.g. "hecate-corpus".'),
+      source_prefix: z.string().optional().describe('Prepended to each file\'s relative path for source_path, e.g. "mcl-corpus".'),
     },
     async ({ directory, include_extensions, exclude_dirs, source_prefix }) => {
       ensurePresence(server);

@@ -165,7 +165,7 @@ export function orgHandle(nodeId: string | undefined): string | undefined {
   return nodeId ? handleOf(loadCredential(nodeId)?.org_identity) : undefined;
 }
 
-/** The agent MRI the realm shows the person; the same convention hecate-daemon used, with this server's own name. Pure. */
+/** The agent MRI the realm shows the person, carrying this server's own name. Pure. */
 export function agentMri(nodeId: string): string {
   return `mri:agent:io.macula/anonymous/macula-mcp-${nodeId.slice(0, 8)}`;
 }

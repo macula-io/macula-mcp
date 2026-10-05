@@ -18,8 +18,6 @@
 //   * Backs up any existing config to `<path>.macula-bak-<timestamp>`
 //     before writing.
 //
-// Reworked 2026-08-29: this used to detect a running hecate-daemon and
-// offer to fetch+launch one; hecate-daemon is now treated as obsolete.
 // (2026-09-04) The macula-cli binary probe that used to run first here
 // is gone too -- this package no longer shells out to a separately
 // installed macula-cli for anything (mesh operations run in-process via
