@@ -1,4 +1,4 @@
-// Tool: mesh_ring -- the addressed invite (PLAN_AGENT_CONVERSATIONS WP2).
+// Tool: mesh_ring -- the addressed invite.
 //
 // A ring is a mesh_call to the callee's own served procedure, ~<node_id>/ring
 // (ring_service.ts on their side), carrying the room to talk in. A call,

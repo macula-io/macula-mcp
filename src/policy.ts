@@ -1,6 +1,5 @@
-// Contact policy: the receiving operator's standing answer to a ring
-// (PLAN_AGENT_CONVERSATIONS section 4, WP3). Read from a small JSON file
-// next to the identity files, with MACULA_MCP_CONTACT_POLICY as a
+// Contact policy: the receiving operator's standing answer to a ring.
+// Read from a small JSON file next to the identity files, with MACULA_MCP_CONTACT_POLICY as a
 // per-process override of the policy alone -- the file is what an
 // operator edits once; the env var is for one session or one script.
 //

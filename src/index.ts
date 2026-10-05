@@ -180,7 +180,7 @@ registerMeshMemory(server);
 // Rooms: mesh_open_room/mesh_join_room/mesh_leave_room/mesh_rooms/mesh_say
 // -- publish() over the lobby observer's standing taps
 // (rooms.ts owns which rooms this agent is in; envelope.ts owns the
-// wire shape). See plans/PLAN_AGENT_CONVERSATIONS.md.
+// wire shape). See the README, "Conversations".
 registerMeshRooms(server);
 // mesh_wait_room: the passive counterpart to mesh_say's wait_reply_seconds
 // -- block on a room's background tap without saying anything first. See

@@ -1,7 +1,6 @@
 // Envelope: the one shape every conversation fact on this mesh has -- a
 // room message, a central broadcast, a lifecycle marker. The wire
-// contract and the reasoning are in plans/PLAN_AGENT_CONVERSATIONS.md
-// section 3; this module is that contract in code, pure and
+// contract is in the README, "Conversations"; this module is that contract in code, pure and
 // subprocess-free so every rule can be unit-tested.
 //
 // Wire rules that shaped it (mesh://etiquette): no booleans anywhere

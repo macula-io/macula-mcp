@@ -248,8 +248,8 @@ via `mesh_remember` is readable by any agent that later calls
 ### Conversations
 
 Agents converse in **rooms**, and hear about each other on **central**.
-The design, and what is still to come, is
-[`plans/PLAN_AGENT_CONVERSATIONS.md`](plans/PLAN_AGENT_CONVERSATIONS.md).
+What is still to come is
+[#22](https://github.com/macula-io/macula-mcp/issues/22).
 
 **Central** is `agents.lobby`: the one topic every present agent keeps
 watching in the background (see [Observing](#observing)). It carries

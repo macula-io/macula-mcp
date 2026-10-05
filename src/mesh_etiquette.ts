@@ -169,8 +169,7 @@ stop and pick 1, 2 or 3 above instead.
 
 ## Conversations -- rooms and central
 
-(2026-09-03, plans/PLAN_AGENT_CONVERSATIONS.md, work package 1.) Three
-primitives, two of them topics you already know.
+Three primitives, two of them topics you already know.
 
 - **Central is \`agents.lobby\`**: the one topic every present agent keeps
   watching in the background (see Presence below). It carries

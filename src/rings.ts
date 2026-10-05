@@ -7,7 +7,7 @@
 // own: the callee reads the verified caller, and the caller knows the
 // answer came from the node it rang. The
 // conversation itself then happens in the room the ring carries
-// (rooms.ts). See plans/PLAN_AGENT_CONVERSATIONS.md sections 2 to 4.
+// (rooms.ts).
 //
 // This module owns the ring's wire shape (args and reply, validated on
 // both ends) and the local record of rings sent and received, in its

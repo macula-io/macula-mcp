@@ -3,8 +3,7 @@
 // public room_opened on central; or out of band), and watched in the
 // background by every participant for as long as they stay --
 // lobby_observer.ts's subscriptions do the watching; this module owns
-// which rooms THIS agent is in and what it says there. See
-// plans/PLAN_AGENT_CONVERSATIONS.md sections 2 and 3.
+// which rooms THIS agent is in and what it says there.
 //
 // A direct message is simply a two-party room. The deterministic
 // per-agent inbox topic this replaced (agents.dm.<node_id>, 2026-08-31

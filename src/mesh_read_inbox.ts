@@ -6,8 +6,7 @@
 //
 // "Inbox" used to mean a deterministic per-agent topic anyone could
 // write into (agents.dm.<node_id>, 2026-08-31 to 2026-09-03). That is
-// gone -- see rooms.ts and plans/PLAN_AGENT_CONVERSATIONS.md. Rings
-// (WP2) will show up here too, once they exist.
+// gone -- see rooms.ts and rings.ts.
 //
 // Never retroactive, same as everything watch-backed here: a room's
 // messages are only the ones that arrived while this process was
