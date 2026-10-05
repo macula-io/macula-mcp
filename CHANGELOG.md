@@ -5,6 +5,20 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.41.0] - 2026-10-06
+
+Every connection now settles on SecP384r1MLKEM1024, the one hybrid key
+exchange group that meets both CNSA 2.0 (ML-KEM-1024 with P-384) and BSI
+TR-02102 (hybrid only). Before, macula-mcp landed on SecP256r1MLKEM768 with
+every station (macula-io/macula-ts#15).
+
+### Changed
+
+- **@macula-io/ts ^0.28.0** (macula-go v0.23.0), whose dial offers
+  SecP384r1MLKEM1024 alone and refuses a handshake that settled on any other
+  group. A station that accepts only SecP256r1MLKEM768 now fails in the
+  handshake; every macula 12 station accepts SecP384r1MLKEM1024.
+
 ## [0.40.0] - 2026-10-05
 
 ### Added

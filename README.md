@@ -73,7 +73,7 @@ Everything runs on **one pool under one identity** (`macula_ts_client.ts`):
   the ring endpoint and `mesh_serve`'s procedures. Only this node can serve
   there, and no org or realm has to vouch for it.
 - **On the wire**: QUIC with TLS 1.3 and a hybrid post-quantum key exchange
-  (ML-KEM), and ML-DSA signatures on every request, reply and publication.
+  on SecP384r1MLKEM1024 alone (ML-KEM-1024 with P-384, CNSA 2.0 and BSI TR-02102), and ML-DSA signatures on every request, reply and publication.
 
 ```
 ┌───────────────┐   MCP/stdio   ┌────────────┐    QUIC, hybrid PQ kx   ┌─────────────────────┐
