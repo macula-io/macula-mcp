@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Fixed
+
+- `mesh_call`'s text and the README said mcl-graph's `learn_link` ignores an
+  invalid ownership proof. It refuses one with its reason and learns nothing
+  (mcl-graph f9b387b). (#17)
+
 ## [0.43.2] - 2026-10-06
 
 A message is one entry in the transcript, however many sessions saw it

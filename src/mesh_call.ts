@@ -32,8 +32,8 @@ const DESCRIPTION_FULL =
   "appear as {\"$bytes\": \"<base64>\"}; pass them back in the same form. " +
   "prove_ownership: 1 attaches an ownership proof (asserted_by) signed by this agent's key, valid only " +
   "for these args, this procedure and realm, once; what a provider does with one is its own policy " +
-  "(mcl-graph's learn_link credits a valid one's identity, ignores an invalid one and refuses a " +
-  "repeated one). args must not carry \"caller\". " +
+  "(mcl-graph's learn_link credits a valid one's identity, refuses an invalid one with its reason, " +
+  "learning nothing, and refuses a repeated one). args must not carry \"caller\". " +
   "The call is sealed to the provider's advertised KEM key whenever its advertisement names one " +
   "(confidential \"preferred\", the default); confidential \"required\" never calls a provider that names " +
   "none and fails with code=confidentiality and its reason instead. code=sealed_refused from the provider " +
