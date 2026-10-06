@@ -5,6 +5,29 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.42.0] - 2026-10-06
+
+UCAN-gated calls (macula-architecture#9). Before, a configured
+`MACULA_MCP_UCAN` made `mesh_call` refuse every call, waiting on post-quantum
+UCANs (macula-io/macula-go#2), which macula-go has signed since v0.17.0;
+@macula-io/ts gained them in 0.29.0.
+
+### Added
+
+- **`mesh_call` `ucan: 1`** presents this server's UCAN to a gated procedure:
+  the token in the file `MACULA_MCP_UCAN` names (first line), with its
+  chain's parents (the lines after). A gated provider refuses a call without
+  one, or with one it does not accept, with `code=unauthorized`. A call
+  without `ucan: 1` sends no token, so a capability chain goes only to a
+  provider the agent chose to present it to. Asking for one when none is
+  configured, readable or present is refused by name before anything is sent.
+
+### Changed
+
+- **@macula-io/ts ^0.29.0.**
+- `MACULA_MCP_UCAN` no longer makes `mesh_call` refuse: it names the token
+  file `ucan: 1` reads.
+
 ## [0.41.0] - 2026-10-06
 
 Every connection now settles on SecP384r1MLKEM1024, the one hybrid key

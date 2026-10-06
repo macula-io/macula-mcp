@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const REALM = "abb81b5a614b63551b400b810648c0c8a78efad845442630c94b46cc95d2fcd1";
 const PROVIDER = "cd".repeat(32);
@@ -68,11 +71,32 @@ describe("mesh_call", () => {
     expect(body.seal).toStrictEqual({ sealed: 0, provider: PROVIDER, means: expect.stringMatching(/NOT sealed.*in the clear/) });
   });
 
-  it("refuses by name while MACULA_MCP_UCAN is set, rather than dropping the token silently", async () => {
-    process.env.MACULA_MCP_UCAN = "/tmp/token";
-    const res = await (await meshCall())({ procedure: "mcl-mail/open_mailbox" });
-    expect(res.isError).toBe(true);
-    expect(res.content[0]!.text).toMatch(/macula-go#2/);
+  it("presents the configured UCAN and its proofs only when the call asks for it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mesh-call-ucan-"));
+    const file = join(dir, "ucan");
+    await writeFile(file, "token.child\nproof.parent\n\n");
+    process.env.MACULA_MCP_UCAN = file;
+    mocks.callWithReport.mockResolvedValue({ procedure: "p/q", payload: 1, duration_ms: 3, seal: { sealed: 0, provider: PROVIDER } });
+    const handler = await meshCall();
+    await handler({ procedure: "p/q", ucan: 1 });
+    expect(mocks.callWithReport).toHaveBeenLastCalledWith(expect.objectContaining({ ucan: "token.child", proofs: ["proof.parent"] }));
+    await handler({ procedure: "p/q" });
+    expect(mocks.callWithReport.mock.lastCall![0]).not.toHaveProperty("ucan");
+    expect(mocks.callWithReport.mock.lastCall![0]).not.toHaveProperty("proofs");
+  });
+
+  it("refuses by name a call that asks for a UCAN none is configured for, before anything is sent", async () => {
+    const handler = await meshCall();
+    const unset = await handler({ procedure: "p/q", ucan: 1 });
+    expect(unset.isError).toBe(true);
+    expect(unset.content[0]!.text).toMatch(/MACULA_MCP_UCAN is not set/);
+    const dir = await mkdtemp(join(tmpdir(), "mesh-call-ucan-"));
+    const empty = join(dir, "empty");
+    await writeFile(empty, "\n");
+    process.env.MACULA_MCP_UCAN = empty;
+    expect((await handler({ procedure: "p/q", ucan: 1 })).content[0]!.text).toMatch(/holds no token/);
+    process.env.MACULA_MCP_UCAN = join(dir, "missing");
+    expect((await handler({ procedure: "p/q", ucan: 1 })).content[0]!.text).toMatch(/cannot be read/);
     expect(mocks.callWithReport).not.toHaveBeenCalled();
   });
 

@@ -148,6 +148,10 @@ export interface CallArgs {
   confidential?: Confidential;
   /** Call THIS provider (its node id, hex) rather than any trusted one. */
   provider?: string;
+  /** A UCAN minted for this server's node, presented to a gated procedure,
+   * and its chain's parents. */
+  ucan?: string;
+  proofs?: string[];
 }
 
 /**
@@ -167,7 +171,8 @@ export async function call(args: CallArgs): Promise<CallResult> {
   const { pool, realm, payload } = await prepared(args);
   try {
     const result = await pool.call(realm, args.procedure, payload,
-      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential, provider: args.provider });
+      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential, provider: args.provider,
+        ucan: args.ucan, proofs: args.proofs });
     return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start };
   } catch (e) {
     throw toMeshError(e);
@@ -190,7 +195,8 @@ export async function callWithReport(args: CallArgs): Promise<CallResult & { sea
   const { pool, realm, payload } = await prepared(args);
   try {
     const { result, report } = await pool.callReport(realm, args.procedure, payload,
-      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential, provider: args.provider });
+      { timeoutMs: args.timeoutMs, bytes: args.bytes, confidential: args.confidential, provider: args.provider,
+        ucan: args.ucan, proofs: args.proofs });
     return { procedure: args.procedure, payload: result, duration_ms: Date.now() - start, seal: sealOf(report) };
   } catch (e) {
     throw toMeshError(e);
