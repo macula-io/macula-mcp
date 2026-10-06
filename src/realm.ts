@@ -31,8 +31,9 @@
 //
 // Credentials live under ~/.config/macula-mcp/realm/<node_id>/<realm>.json
 // (0600), keyed by the identity they belong to: a session-scoped identity
-// keeps its membership for as long as that identity exists; pin
-// MACULA_MCP_IDENTITY to keep both across harness sessions.
+// keeps its membership for as long as that identity exists; name the
+// agent (MACULA_MCP_AGENT) or pin MACULA_MCP_IDENTITY to keep both across
+// harness sessions.
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname, arch, homedir, platform } from "node:os";
 import { join } from "node:path";

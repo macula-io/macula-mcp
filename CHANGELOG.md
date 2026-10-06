@@ -5,6 +5,23 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.43.0] - 2026-10-06
+
+A stable identity per named agent (macula-services/mcl-kanban#6). Before, a
+server had one key per harness session, so an agent became a stranger to its
+peers after every restart, and `MACULA_MCP_IDENTITY` in a shared MCP config
+gave every agent the same key.
+
+### Added
+
+- **`MACULA_MCP_AGENT=<name>`**: the identity key is
+  `~/.config/macula-mcp/keys/agent-<name>.key`, created on first use (0600),
+  the same in every session launched with that name and different per name.
+  The name is case-insensitive and refused, by name, unless it is letters,
+  digits, `_` and `-` (not starting with `-`, at most 64). Setting it together
+  with `MACULA_MCP_IDENTITY` is refused, naming both. Unset or empty: the
+  per-session key as before.
+
 ## [0.42.0] - 2026-10-06
 
 UCAN-gated calls (macula-architecture#9). Before, a configured

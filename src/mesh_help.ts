@@ -54,7 +54,8 @@ const TOPICS: HelpTopic[] = [
       "identity key -- an ML-DSA node key -- used for every link, call, publication and served " +
       "procedure, so providers see it as the caller and subscribers as the publisher; that it is " +
       "persisted per logical session (scoped by CLAUDE_CODE_SESSION_ID, else the parent pid), and how " +
-      "to pin it to a fixed file with MACULA_MCP_IDENTITY when a stable node_id across sessions is needed.",
+      "to keep a stable node_id across sessions: MACULA_MCP_AGENT=<name> for one key per named agent " +
+      "(keys/agent-<name>.key), or MACULA_MCP_IDENTITY to pin a fixed file.",
   },
   {
     name: "help_wire_format",

@@ -153,8 +153,10 @@ stop and pick 1, 2 or 3 above instead.
 - One session, one agent: a fresh Claude Code session, or a subagent with
   its own macula-mcp connection, gets its OWN identity (a different parent
   pid). The SAME session restarting (including \`--resume\`) reuses the
-  same one. \`MACULA_MCP_IDENTITY\` pins it to a fixed file, e.g. for an
-  identity that must survive even a session id change. This matters for
+  same one. \`MACULA_MCP_AGENT=<name>\` gives a named agent one key of its
+  own (\`keys/agent-<name>.key\`) in every session it runs, and
+  \`MACULA_MCP_IDENTITY\` pins it to a fixed file, e.g. for an identity
+  that must survive even a session id change. This matters for
   presence: \`mesh_agents\`' roster is keyed by node ID, so two agents
   sharing a scope (or a pinned file) look like one to everyone else.
   \`operator_name\` is the stable, human-facing label over the identity --

@@ -13,10 +13,10 @@ import { toolDescription } from "./tool_description.js";
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
 function pinHint(identityPath: string): string | undefined {
-  return process.env.MACULA_MCP_IDENTITY
+  return process.env.MACULA_MCP_IDENTITY || process.env.MACULA_MCP_AGENT
     ? undefined
     : `This identity is scoped to the current harness session. To keep it, and this membership, across sessions: ` +
-        `set MACULA_MCP_IDENTITY=${identityPath} in the client's MCP server environment.`;
+        `launch it with MACULA_MCP_AGENT=<agent name>, or set MACULA_MCP_IDENTITY=${identityPath} in the client's MCP server environment.`;
 }
 
 /**

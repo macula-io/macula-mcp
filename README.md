@@ -609,8 +609,9 @@ macula.io):
 ```
 
 Membership follows the identity it was granted to. Identities are scoped to
-the harness session by default, so pin `MACULA_MCP_IDENTITY` to keep both the
-identity and its membership across sessions; the tool says so when it applies.
+the harness session by default, so name the agent with `MACULA_MCP_AGENT` (or
+pin `MACULA_MCP_IDENTITY`) to keep both the identity and its membership across
+sessions; the tool says so when it applies.
 `MACULA_MCP_REALM_URL` overrides where THIS flow (always `io.macula`) points --
 for joining a genuinely different realm, see multi-realm below, which never
 consults this variable at all.
@@ -750,7 +751,7 @@ For a HUMAN in the conversation, not the agent, surfaces as a slash command in c
 | Prompt             | Asks the model to explain                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------ |
 | `help`             | Full quick-start: tool overview, one example each, top gotchas.                          |
-| `help_identity`    | How identity works: one key per session, pinning it with `MACULA_MCP_IDENTITY`. |
+| `help_identity`    | How identity works: one key per session, one per named agent with `MACULA_MCP_AGENT`, pinning it with `MACULA_MCP_IDENTITY`. |
 | `help_wire_format` | The no-bool / naming rules, with a valid and invalid example.                             |
 | `help_watch`       | What `mesh_watch` is actually for, and the mistake to avoid.                              |
 | `help_presence`    | What `mesh_hello`/`mesh_agents`/`mesh_goodbye` actually do, the SQLite roster.            |
@@ -848,6 +849,7 @@ installing without registering any client) and troubleshooting.
 | `MACULA_MESH_STATIONS`         | Comma-separated stations to link to, each as `host:port@<node_id hex>` (an IPv6 host in brackets). A station is only trusted by the node_id it proves, so an entry without one is refused by name. The pool links to every one and redials a dropped link. | the six fleet stations (Frankfurt, Nuremberg, Falkenstein, Helsinki, Paris, Amsterdam), each pinned by its node_id |
 | `MACULA_MESH_REALMS`           | Comma-separated `<realm id hex>=<realm key hex>` entries: realms whose keys this server trusts, besides io.macula. A provider in a realm is trusted only when its authorization verifies against that realm's key. | io.macula only (its key ships with this package) |
 | `MACULA_MCP_KEM_ADVERTISE`     | `1` names this server's KEM key (in memory, rotated daily) in the advertisements of everything it serves that is not `confidential: "off"`, `~<node_id>/ring` included (shared content is always served in the clear), so callers seal their calls to it; `mesh_serve` `confidential: "required"` needs it. Past one advertisement lifetime (about five minutes) a caller that cannot seal (older than macula 13, macula-go 0.18 or @macula-io/ts 0.24) is refused `sealed_required`, ring included. Turn it on only once every station you serve through runs macula 12.11 or later and your callers run those. Unset or empty is `0`; any value but `0` or `1` is refused by name. | `0` (no key named: served in the clear) |
+| `MACULA_MCP_AGENT`             | Name this agent: its identity key is `~/.config/macula-mcp/keys/agent-<name>.key`, created on first use (owner-readable only) and the same in every session launched with that name, so a crew of agents each keeps one stable node_id across restarts. Letters, digits, `_` and `-`, case-insensitive, at most 64; anything else is refused. Set it in the launch environment of each agent (the MCP server inherits it), not in a shared MCP config, or every agent becomes one. Refused together with `MACULA_MCP_IDENTITY`. | unset: the per-session key below |
 | `MACULA_MCP_IDENTITY`          | Pin this server's one identity key (an ML-DSA node key, `pq_hybrid`) to a fixed file, for an identity that survives across harness sessions. The key file is created on first use, readable by its owner only. | one key per logical session: `~/.config/macula-mcp/keys/<scope>.key`, scoped by `CLAUDE_CODE_SESSION_ID` else the parent pid (a restart of this same session reuses it, a different session gets its own) |
 | `MACULA_MCP_UCAN`              | A file holding the UCAN `mesh_call` presents when a call passes `ucan: 1`: the token, minted for this server's node, on the first line, and its chain's parents (proofs) on the lines after, one per line. Read at each such call, so a renewed token is picked up without a restart. A call without `ucan: 1` sends no token. `ucan: 1` with this unset, unreadable or empty is refused by name, never sent without one. | unset |
 | `MACULA_MCP_AUTOJOIN_REALM`    | A realm to join silently at the device tier on presence start (see `device_membership.ts`). A realm other than io.macula also needs its key in `MACULA_MESH_REALMS`. | unset (off) |

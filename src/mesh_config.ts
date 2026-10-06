@@ -138,14 +138,42 @@ const scopeKey = process.env.CLAUDE_CODE_SESSION_ID ?? `ppid-${process.ppid}`;
 /**
  * Where this server's ONE identity key lives: an ML-DSA node key under the
  * fleet's pq_hybrid profile, used for every link, call, publication and
- * served procedure. MACULA_MCP_IDENTITY pins it to a fixed file (a durable
- * agent identity across harness restarts). The Ed25519 seed files of the
- * releases before macula 12 (`~/.config/macula-mcp/identities/*.seed`) are
- * left untouched and never read.
+ * served procedure. MACULA_MCP_AGENT=<name> gives the agent of that name
+ * one key, `keys/agent-<name>.key`, the same in every session it runs, so
+ * a harness that launches each agent with its own name keeps every agent's
+ * node_id stable and distinct. MACULA_MCP_IDENTITY pins it to a fixed file
+ * instead; setting both is refused. The Ed25519 seed files of the releases
+ * before macula 12 (`~/.config/macula-mcp/identities/*.seed`) are left
+ * untouched and never read.
  */
 export function nodeKeyPath(): string {
-  if (process.env.MACULA_MCP_IDENTITY) return process.env.MACULA_MCP_IDENTITY;
-  return join(homedir(), ".config", "macula-mcp", "keys", `${scopeKey}.key`);
+  const agent = agentName();
+  const pinned = process.env.MACULA_MCP_IDENTITY;
+  if (agent && pinned) {
+    throw new MeshError(
+      `MACULA_MCP_AGENT ("${agent}") and MACULA_MCP_IDENTITY ("${pinned}") are both set: set one of them`,
+    );
+  }
+  if (pinned) return pinned;
+  const file = agent ? `agent-${agent}.key` : `${scopeKey}.key`;
+  return join(homedir(), ".config", "macula-mcp", "keys", file);
+}
+
+/**
+ * MACULA_MCP_AGENT, lowercased, or undefined when unset or empty. It
+ * becomes part of a file name, so anything but a plain word (letters,
+ * digits, `_` and `-`, not starting with `-`, at most 64) is refused.
+ */
+export function agentName(): string | undefined {
+  const value = process.env.MACULA_MCP_AGENT;
+  if (value === undefined || value === "") return undefined;
+  const name = value.toLowerCase();
+  if (!/^[a-z0-9_][a-z0-9_-]{0,63}$/.test(name)) {
+    throw new MeshError(
+      `MACULA_MCP_AGENT is "${value}": an agent name is letters, digits, _ and -, not starting with -, at most 64`,
+    );
+  }
+  return name;
 }
 
 /**
