@@ -1,20 +1,21 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.rgfaber/macula-mcp",
+  "name": "io.macula/macula-mcp",
   "description": "Model Context Protocol server that exposes the Macula mesh to any agent harness",
   "repository": {
     "url": "https://github.com/macula-io/macula-mcp",
     "source": "github"
   },
-  "version": "0.28.2",
+  "version": "0.43.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@macula-io/mcp",
-      "version": "0.28.2",
+      "version": "0.43.1",
       "transport": {
         "type": "stdio"
       }
     }
-  ]
+  ],
+  "title": "Macula mesh"
 }

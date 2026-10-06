@@ -5,6 +5,24 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.43.1] - 2026-10-06
+
+Listed in the official MCP Registry as `io.macula/macula-mcp`
+(macula-io/macula-architecture#11).
+
+### Changed
+
+- `mcpName` and `server.json` name the `io.macula` namespace, proven by a DNS
+  TXT record on macula.io, instead of `io.github.rgfaber`, which needed Raf's
+  own GitHub login for every publish.
+- A `v*` tag now also publishes `server.json` to the MCP Registry, after the
+  npm publish. The release refuses a tag whose version differs from
+  `server.json`'s, as it already did for `package.json`'s.
+
+### Removed
+
+- `glama.json`: the server is not listed on Glama.
+
 ## [0.43.0] - 2026-10-06
 
 A stable identity per named agent (macula-services/mcl-kanban#6). Before, a

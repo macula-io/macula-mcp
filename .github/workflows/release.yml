@@ -22,13 +22,19 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Validate version matches package.json
+      - name: Validate version matches package.json and server.json
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
           if [ "$PKG_VERSION" != "${{ steps.version.outputs.VERSION }}" ]; then
             echo "::error::Tag version (${{ steps.version.outputs.VERSION }}) doesn't match package.json version ($PKG_VERSION)"
             exit 1
           fi
+          for SERVER_VERSION in $(node -p "const s = require('./server.json'); [s.version, ...s.packages.map(p => p.version)].join(' ')"); do
+            if [ "$SERVER_VERSION" != "${{ steps.version.outputs.VERSION }}" ]; then
+              echo "::error::Tag version (${{ steps.version.outputs.VERSION }}) doesn't match a server.json version ($SERVER_VERSION)"
+              exit 1
+            fi
+          done
 
       # Rebuilds and re-runs the offline suite here rather than trusting
       # an artifact from the CI workflow -- this workflow triggers off a
@@ -66,3 +72,16 @@ jobs:
       # attestation (this exact commit/workflow run) to the published
       # package, free once OIDC is already wired up.
       - run: npm publish --access public --provenance
+
+      # The official MCP Registry lists this package as io.macula/macula-mcp.
+      # The io.macula namespace is proven by DNS: an Ed25519 public key in a
+      # "v=MCPv1" TXT record on the macula.io apex, whose private key is the
+      # MCP_REGISTRY_KEY secret. The registry checks that the npm package's
+      # mcpName equals server.json's name, so this runs after npm publish.
+      - name: Publish to the MCP Registry
+        env:
+          MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login dns --domain macula.io --private-key "$MCP_REGISTRY_KEY"
+          ./mcp-publisher publish
