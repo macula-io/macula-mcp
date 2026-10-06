@@ -636,8 +636,9 @@ macula-cli person delegate -realm io.macula -realm-key @io_macula.key \
   -to <this server's node_id> -ttl 24h -out ~/.config/macula-mcp/note.ucan
 ```
 
-This server's node_id is in `mesh://identity` (pin `MACULA_MCP_IDENTITY` so it
-stays the same across sessions). Point `MACULA_MCP_UCAN` at the chain file and
+This server's node_id is in `mesh://identity`; name the agent with
+`MACULA_MCP_AGENT` (or pin `MACULA_MCP_IDENTITY`) so it stays the same across
+sessions, or the note stops matching. Point `MACULA_MCP_UCAN` at the chain file and
 call with `ucan: 1`. The note is revoked only by its expiry, so delegate again
 when it runs out; the file is read at each call, so no restart is needed.
 `mesh_join_realm`'s own device membership is separate and is not presented.
