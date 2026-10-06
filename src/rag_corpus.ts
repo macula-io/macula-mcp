@@ -80,6 +80,25 @@ export function verifyCorpus(d: Description, provider: string, answered: string,
   return { corpus_hash: answered, provider, signature: "verified", signed_by: verified.nodeId };
 }
 
+/** Whether a hit belongs to a corpus whose description checked out (verified
+ * or unsigned): a corpus hit counts only when the description lists its repo
+ * at the commit the hit names. A deposit, or a hit without a usable
+ * provenance, is outside what the description (and so its signature) covers.
+ * Booleans go as 1/0, like content_verified. */
+export type CorpusMembership = { in_corpus: 1 } | { in_corpus: 0; corpus_reason: string };
+
+export function inCorpus(hit: unknown, repos: Repo[]): CorpusMembership {
+  const out = (corpus_reason: string): CorpusMembership => ({ in_corpus: 0, corpus_reason });
+  const p = hit !== null && typeof hit === "object" ? (hit as Record<string, unknown>).provenance : undefined;
+  if (p === null || typeof p !== "object") return out("malformed_provenance");
+  const { kind, repo_id, commit } = p as Record<string, unknown>;
+  if (kind === "deposit") return out("deposit");
+  if (kind !== "corpus" || typeof repo_id !== "string" || typeof commit !== "string") return out("malformed_provenance");
+  const listed = repos.filter((r) => r.id === repo_id);
+  if (listed.length === 0) return out("repo_not_in_corpus");
+  return listed.some((r) => r.commit === commit) ? { in_corpus: 1 } : out("commit_not_in_corpus");
+}
+
 function wellFormed(d: unknown): d is Description {
   if (d === null || typeof d !== "object") return false;
   const x = d as Record<string, unknown>;

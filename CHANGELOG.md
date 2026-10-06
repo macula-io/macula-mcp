@@ -7,6 +7,14 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- `mesh_recall` marks each hit `in_corpus` 1 or 0 (with `corpus_reason`)
+  against the corpus description it checked, when that corpus is `verified`
+  or `unsigned`: a hit counts only when the description lists its repo at its
+  commit, so a provider can no longer sign one corpus and return hits from
+  another under that signature (macula-io/macula-mcp#19).
+
 ### Fixed
 
 - `mesh_call`'s text and the README said mcl-graph's `learn_link` ignores an

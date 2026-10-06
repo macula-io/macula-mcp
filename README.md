@@ -234,6 +234,16 @@ against its frozen vectors. A signature is static, so a copied one is
 refused: only the key of the provider that answered counts, never the
 description's own `signed_by`. A signature says who vouched, not when.
 
+**Which hits the corpus covers.** When the corpus checked out (`verified` or
+`unsigned`), `mesh_recall` holds each hit against the description it just
+checked and adds `in_corpus`: 1 when the description lists the hit's
+`repo_id` at the hit's `commit`, 0 otherwise, with `corpus_reason`
+(`repo_not_in_corpus`, `commit_not_in_corpus`, `deposit`, or
+`malformed_provenance`). A deposit is never in the corpus: the description
+lists repos only. Only an `in_corpus` 1 hit is covered by the corpus
+signature. When the corpus was `refused` or `unchecked`, hits carry no
+`in_corpus`: there is no checked description to hold them against.
+
 `mesh_remember` calls `mcl-rag`'s `add_knowledge`: one mesh RPC;
 chunking and embedding happen entirely on `mcl-rag`'s side, and it
 derives its own chunk ids, so there is no `document_id` to supply.

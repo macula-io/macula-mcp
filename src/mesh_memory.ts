@@ -56,7 +56,7 @@ import { z } from "zod";
 // Same as mesh_stations.ts: mcl-rag is called in the realm its own
 // advertisement names, discovered first.
 import { KEY_PROFILE, call, callWithReport, discoverProcedureRealm } from "./macula_ts_client.js";
-import { verifyCorpus, type CorpusCheck, type Description } from "./rag_corpus.js";
+import { inCorpus, verifyCorpus, type CorpusCheck, type Description } from "./rag_corpus.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret, findLikelySecret, isExcludedPath } from "./secret_scan.js";
@@ -117,14 +117,17 @@ const RECALL_DESCRIPTION_FULL =
   "commit and lines, or who deposited it) plus content_verified (1 when the text matches the hash its " +
   "provenance names, 0 when not). The reply's corpus_hash names the corpus that answered, and corpus says " +
   "who vouches for it, checked against the provider that answered: signature verified (with signed_by), " +
-  "unsigned, refused or unchecked (with a reason). Empty results mean nothing relevant " +
+  "unsigned, refused or unchecked (with a reason). When the corpus checked out (verified or unsigned), each " +
+  "hit also has in_corpus: 1 when that corpus lists its repo at its commit, 0 with corpus_reason when not " +
+  "(deposits included): only in_corpus 1 hits are covered by the signature. Empty results mean nothing relevant " +
   "has been deposited yet, not an error. Not automatic -- call this deliberately when you actually " +
   "want to check shared memory, e.g. early in a session working on a repo others may have touched.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "empty is not an error" and "not automatic". */
 const RECALL_DESCRIPTION_TERSE =
   "Query the mesh's shared memory (mcl-rag) for anything relevant to query_text -- semantic, not " +
   "keyword match. Returns chunks anyone deposited via mesh_remember, scored, each with its provenance " +
-  "and content_verified (1/0), plus the answering corpus_hash and whether its signature verified. Empty means nothing " +
+  "and content_verified (1/0), plus the answering corpus_hash, whether its signature verified, and per hit " +
+  "in_corpus (1/0, with corpus_reason): only in_corpus 1 is covered by the signature. Empty means nothing " +
   "relevant yet, not an error. Not automatic -- call deliberately, e.g. early in a session on a shared repo.";
 
 const REMEMBER_DESCRIPTION_FULL =
@@ -172,16 +175,34 @@ function recalled(realm: string, payload: unknown): Record<string, unknown> {
 
 /** The corpus that answered, checked: describe_corpus asked of the provider
  * that answered (pinned), then macula_rag's rules (rag_corpus.ts). A provider
- * that cannot describe its corpus leaves the signature unchecked. */
-async function checkedCorpus(realm: string, provider: string, answered: string): Promise<CorpusCheck> {
+ * that cannot describe its corpus leaves the signature unchecked. The
+ * description comes back only when its hash checked out (verified or
+ * unsigned), so its repos can be held against each hit. */
+async function checkedCorpus(realm: string, provider: string, answered: string):
+  Promise<{ check: CorpusCheck; description?: Description }> {
   let description: unknown;
   try {
     description = (await call({ procedure: DESCRIBE_PROCEDURE, realm, provider, bytes: "tagged" })).payload;
   } catch (e) {
-    return { corpus_hash: answered, provider, signature: "unchecked",
-             reason: e instanceof Error ? e.message : String(e) };
+    return { check: { corpus_hash: answered, provider, signature: "unchecked",
+                      reason: e instanceof Error ? e.message : String(e) } };
   }
-  return verifyCorpus(description as Description, provider, answered, KEY_PROFILE);
+  const check = verifyCorpus(description as Description, provider, answered, KEY_PROFILE);
+  const trusted = check.signature === "verified" || check.signature === "unsigned";
+  return trusted ? { check, description: description as Description } : { check };
+}
+
+/** Marks each hit in_corpus 1/0 against a checked description: a hit outside
+ * it is never covered by the corpus signature (macula-mcp#19). */
+function withMembership(hits: unknown, description: Description): unknown {
+  // The provider's own in_corpus/corpus_reason, if it sent any, never survive: the mark is ours alone.
+  const mark = (h: Record<string, unknown>) => {
+    const { in_corpus: _i, corpus_reason: _r, ...rest } = h;
+    return { ...rest, ...inCorpus(h, description.repos) };
+  };
+  return Array.isArray(hits)
+    ? hits.map((h) => (h !== null && typeof h === "object" && !Array.isArray(h) ? mark(h as Record<string, unknown>) : h))
+    : hits;
 }
 
 function checkedHit(hit: unknown): unknown {
@@ -219,7 +240,9 @@ export function registerMeshMemory(server: McpServer): void {
         const answer = recalled(discovery.realm, res.payload);
         const hash = answer.corpus_hash;
         if (typeof hash !== "string") return jsonContent(answer);
-        return jsonContent({ ...answer, corpus: await checkedCorpus(discovery.realm, res.seal.provider, hash) });
+        const { check, description } = await checkedCorpus(discovery.realm, res.seal.provider, hash);
+        const hits = description ? withMembership(answer.hits, description) : answer.hits;
+        return jsonContent({ ...answer, hits, corpus: check });
       } catch (e) {
         return errorContent(describeMeshError("mesh_recall failed", e));
       }

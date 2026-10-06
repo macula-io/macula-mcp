@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalJson, corpusHash, verifyCorpus, type Description } from "./rag_corpus.js";
+import { canonicalJson, corpusHash, inCorpus, verifyCorpus, type Description } from "./rag_corpus.js";
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "rag_contract");
 
@@ -104,5 +104,37 @@ describe("verifyCorpus", () => {
   it("refuses a malformed description without throwing", () => {
     expect(verifyCorpus({ model: "m" } as unknown as Description, OTHER, "x", "pq_hybrid"))
       .toMatchObject({ signature: "refused", reason: "malformed_description" });
+  });
+});
+
+describe("inCorpus", () => {
+  const repos = base.description.repos as Description["repos"];
+  const A = "a".repeat(40);
+  const hit = (provenance: Record<string, unknown>) => ({ content: "x", provenance });
+
+  it("takes a corpus hit whose repo and commit the description lists", () => {
+    expect(inCorpus(hit({ kind: "corpus", repo_id: "alpha", commit: A, path: "alpha/README.md" }), repos))
+      .toEqual({ in_corpus: 1 });
+  });
+
+  it("marks a corpus hit from a repo the description does not list", () => {
+    expect(inCorpus(hit({ kind: "corpus", repo_id: "gamma", commit: A, path: "gamma/x.md" }), repos))
+      .toEqual({ in_corpus: 0, corpus_reason: "repo_not_in_corpus" });
+  });
+
+  it("marks a corpus hit at a commit other than the described one", () => {
+    expect(inCorpus(hit({ kind: "corpus", repo_id: "alpha", commit: "c".repeat(40), path: "alpha/x.md" }), repos))
+      .toEqual({ in_corpus: 0, corpus_reason: "commit_not_in_corpus" });
+  });
+
+  it("marks a deposit: the signed description covers repos only", () => {
+    expect(inCorpus(hit({ kind: "deposit", path: "notes.md" }), repos))
+      .toEqual({ in_corpus: 0, corpus_reason: "deposit" });
+  });
+
+  it("marks a hit with no usable provenance", () => {
+    expect(inCorpus(hit({ kind: "other" }), repos)).toEqual({ in_corpus: 0, corpus_reason: "malformed_provenance" });
+    expect(inCorpus({ content: "x" }, repos)).toEqual({ in_corpus: 0, corpus_reason: "malformed_provenance" });
+    expect(inCorpus("not a hit", repos)).toEqual({ in_corpus: 0, corpus_reason: "malformed_provenance" });
   });
 });

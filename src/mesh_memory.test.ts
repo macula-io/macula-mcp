@@ -164,9 +164,42 @@ describe("mesh_recall", () => {
 
     const body = await recall({ query_text: "pangolins" });
 
-    expect(body.hits[0]).toEqual({ chunk_id: "1", score: 0.9, content: good, provenance, content_verified: 1 });
+    expect(body.hits[0]).toEqual({ chunk_id: "1", score: 0.9, content: good, provenance, content_verified: 1, in_corpus: 1 });
     expect(body.hits[1].content_verified).toBe(0);
     expect(body.hits[1].provenance).toEqual(provenance);
+  });
+
+  // macula-mcp#19: a signed corpus covers only the hits its description lists.
+  it("marks a hit from a repo the verified corpus does not list as outside it", async () => {
+    const v = SIGNED_HYBRID;
+    const content = "From elsewhere.";
+    const sha = createHash("sha256").update(content, "utf8").digest("hex");
+    const inside = { kind: "corpus", repo_id: "alpha", path: "alpha/a.md", commit: "a".repeat(40), content_sha256: sha };
+    const outside = { ...inside, repo_id: "gamma", path: "gamma/g.md" };
+    mocks.discoverProcedureRealm.mockResolvedValue(REALM);
+    answering({ corpus_hash: v.corpus_hash, hits: [{ chunk_id: "1", content, provenance: inside, corpus_reason: "planted" },
+                                                   { chunk_id: "2", content, provenance: outside }] }, v.signed_by);
+    describing({ ...BASE.description, corpus_hash: v.corpus_hash, signature: { $bytes: v.signature_base64 },
+                 signed_by: v.signed_by });
+
+    const body = await recall({ query_text: "x" });
+
+    expect(body.corpus.signature).toBe("verified");
+    expect(body.hits[0]).toMatchObject({ in_corpus: 1 });
+    expect(body.hits[0]).not.toHaveProperty("corpus_reason");
+    expect(body.hits[1]).toMatchObject({ in_corpus: 0, corpus_reason: "repo_not_in_corpus" });
+  });
+
+  it("leaves hits unmarked when the corpus is refused: there is no checked description", async () => {
+    const provenance = { kind: "corpus", repo_id: "alpha", path: "alpha/a.md", commit: "a".repeat(40) };
+    mocks.discoverProcedureRealm.mockResolvedValue(REALM);
+    answering({ corpus_hash: "0".repeat(64), hits: [{ chunk_id: "1", content: "x", provenance }] });
+    describing(UNSIGNED);
+
+    const body = await recall({ query_text: "x" });
+
+    expect(body.corpus.signature).toBe("refused");
+    expect(body.hits[0]).not.toHaveProperty("in_corpus");
   });
 
   // THE PIN: the corpus is described by the provider that answered, and only
