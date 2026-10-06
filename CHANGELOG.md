@@ -5,7 +5,18 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.44.0] - 2026-10-06
+
+### Security
+
+- The lockfile resolves patched releases of five transitive dependencies with
+  open advisories (macula-io/macula-mcp#26): `proxy-addr` 2.0.8 (critical,
+  via express), `fast-uri` 3.1.8 (via ajv), `hono` 4.13.13 (via the MCP SDK),
+  `ip-address` 10.7.3 (via express-rate-limit), and `source-map-js` 1.2.2
+  (high, development only, via vitest). Every parent's range already allowed
+  the fix, so no constraint changed; `npm update` regenerated the lockfile. A
+  fresh install of `@macula-io/mcp` already resolved these; the lockfile
+  governs this repo's own builds and CI.
 
 ### Added
 
