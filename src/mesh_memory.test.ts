@@ -26,11 +26,11 @@ vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<unknown>;
 
-/** Captures server.tool()'s registered handlers instead of a real McpServer -- registerMeshMemory registers three tools on one call. */
+/** Captures server.registerTool()'s registered handlers instead of a real McpServer -- registerMeshMemory registers three tools on one call. */
 function fakeServer(): { server: McpServer; getHandler: (name: string) => Handler } {
   const handlers = new Map<string, Handler>();
   const server = {
-    tool: (name: string, _desc: string, _schema: unknown, fn: Handler) => {
+    registerTool: (name: string, _config: unknown, fn: Handler) => {
       handlers.set(name, fn);
     },
   } as unknown as McpServer;

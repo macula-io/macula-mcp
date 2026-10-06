@@ -219,19 +219,21 @@ const SAY_DESCRIPTION_TERSE =
   "gap to miss a fast one. No ack on the send itself; a ring is what gives you one. With a wait, " + DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshRooms(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_open_room",
-    toolDescription(OPEN_ROOM_DESCRIPTION_FULL, OPEN_ROOM_DESCRIPTION_TERSE),
     {
-      purpose: z.string().max(MAX_PURPOSE_CHARS).optional().describe("Why this room exists, one line. Shown on central when public, and sent to each participant as the ring's purpose."),
-      public: zeroOne.optional().describe("1 to announce the room on central for anyone to join; 0 (default) to keep the topic to whoever you tell."),
-      participants: z.array(nodeIdOrPetnameSchema).max(32).optional().describe("Node ids or petnames (from mesh_agents) to actually ring and invite into this room, besides yourself. All rung at once."),
-      wait_join_seconds: z
-        .number()
-        .min(0)
-        .max(MAX_WAIT_JOIN_SECONDS)
-        .optional()
-        .describe(`Per accepting participant, how long to wait for their participant_joined before reporting them not-yet-joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait). Participants wait side by side, so this is added once, not per participant.`),
+      description: toolDescription(OPEN_ROOM_DESCRIPTION_FULL, OPEN_ROOM_DESCRIPTION_TERSE),
+      inputSchema: {
+        purpose: z.string().max(MAX_PURPOSE_CHARS).optional().describe("Why this room exists, one line. Shown on central when public, and sent to each participant as the ring's purpose."),
+        public: zeroOne.optional().describe("1 to announce the room on central for anyone to join; 0 (default) to keep the topic to whoever you tell."),
+        participants: z.array(nodeIdOrPetnameSchema).max(32).optional().describe("Node ids or petnames (from mesh_agents) to actually ring and invite into this room, besides yourself. All rung at once."),
+        wait_join_seconds: z
+          .number()
+          .min(0)
+          .max(MAX_WAIT_JOIN_SECONDS)
+          .optional()
+          .describe(`Per accepting participant, how long to wait for their participant_joined before reporting them not-yet-joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait). Participants wait side by side, so this is added once, not per participant.`),
+      },
     },
     async ({ purpose, public: isPublic, participants, wait_join_seconds }) => {
       ensurePresence(server);
@@ -244,11 +246,13 @@ export function registerMeshRooms(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_join_room",
-    toolDescription(JOIN_ROOM_DESCRIPTION_FULL, JOIN_ROOM_DESCRIPTION_TERSE),
     {
-      room_topic: z.string().describe("The agents.room.<32 hex> topic."),
+      description: toolDescription(JOIN_ROOM_DESCRIPTION_FULL, JOIN_ROOM_DESCRIPTION_TERSE),
+      inputSchema: {
+        room_topic: z.string().describe("The agents.room.<32 hex> topic."),
+      },
     },
     async ({ room_topic }) => {
       ensurePresence(server);
@@ -260,12 +264,14 @@ export function registerMeshRooms(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_leave_room",
-    toolDescription(LEAVE_ROOM_DESCRIPTION_FULL, LEAVE_ROOM_DESCRIPTION_TERSE),
     {
-      room_topic: z.string().describe("A room you are in (see mesh_rooms)."),
-      close: zeroOne.optional().describe("1 to publish room_closed instead of participant_left."),
+      description: toolDescription(LEAVE_ROOM_DESCRIPTION_FULL, LEAVE_ROOM_DESCRIPTION_TERSE),
+      inputSchema: {
+        room_topic: z.string().describe("A room you are in (see mesh_rooms)."),
+        close: zeroOne.optional().describe("1 to publish room_closed instead of participant_left."),
+      },
     },
     async ({ room_topic, close }) => {
       ensurePresence(server);
@@ -277,10 +283,12 @@ export function registerMeshRooms(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_rooms",
-    toolDescription(ROOMS_DESCRIPTION_FULL, ROOMS_DESCRIPTION_TERSE),
-    {},
+    {
+      description: toolDescription(ROOMS_DESCRIPTION_FULL, ROOMS_DESCRIPTION_TERSE),
+      inputSchema: {},
+    },
     async () => {
       // Real bug, found while auditing this file for Part B: every sibling
       // tool here (mesh_open_room/mesh_join_room/mesh_leave_room/mesh_say)
@@ -329,21 +337,23 @@ export function registerMeshRooms(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_say",
-    toolDescription(SAY_DESCRIPTION_FULL, SAY_DESCRIPTION_TERSE),
     {
-      room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for a broadcast.`),
-      text: z.string().describe("The message."),
-      kind: z.enum(KINDS).optional().describe(`One of ${TALK_KINDS.join(", ")} (default remark_made). Lifecycle kinds are published by the room tools, not here.`),
-      in_reply_to: messageIdSchema.optional().describe("message_id this replies to. Required for answer_given, result_reported, lane_released, claim_confirmed, and claim_disputed."),
-      refs: z.array(z.string().min(1)).max(16).optional().describe("mesh_put artifact ids for anything large. Never paste large content into text."),
-      wait_reply_seconds: z
-        .number()
-        .positive()
-        .max(MAX_WAIT_SECONDS)
-        .optional()
-        .describe(`Also wait up to this long (max ${MAX_WAIT_SECONDS}) for the first envelope from another sender on this topic.`),
+      description: toolDescription(SAY_DESCRIPTION_FULL, SAY_DESCRIPTION_TERSE),
+      inputSchema: {
+        room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for a broadcast.`),
+        text: z.string().describe("The message."),
+        kind: z.enum(KINDS).optional().describe(`One of ${TALK_KINDS.join(", ")} (default remark_made). Lifecycle kinds are published by the room tools, not here.`),
+        in_reply_to: messageIdSchema.optional().describe("message_id this replies to. Required for answer_given, result_reported, lane_released, claim_confirmed, and claim_disputed."),
+        refs: z.array(z.string().min(1)).max(16).optional().describe("mesh_put artifact ids for anything large. Never paste large content into text."),
+        wait_reply_seconds: z
+          .number()
+          .positive()
+          .max(MAX_WAIT_SECONDS)
+          .optional()
+          .describe(`Also wait up to this long (max ${MAX_WAIT_SECONDS}) for the first envelope from another sender on this topic.`),
+      },
     },
     async ({ room_topic, text, kind, in_reply_to, refs, wait_reply_seconds }) => {
       ensurePresence(server);

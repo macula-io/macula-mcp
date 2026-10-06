@@ -197,12 +197,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 export function registerMeshMemory(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_recall",
-    toolDescription(RECALL_DESCRIPTION_FULL, RECALL_DESCRIPTION_TERSE),
     {
-      query_text: z.string().describe("What to search for, in natural language."),
-      top_k: z.number().int().positive().max(100).optional().describe("Max results (default 10)."),
+      description: toolDescription(RECALL_DESCRIPTION_FULL, RECALL_DESCRIPTION_TERSE),
+      inputSchema: {
+        query_text: z.string().describe("What to search for, in natural language."),
+        top_k: z.number().int().positive().max(100).optional().describe("Max results (default 10)."),
+      },
     },
     async ({ query_text, top_k }) => {
       ensurePresence(server);
@@ -224,13 +226,15 @@ export function registerMeshMemory(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_remember",
-    toolDescription(REMEMBER_DESCRIPTION_FULL, REMEMBER_DESCRIPTION_TERSE),
     {
-      content: z.string().describe("The text to remember, in your own words. Markdown is fine -- header-aware chunking splits it if long."),
-      source_label: z.string().optional().describe("Grouping/attribution label, e.g. \"agent-notes/macula-mcp-presence\". Defaults to \"conversational\" if omitted."),
-      topics: z.array(z.string()).optional().describe("Topic labels to tag this deposit with, for later topic-filtered search."),
+      description: toolDescription(REMEMBER_DESCRIPTION_FULL, REMEMBER_DESCRIPTION_TERSE),
+      inputSchema: {
+        content: z.string().describe("The text to remember, in your own words. Markdown is fine -- header-aware chunking splits it if long."),
+        source_label: z.string().optional().describe("Grouping/attribution label, e.g. \"agent-notes/macula-mcp-presence\". Defaults to \"conversational\" if omitted."),
+        topics: z.array(z.string()).optional().describe("Topic labels to tag this deposit with, for later topic-filtered search."),
+      },
     },
     async ({ content, source_label, topics }) => {
       ensurePresence(server);
@@ -257,20 +261,22 @@ export function registerMeshMemory(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_remember_directory",
-    toolDescription(REMEMBER_DIRECTORY_DESCRIPTION_FULL, REMEMBER_DIRECTORY_DESCRIPTION_TERSE),
     {
-      directory: z.string().describe("Local directory to walk, recursively. Must exist and be readable."),
-      include_extensions: z
-        .array(z.string())
-        .optional()
-        .describe(`File extensions to ingest, e.g. [".md", ".ts"]. Defaults to ${JSON.stringify(DEFAULT_INCLUDE_EXTENSIONS)}.`),
-      exclude_dirs: z
-        .array(z.string())
-        .optional()
-        .describe(`Directory names to skip anywhere in the tree. Defaults to ${JSON.stringify(DEFAULT_EXCLUDE_DIRS)}.`),
-      source_prefix: z.string().optional().describe('Prepended to each file\'s relative path for source_path, e.g. "mcl-corpus".'),
+      description: toolDescription(REMEMBER_DIRECTORY_DESCRIPTION_FULL, REMEMBER_DIRECTORY_DESCRIPTION_TERSE),
+      inputSchema: {
+        directory: z.string().describe("Local directory to walk, recursively. Must exist and be readable."),
+        include_extensions: z
+          .array(z.string())
+          .optional()
+          .describe(`File extensions to ingest, e.g. [".md", ".ts"]. Defaults to ${JSON.stringify(DEFAULT_INCLUDE_EXTENSIONS)}.`),
+        exclude_dirs: z
+          .array(z.string())
+          .optional()
+          .describe(`Directory names to skip anywhere in the tree. Defaults to ${JSON.stringify(DEFAULT_EXCLUDE_DIRS)}.`),
+        source_prefix: z.string().optional().describe('Prepended to each file\'s relative path for source_path, e.g. "mcl-corpus".'),
+      },
     },
     async ({ directory, include_extensions, exclude_dirs, source_prefix }) => {
       ensurePresence(server);

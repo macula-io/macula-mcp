@@ -34,24 +34,26 @@ const DESCRIPTION_TERSE =
   `Bytes appear as {"$bytes": "<base64>"}; pass them back in the same form. dropped: events discarded after arriving (0 = none).`;
 
 export function registerMeshWatch(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_watch",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      topic: z.string().describe("Topic name (e.g. 'chat.demo')."),
-      duration_seconds: z
-        .number()
-        .positive()
-        .max(MAX_DURATION_SECONDS)
-        .default(10)
-        .describe(`How long to watch, in seconds (max ${MAX_DURATION_SECONDS}).`),
-      count: z.number().int().positive().optional().describe("Stop early once this many events have arrived."),
-      realm: z
-        .string()
-        .length(64)
-        .regex(/^[0-9a-fA-F]+$/, "must be hex")
-        .optional()
-        .describe("32-byte realm id as hex (64 chars) the topic is scoped to. Omit for io.macula."),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        topic: z.string().describe("Topic name (e.g. 'chat.demo')."),
+        duration_seconds: z
+          .number()
+          .positive()
+          .max(MAX_DURATION_SECONDS)
+          .default(10)
+          .describe(`How long to watch, in seconds (max ${MAX_DURATION_SECONDS}).`),
+        count: z.number().int().positive().optional().describe("Stop early once this many events have arrived."),
+        realm: z
+          .string()
+          .length(64)
+          .regex(/^[0-9a-fA-F]+$/, "must be hex")
+          .optional()
+          .describe("32-byte realm id as hex (64 chars) the topic is scoped to. Omit for io.macula."),
+      },
     },
     async ({ topic, duration_seconds, count, realm }) => {
       ensurePresence(server);

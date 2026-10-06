@@ -46,40 +46,42 @@ const DESCRIPTION_TERSE =
   "stranger running repeatedly on this machine. Bytes appear as {\"$bytes\": \"<base64>\"} on stdin; reply with bytes in the same form. MACULA_MCP_SEALED=1|0 says whether the call came sealed.";
 
 export function registerMeshServe(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_serve",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      name: z
-        .string()
-        .min(1)
-        .describe("The procedure's name in this agent's own namespace, one segment, e.g. \"summarize\" (served as ~<node_id>/summarize)."),
-      exec: z
-        .string()
-        .min(1)
-        .describe(
-          "Shell command to run once per inbound call. Receives the call's JSON payload on stdin and the caller's " +
-            "node_id in MACULA_MCP_CALLER; its entire stdout is parsed as the JSON reply (empty stdout replies null). " +
-            "Bytes appear as {\"$bytes\": \"<base64>\"} both ways.",
-        ),
-      exec_timeout_seconds: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe(`How long one invocation may run before it's killed (default ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}).`),
-      confidential: z
-        .enum(["preferred", "required", "off"])
-        .optional()
-        .describe(
-          "\"preferred\" (default): with MACULA_MCP_KEM_ADVERTISE=1 this agent's KEM key is named so callers seal, " +
-            "and a clear call is taken only while its last keyless advertisement could still be served, then refused " +
-            "sealed_required, so a caller older than macula 13 / macula-go 0.18 / @macula-io/ts 0.24 cannot call it " +
-            "after that; without it, served in the clear. \"required\": every clear call is refused (sealed_required); needs " +
-            "MACULA_MCP_KEM_ADVERTISE=1, else code=confidentiality (reason=kem_advertise_disabled), and a caller " +
-            "older than macula 13 / macula-go 0.18 / @macula-io/ts 0.24 cannot call it. \"off\": served in the clear. " +
-            "To change it on a served name, mesh_unserve it first.",
-        ),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        name: z
+          .string()
+          .min(1)
+          .describe("The procedure's name in this agent's own namespace, one segment, e.g. \"summarize\" (served as ~<node_id>/summarize)."),
+        exec: z
+          .string()
+          .min(1)
+          .describe(
+            "Shell command to run once per inbound call. Receives the call's JSON payload on stdin and the caller's " +
+              "node_id in MACULA_MCP_CALLER; its entire stdout is parsed as the JSON reply (empty stdout replies null). " +
+              "Bytes appear as {\"$bytes\": \"<base64>\"} both ways.",
+          ),
+        exec_timeout_seconds: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(`How long one invocation may run before it's killed (default ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}).`),
+        confidential: z
+          .enum(["preferred", "required", "off"])
+          .optional()
+          .describe(
+            "\"preferred\" (default): with MACULA_MCP_KEM_ADVERTISE=1 this agent's KEM key is named so callers seal, " +
+              "and a clear call is taken only while its last keyless advertisement could still be served, then refused " +
+              "sealed_required, so a caller older than macula 13 / macula-go 0.18 / @macula-io/ts 0.24 cannot call it " +
+              "after that; without it, served in the clear. \"required\": every clear call is refused (sealed_required); needs " +
+              "MACULA_MCP_KEM_ADVERTISE=1, else code=confidentiality (reason=kem_advertise_disabled), and a caller " +
+              "older than macula 13 / macula-go 0.18 / @macula-io/ts 0.24 cannot call it. \"off\": served in the clear. " +
+              "To change it on a served name, mesh_unserve it first.",
+          ),
+      },
     },
     async ({ name, exec, exec_timeout_seconds, confidential }) => {
       try {

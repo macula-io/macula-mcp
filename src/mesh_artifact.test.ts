@@ -11,7 +11,7 @@ type Handler = (args: Record<string, unknown>) => Promise<{ isError?: boolean; c
 
 async function tools(): Promise<Map<string, Handler>> {
   const handlers = new Map<string, Handler>();
-  const server = { tool: (n: string, _d: string, _s: unknown, fn: Handler) => handlers.set(n, fn) } as unknown as McpServer;
+  const server = { registerTool: (n: string, _config: unknown, fn: Handler) => handlers.set(n, fn) } as unknown as McpServer;
   const { registerMeshArtifact } = await import("./mesh_artifact.js");
   registerMeshArtifact(server);
   return handlers;

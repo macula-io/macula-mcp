@@ -185,19 +185,21 @@ const DESCRIPTION_TERSE =
   DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshRing(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_ring",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      to: nodeIdOrPetnameSchema.describe("The agent to ring: a node_id or petname from mesh_agents."),
-      purpose: z.string().min(1).max(MAX_PURPOSE_CHARS).describe(`Why you are ringing, one line (max ${MAX_PURPOSE_CHARS} chars).`),
-      room_topic: z.string().optional().describe("A room you are already in to invite them into. Omit to open a fresh two-party room."),
-      wait_join_seconds: z
-        .number()
-        .min(0)
-        .max(MAX_WAIT_JOIN_SECONDS)
-        .optional()
-        .describe(`After an accepted answer, how long to wait for their participant_joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait).`),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        to: nodeIdOrPetnameSchema.describe("The agent to ring: a node_id or petname from mesh_agents."),
+        purpose: z.string().min(1).max(MAX_PURPOSE_CHARS).describe(`Why you are ringing, one line (max ${MAX_PURPOSE_CHARS} chars).`),
+        room_topic: z.string().optional().describe("A room you are already in to invite them into. Omit to open a fresh two-party room."),
+        wait_join_seconds: z
+          .number()
+          .min(0)
+          .max(MAX_WAIT_JOIN_SECONDS)
+          .optional()
+          .describe(`After an accepted answer, how long to wait for their participant_joined (default ${DEFAULT_WAIT_JOIN_SECONDS}, 0 to not wait).`),
+      },
     },
     async ({ to, purpose, room_topic, wait_join_seconds }) => {
       presence.ensurePresence(server);

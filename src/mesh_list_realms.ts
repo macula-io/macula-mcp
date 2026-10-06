@@ -55,9 +55,13 @@ const LIST_REALMS_DESCRIPTION_TERSE =
   "sessions, no bearer credentials. Joining is a separate CLI command, not a tool.";
 
 export function registerMeshListRealms(server: McpServer): void {
-  server.tool("mesh_list_realms", toolDescription(LIST_REALMS_DESCRIPTION_FULL, LIST_REALMS_DESCRIPTION_TERSE), {}, async () => {
-    const nodeId = await selfNodeId();
-    const memberships = listCredentials(nodeId).map(realmSummary);
-    return jsonContent({ realms: memberships });
-  });
+  server.registerTool(
+    "mesh_list_realms",
+    { description: toolDescription(LIST_REALMS_DESCRIPTION_FULL, LIST_REALMS_DESCRIPTION_TERSE), inputSchema: {} },
+    async () => {
+      const nodeId = await selfNodeId();
+      const memberships = listCredentials(nodeId).map(realmSummary);
+      return jsonContent({ realms: memberships });
+    },
+  );
 }

@@ -50,12 +50,14 @@ const DESCRIPTION_TERSE =
   "heartbeats, probably gone (well before the 15-min hard prune). presence_dropped: hellos/goodbyes discarded after arriving (0 = none, null = not listening).";
 
 export function registerMeshAgents(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_agents",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      page: z.number().int().positive().default(1).describe("1-based page number."),
-      page_size: z.number().int().positive().max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        page: z.number().int().positive().default(1).describe("1-based page number."),
+        page_size: z.number().int().positive().max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
+      },
     },
     async ({ page, page_size }) => {
       try {

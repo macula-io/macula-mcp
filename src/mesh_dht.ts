@@ -40,10 +40,12 @@ const FIND_RECORDS_BY_TYPE_DESCRIPTION_TERSE =
   "Coverage is the linked stations' DHT, not a census.";
 
 export function registerMeshDht(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_find_record",
-    toolDescription(FIND_RECORD_DESCRIPTION_FULL, FIND_RECORD_DESCRIPTION_TERSE),
-    { key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION) },
+    {
+      description: toolDescription(FIND_RECORD_DESCRIPTION_FULL, FIND_RECORD_DESCRIPTION_TERSE),
+      inputSchema: { key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION) },
+    },
     async ({ key_hex }) => {
       ensurePresence(server);
       try {
@@ -55,10 +57,12 @@ export function registerMeshDht(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_find_records",
-    toolDescription(FIND_RECORDS_DESCRIPTION_FULL, FIND_RECORDS_DESCRIPTION_TERSE),
-    { key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION) },
+    {
+      description: toolDescription(FIND_RECORDS_DESCRIPTION_FULL, FIND_RECORDS_DESCRIPTION_TERSE),
+      inputSchema: { key_hex: z.string().length(64).regex(/^[0-9a-fA-F]+$/, "must be hex").describe(KEY_DESCRIPTION) },
+    },
     async ({ key_hex }) => {
       ensurePresence(server);
       try {
@@ -69,10 +73,12 @@ export function registerMeshDht(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_find_records_by_type",
-    toolDescription(FIND_RECORDS_BY_TYPE_DESCRIPTION_FULL, FIND_RECORDS_BY_TYPE_DESCRIPTION_TERSE),
-    { record_type: z.string().describe(`One of ${RECORD_TYPE_NAMES.map((n) => `"${n}"`).join(", ")}, or a raw type number 0-255.`) },
+    {
+      description: toolDescription(FIND_RECORDS_BY_TYPE_DESCRIPTION_FULL, FIND_RECORDS_BY_TYPE_DESCRIPTION_TERSE),
+      inputSchema: { record_type: z.string().describe(`One of ${RECORD_TYPE_NAMES.map((n) => `"${n}"`).join(", ")}, or a raw type number 0-255.`) },
+    },
     async ({ record_type }) => {
       ensurePresence(server);
       try {

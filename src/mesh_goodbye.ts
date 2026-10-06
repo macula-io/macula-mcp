@@ -38,10 +38,12 @@ const DESCRIPTION_TERSE =
   "only mesh_hello does. No-op if presence was never active.";
 
 export function registerMeshGoodbye(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_goodbye",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
-    {},
+    {
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {},
+    },
     async () => {
       try {
         if (!presence.isActive()) {

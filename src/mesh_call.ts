@@ -82,62 +82,64 @@ export function withMeaning(seal: Seal): Seal & { means: string } {
 }
 
 export function registerMeshCall(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_call",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      procedure: z
-        .string()
-        .describe(
-          "Procedure name as advertised, e.g. mcl-rag/search_chunks_semantic, with the realm in `realm`. " +
-            "The realm-prefixed form a DHT listing prints (`<64 hex>/<procedure>`) is accepted too and " +
-            "split into procedure + realm for you.",
-        ),
-      args: z
-        .record(z.string(), z.unknown())
-        .optional()
-        .describe("Structured arguments for the procedure (plain JSON; this server encodes the wire). Bytes as {\"$bytes\": \"<base64>\"}."),
-      prove_ownership: z
-        .union([z.literal(0), z.literal(1)])
-        .optional()
-        .describe(
-          "1 attaches an ownership proof v2 (mcl-om#7) to args, under asserted_by: this agent's key vouches " +
-            "for every field, for this procedure in this realm, once, and the proof verifies for nothing else. " +
-            "What a provider does with a proof that does not verify is its own policy. A provider's handler " +
-            "runs at most once per call, so the proof is never replayed by the transport. 0 or omitted: none. " +
-            "args must not carry \"caller\".",
-        ),
-      confidential: z
-        .enum(["preferred", "required"])
-        .optional()
-        .describe(
-          "\"preferred\" (default): sealed to the provider's advertised KEM key when its advertisement names one, " +
-            "in the clear when it names none. \"required\": never called in the clear; a provider that names no key " +
-            "fails with code=confidentiality (reason=no_kem_key). A sealed call never falls back to the clear. " +
-            "The result's seal reports whether it went sealed either way; \"required\" is how you refuse a clear " +
-            "call before it is sent.",
-        ),
-      ucan: z
-        .union([z.literal(0), z.literal(1)])
-        .optional()
-        .describe(
-          "1 presents this server's UCAN to a gated procedure: the token in the file MACULA_MCP_UCAN names " +
-            "(first line), with its chain's parents (the lines after). A gated provider checks it before its " +
-            "handler runs and refuses with code=unauthorized. 0 or omitted: no token is sent, so a gated " +
-            "procedure refuses the call. Fails by name when asked for and none is configured.",
-        ),
-      timeout_ms: z.number().int().positive().optional().describe("How long to wait for the result, in milliseconds (5000 by default)."),
-      realm: z
-        .string()
-        .length(64)
-        .regex(/^[0-9a-fA-F]+$/, "must be hex")
-        .optional()
-        .describe(
-          "32-byte realm id as hex (64 chars). Omit for io.macula. A provider is only trusted in a realm " +
-            "whose key this server holds (io.macula always; others through MACULA_MESH_REALMS), so " +
-            "\"no trusted provider\" can mean the wrong realm, not a missing service -- find a procedure's " +
-            "realm with mesh_find_records_by_type (record_type \"procedure_advertisement\").",
-        ),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        procedure: z
+          .string()
+          .describe(
+            "Procedure name as advertised, e.g. mcl-rag/search_chunks_semantic, with the realm in `realm`. " +
+              "The realm-prefixed form a DHT listing prints (`<64 hex>/<procedure>`) is accepted too and " +
+              "split into procedure + realm for you.",
+          ),
+        args: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Structured arguments for the procedure (plain JSON; this server encodes the wire). Bytes as {\"$bytes\": \"<base64>\"}."),
+        prove_ownership: z
+          .union([z.literal(0), z.literal(1)])
+          .optional()
+          .describe(
+            "1 attaches an ownership proof v2 (mcl-om#7) to args, under asserted_by: this agent's key vouches " +
+              "for every field, for this procedure in this realm, once, and the proof verifies for nothing else. " +
+              "What a provider does with a proof that does not verify is its own policy. A provider's handler " +
+              "runs at most once per call, so the proof is never replayed by the transport. 0 or omitted: none. " +
+              "args must not carry \"caller\".",
+          ),
+        confidential: z
+          .enum(["preferred", "required"])
+          .optional()
+          .describe(
+            "\"preferred\" (default): sealed to the provider's advertised KEM key when its advertisement names one, " +
+              "in the clear when it names none. \"required\": never called in the clear; a provider that names no key " +
+              "fails with code=confidentiality (reason=no_kem_key). A sealed call never falls back to the clear. " +
+              "The result's seal reports whether it went sealed either way; \"required\" is how you refuse a clear " +
+              "call before it is sent.",
+          ),
+        ucan: z
+          .union([z.literal(0), z.literal(1)])
+          .optional()
+          .describe(
+            "1 presents this server's UCAN to a gated procedure: the token in the file MACULA_MCP_UCAN names " +
+              "(first line), with its chain's parents (the lines after). A gated provider checks it before its " +
+              "handler runs and refuses with code=unauthorized. 0 or omitted: no token is sent, so a gated " +
+              "procedure refuses the call. Fails by name when asked for and none is configured.",
+          ),
+        timeout_ms: z.number().int().positive().optional().describe("How long to wait for the result, in milliseconds (5000 by default)."),
+        realm: z
+          .string()
+          .length(64)
+          .regex(/^[0-9a-fA-F]+$/, "must be hex")
+          .optional()
+          .describe(
+            "32-byte realm id as hex (64 chars). Omit for io.macula. A provider is only trusted in a realm " +
+              "whose key this server holds (io.macula always; others through MACULA_MESH_REALMS), so " +
+              "\"no trusted provider\" can mean the wrong realm, not a missing service -- find a procedure's " +
+              "realm with mesh_find_records_by_type (record_type \"procedure_advertisement\").",
+          ),
+      },
     },
     async ({ procedure: rawProcedure, args, timeout_ms, realm: rawRealm, prove_ownership, confidential, ucan }) => {
       ensurePresence(server);

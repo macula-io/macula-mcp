@@ -29,13 +29,15 @@ const DESCRIPTION_TERSE =
   "then (caller_notified: 0). Deferring again is not valid -- accept or decline.";
 
 export function registerMeshAnswerRing(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_answer_ring",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      ring_id: z.string().length(32).regex(/^[0-9a-f]+$/, "must be lowercase hex").describe("From rings.pending in mesh_read_inbox."),
-      answer: z.number().int().min(1).max(2).describe("1 accept, 2 decline. No booleans on the wire."),
-      reason: z.string().max(280).optional().describe("Shown to the caller. Worth giving on a decline."),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        ring_id: z.string().length(32).regex(/^[0-9a-f]+$/, "must be lowercase hex").describe("From rings.pending in mesh_read_inbox."),
+        answer: z.number().int().min(1).max(2).describe("1 accept, 2 decline. No booleans on the wire."),
+        reason: z.string().max(280).optional().describe("Shown to the caller. Worth giving on a decline."),
+      },
     },
     async ({ ring_id, answer, reason }) => {
       ensurePresence(server);

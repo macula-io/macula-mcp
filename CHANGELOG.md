@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Changed
+
+- Every tool registers through `McpServer.registerTool()` instead of the
+  deprecated `McpServer.tool()` (#6). Tool names, descriptions and input
+  schemas on the wire are unchanged. The tool-description suite now fails,
+  naming the tool, if anything registers through `tool()` again.
+
 ## [0.43.1] - 2026-10-06
 
 Listed in the official MCP Registry as `io.macula/macula-mcp`

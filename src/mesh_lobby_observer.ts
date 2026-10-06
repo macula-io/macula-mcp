@@ -93,16 +93,18 @@ const UNOBSERVE_DESCRIPTION_TERSE =
   "readable. Not sticky -- the next mesh_hello restarts it.";
 
 export function registerMeshLobbyObserver(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_observe_lobby",
-    toolDescription(OBSERVE_DESCRIPTION_FULL, OBSERVE_DESCRIPTION_TERSE),
     {
-      max_rooms: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Cap on concurrently-tapped PUBLIC rooms (default 20) -- a bound against unlimited child processes on a busy central. Rooms you open or join yourself are never subject to it."),
+      description: toolDescription(OBSERVE_DESCRIPTION_FULL, OBSERVE_DESCRIPTION_TERSE),
+      inputSchema: {
+        max_rooms: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Cap on concurrently-tapped PUBLIC rooms (default 20) -- a bound against unlimited child processes on a busy central. Rooms you open or join yourself are never subject to it."),
+      },
     },
     async ({ max_rooms }) => {
       try {
@@ -120,18 +122,20 @@ export function registerMeshLobbyObserver(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_lobby_transcript",
-    toolDescription(TRANSCRIPT_DESCRIPTION_FULL, TRANSCRIPT_DESCRIPTION_TERSE),
     {
-      topic: z.string().optional().describe("Narrow to one topic. Omit to see everything observed, across all topics."),
-      limit: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_TRANSCRIPT_LIMIT)
-        .default(DEFAULT_TRANSCRIPT_LIMIT)
-        .describe(`Most recent N facts, oldest-first within that window (default ${DEFAULT_TRANSCRIPT_LIMIT}).`),
+      description: toolDescription(TRANSCRIPT_DESCRIPTION_FULL, TRANSCRIPT_DESCRIPTION_TERSE),
+      inputSchema: {
+        topic: z.string().optional().describe("Narrow to one topic. Omit to see everything observed, across all topics."),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_TRANSCRIPT_LIMIT)
+          .default(DEFAULT_TRANSCRIPT_LIMIT)
+          .describe(`Most recent N facts, oldest-first within that window (default ${DEFAULT_TRANSCRIPT_LIMIT}).`),
+      },
     },
     async ({ topic, limit }) => {
       try {
@@ -161,10 +165,12 @@ export function registerMeshLobbyObserver(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_unobserve_lobby",
-    toolDescription(UNOBSERVE_DESCRIPTION_FULL, UNOBSERVE_DESCRIPTION_TERSE),
-    {},
+    {
+      description: toolDescription(UNOBSERVE_DESCRIPTION_FULL, UNOBSERVE_DESCRIPTION_TERSE),
+      inputSchema: {},
+    },
     async () => {
       const result = await lobbyObserver.stop();
       return jsonContent(result);

@@ -86,11 +86,13 @@ const UNTRUST_DESCRIPTION_TERSE =
   "No-op if never listed.";
 
 export function registerMeshTrustAgent(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_trust_agent",
-    toolDescription(TRUST_DESCRIPTION_FULL, TRUST_DESCRIPTION_TERSE),
     {
-      node_id: nodeIdOrPetnameSchema.describe("The peer to trust: a node_id or petname from mesh_agents, mesh_ring's `to`, mesh_answer_ring's `peer`, or mesh_read_inbox's rings.pending."),
+      description: toolDescription(TRUST_DESCRIPTION_FULL, TRUST_DESCRIPTION_TERSE),
+      inputSchema: {
+        node_id: nodeIdOrPetnameSchema.describe("The peer to trust: a node_id or petname from mesh_agents, mesh_ring's `to`, mesh_answer_ring's `peer`, or mesh_read_inbox's rings.pending."),
+      },
     },
     async ({ node_id }) => {
       const resolved = resolveNodeId(node_id);
@@ -100,15 +102,17 @@ export function registerMeshTrustAgent(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_untrust_agent",
-    toolDescription(UNTRUST_DESCRIPTION_FULL, UNTRUST_DESCRIPTION_TERSE),
     {
-      node_id: nodeIdOrPetnameSchema.describe(
-        "The peer to remove: a node_id from mesh_agents or the allowlist itself, or a petname -- petname resolution needs " +
-          "the peer in your CURRENT roster (mesh_agents), so it may not resolve someone trusted long ago who has since gone " +
-          "stale/offline; use their raw node_id from the allowlist file in that case.",
-      ),
+      description: toolDescription(UNTRUST_DESCRIPTION_FULL, UNTRUST_DESCRIPTION_TERSE),
+      inputSchema: {
+        node_id: nodeIdOrPetnameSchema.describe(
+          "The peer to remove: a node_id from mesh_agents or the allowlist itself, or a petname -- petname resolution needs " +
+            "the peer in your CURRENT roster (mesh_agents), so it may not resolve someone trusted long ago who has since gone " +
+            "stale/offline; use their raw node_id from the allowlist file in that case.",
+        ),
+      },
     },
     async ({ node_id }) => {
       const resolved = resolveNodeId(node_id);

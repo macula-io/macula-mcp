@@ -53,7 +53,7 @@ function register(fn: (s: McpServer) => void) {
   const handlers = new Map<string, Handler>();
   const descriptions = new Map<string, string>();
   const server = {
-    tool: (name: string, description: string, _schema: unknown, cb: Handler) => {
+    registerTool: (name: string, { description }: { description: string }, cb: Handler) => {
       handlers.set(name, cb);
       descriptions.set(name, description);
     },

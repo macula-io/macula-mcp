@@ -23,18 +23,20 @@ const DESCRIPTION_FULL =
 const DESCRIPTION_TERSE = `Publish a fact to a mesh topic. Use a business verb for the fact type (e.g. 'module_generated'), never CRUD. Realm defaults to io.macula. Bytes as {"$bytes": "<base64>"}.`;
 
 export function registerMeshPublish(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_publish",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      topic: z.string().describe("Topic name (e.g. 'agents.module_generated')."),
-      fact: z.record(z.string(), z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire). Bytes as {\"$bytes\": \"<base64>\"}."),
-      realm: z
-        .string()
-        .length(64)
-        .regex(/^[0-9a-fA-F]+$/, "must be hex")
-        .optional()
-        .describe("32-byte realm id as hex (64 chars) the topic is scoped to. Omit for io.macula."),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        topic: z.string().describe("Topic name (e.g. 'agents.module_generated')."),
+        fact: z.record(z.string(), z.unknown()).describe("The integration fact payload (plain JSON; this server encodes the wire). Bytes as {\"$bytes\": \"<base64>\"}."),
+        realm: z
+          .string()
+          .length(64)
+          .regex(/^[0-9a-fA-F]+$/, "must be hex")
+          .optional()
+          .describe("32-byte realm id as hex (64 chars) the topic is scoped to. Omit for io.macula."),
+      },
     },
     async ({ topic, fact, realm }) => {
       ensurePresence(server);

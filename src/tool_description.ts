@@ -32,7 +32,7 @@ export function terseToolsEnabled(): boolean {
   return process.env.MACULA_MCP_TERSE_TOOLS === "1";
 }
 
-/** The description a tool registration should actually pass to server.tool()/registerTool(), given both variants. */
+/** The description a tool registration should actually pass to server.registerTool(), given both variants. */
 export function toolDescription(full: string, terse: string): string {
   return terseToolsEnabled() ? terse : full;
 }

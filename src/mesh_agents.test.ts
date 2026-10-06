@@ -21,11 +21,11 @@ vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, dropped: m
 
 type Handler = (args: Record<string, unknown>) => Promise<{ content: { text: string }[]; isError?: boolean }>;
 
-/** Captures server.tool()'s registered handler instead of a real McpServer -- mesh_trust_agent.test.ts's own pattern. */
+/** Captures server.registerTool()'s registered handler instead of a real McpServer -- mesh_trust_agent.test.ts's own pattern. */
 function fakeServer(): { server: McpServer; handlers: Map<string, Handler> } {
   const handlers = new Map<string, Handler>();
   const server = {
-    tool: (name: string, _desc: string, _schema: unknown, fn: Handler) => {
+    registerTool: (name: string, _config: unknown, fn: Handler) => {
       handlers.set(name, fn);
     },
   } as unknown as McpServer;

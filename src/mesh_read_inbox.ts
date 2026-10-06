@@ -129,18 +129,20 @@ const DESCRIPTION_TERSE =
   "blocks. Rooms show what was recorded while watched. " + DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshReadInbox(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_read_inbox",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      room_topic: z.string().optional().describe("One room to read. Omit for every room you are in."),
-      limit: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_LIMIT)
-        .default(DEFAULT_LIMIT)
-        .describe(`Most recent N messages per room, oldest-first within that window (default ${DEFAULT_LIMIT}).`),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        room_topic: z.string().optional().describe("One room to read. Omit for every room you are in."),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_LIMIT)
+          .default(DEFAULT_LIMIT)
+          .describe(`Most recent N messages per room, oldest-first within that window (default ${DEFAULT_LIMIT}).`),
+      },
     },
     async ({ room_topic, limit }) => {
       presence.ensurePresence(server);

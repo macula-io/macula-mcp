@@ -82,20 +82,22 @@ const JOIN_REALM_DESCRIPTION_TERSE =
   "membership UCAN, stored under ~/.config/macula-mcp/realm/). Already joined: reports the membership.";
 
 export function registerMeshJoinRealm(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_join_realm",
-    toolDescription(JOIN_REALM_DESCRIPTION_FULL, JOIN_REALM_DESCRIPTION_TERSE),
     {
-      wait_seconds: z
-        .number()
-        .int()
-        .min(0)
-        .max(600)
-        .optional()
-        .describe(
-          "After creating (or reusing) the session, wait this long for the person to confirm before returning. " +
-            "0 (default) returns the link immediately. A session lives 10 minutes.",
-        ),
+      description: toolDescription(JOIN_REALM_DESCRIPTION_FULL, JOIN_REALM_DESCRIPTION_TERSE),
+      inputSchema: {
+        wait_seconds: z
+          .number()
+          .int()
+          .min(0)
+          .max(600)
+          .optional()
+          .describe(
+            "After creating (or reusing) the session, wait this long for the person to confirm before returning. " +
+              "0 (default) returns the link immediately. A session lives 10 minutes.",
+          ),
+      },
     },
     async ({ wait_seconds }) => {
       ensurePresence(server);

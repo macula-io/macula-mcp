@@ -58,11 +58,13 @@ const DESCRIPTION_TERSE =
   "Never sleep-then-poll -- one call does the same wait server-side.";
 
 export function registerMeshWaitRing(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_wait_ring",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
+      },
     },
     async ({ wait_seconds }) => {
       ensurePresence(server);

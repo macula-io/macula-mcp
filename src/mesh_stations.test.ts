@@ -17,13 +17,13 @@ vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<unknown>;
 
-/** Captures server.tool()'s registered handler instead of a real McpServer -- same shape mesh_stations.ts's own registerMeshListStations expects. */
+/** Captures server.registerTool()'s registered handler instead of a real McpServer -- same shape mesh_stations.ts's own registerMeshListStations expects. */
 function fakeServer(): { server: McpServer; getHandler: () => Handler } {
   let handler: Handler = async () => {
     throw new Error("mesh_list_stations was never registered");
   };
   const server = {
-    tool: (_name: string, _desc: string, _schema: unknown, fn: Handler) => {
+    registerTool: (_name: string, _config: unknown, fn: Handler) => {
       handler = fn;
     },
   } as unknown as McpServer;

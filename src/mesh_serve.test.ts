@@ -8,7 +8,7 @@ type Handler = (args: Record<string, unknown>) => Promise<{ isError?: boolean; c
 
 async function meshServe(): Promise<Handler> {
   let handler: Handler | undefined;
-  const server = { tool: (_n: string, _d: string, _s: unknown, fn: Handler) => (handler = fn) } as unknown as McpServer;
+  const server = { registerTool: (_n: string, _config: unknown, fn: Handler) => (handler = fn) } as unknown as McpServer;
   const { registerMeshServe } = await import("./mesh_serve.js");
   registerMeshServe(server);
   return handler!;

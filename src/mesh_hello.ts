@@ -101,34 +101,36 @@ const DESCRIPTION_TERSE =
   "else undoes automatically). Pair with mesh_goodbye to leave deliberately.";
 
 export function registerMeshHello(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_hello",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      operator_name: z.string().optional().describe("Customizable human-readable name for whoever's behind this agent."),
-      session_name: z
-        .string()
-        .optional()
-        .describe(
-          "Customizable label for THIS session/process, distinct from operator_name: operator_name stays the " +
-            "same across every session the same person runs (e.g. \"Raf Lefever\"), session_name tells two of " +
-            "that operator's own concurrent sessions apart in mesh_agents/Meshview (e.g. a Claude Code " +
-            "session's own /rename title). Not auto-populated -- pass it explicitly if you know it.",
-        ),
-      message: z.string().optional().describe("A short greeting or status, sent with every heartbeat."),
-      model: z
-        .string()
-        .optional()
-        .describe(
-          "Which LLM is driving this agent (e.g. \"claude-sonnet-5\"). Self-reported, not verifiable -- " +
-            "MCP has no protocol-level way for this server to know your model, unlike connected_via below.",
-        ),
-      interval_seconds: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Heartbeat interval in seconds (default 60, minimum 10)."),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        operator_name: z.string().optional().describe("Customizable human-readable name for whoever's behind this agent."),
+        session_name: z
+          .string()
+          .optional()
+          .describe(
+            "Customizable label for THIS session/process, distinct from operator_name: operator_name stays the " +
+              "same across every session the same person runs (e.g. \"Raf Lefever\"), session_name tells two of " +
+              "that operator's own concurrent sessions apart in mesh_agents/Meshview (e.g. a Claude Code " +
+              "session's own /rename title). Not auto-populated -- pass it explicitly if you know it.",
+          ),
+        message: z.string().optional().describe("A short greeting or status, sent with every heartbeat."),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            "Which LLM is driving this agent (e.g. \"claude-sonnet-5\"). Self-reported, not verifiable -- " +
+              "MCP has no protocol-level way for this server to know your model, unlike connected_via below.",
+          ),
+        interval_seconds: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Heartbeat interval in seconds (default 60, minimum 10)."),
+      },
     },
     async ({ operator_name, session_name, message, model, interval_seconds }) => {
       try {

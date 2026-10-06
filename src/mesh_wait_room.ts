@@ -54,12 +54,14 @@ const DESCRIPTION_TERSE =
   DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshWaitRoom(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_wait_room",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for central. Joins it first if you are not in it yet.`),
-      wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for central. Joins it first if you are not in it yet.`),
+        wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
+      },
     },
     async ({ room_topic, wait_seconds }) => {
       ensurePresence(server);

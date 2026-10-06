@@ -98,13 +98,13 @@ vi.mock("./rings.js", async (importOriginal) => {
 
 type Handler = (args: Record<string, unknown>) => Promise<{ content: { text: string }[] }>;
 
-/** Captures server.tool()'s registered handler instead of a real McpServer -- mesh_stations.test.ts's own pattern. */
+/** Captures server.registerTool()'s registered handler instead of a real McpServer -- mesh_stations.test.ts's own pattern. */
 function fakeServer(): { server: McpServer; getHandler: () => Handler } {
   let handler: Handler = async () => {
     throw new Error("mesh_read_inbox was never registered");
   };
   const server = {
-    tool: (_name: string, _desc: string, _schema: unknown, fn: Handler) => {
+    registerTool: (_name: string, _config: unknown, fn: Handler) => {
       handler = fn;
     },
   } as unknown as McpServer;

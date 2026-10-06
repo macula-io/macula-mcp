@@ -33,12 +33,14 @@ const GET_DESCRIPTION_FULL =
 const GET_DESCRIPTION_TERSE = "Fetch an artifact by its MCID from a node that shares it, verified. Returns base64.";
 
 export function registerMeshArtifact(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_put",
-    toolDescription(PUT_DESCRIPTION_FULL, PUT_DESCRIPTION_TERSE),
     {
-      content: z.string().describe("Artifact bytes, base64-encoded."),
-      name: z.string().optional().describe("A name for content over 256 KiB, carried in its manifest (part of its MCID)."),
+      description: toolDescription(PUT_DESCRIPTION_FULL, PUT_DESCRIPTION_TERSE),
+      inputSchema: {
+        content: z.string().describe("Artifact bytes, base64-encoded."),
+        name: z.string().optional().describe("A name for content over 256 KiB, carried in its manifest (part of its MCID)."),
+      },
     },
     async ({ content, name }) => {
       ensurePresence(server);
@@ -53,11 +55,13 @@ export function registerMeshArtifact(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mesh_get",
-    toolDescription(GET_DESCRIPTION_FULL, GET_DESCRIPTION_TERSE),
     {
-      mcid_hex: z.string().length(100).regex(/^[0-9a-fA-F]+$/, "must be hex").describe("The artifact's MCID, as mesh_put returned it."),
+      description: toolDescription(GET_DESCRIPTION_FULL, GET_DESCRIPTION_TERSE),
+      inputSchema: {
+        mcid_hex: z.string().length(100).regex(/^[0-9a-fA-F]+$/, "must be hex").describe("The artifact's MCID, as mesh_put returned it."),
+      },
     },
     async ({ mcid_hex }) => {
       ensurePresence(server);

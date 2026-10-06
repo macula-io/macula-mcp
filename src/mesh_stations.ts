@@ -50,21 +50,23 @@ const DESCRIPTION_FULL =
 const DESCRIPTION_TERSE = "List macula stations via mcl-stations/list_stations (auto-discovers its realm via DHT). Optional near/continent/country/city filters -- omit all to list everything.";
 
 export function registerMeshListStations(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "mesh_list_stations",
-    toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
     {
-      near: z
-        .object({
-          lat: z.number(),
-          lng: z.number(),
-          limit: z.number().int().positive().optional(),
-        })
-        .optional()
-        .describe("Sort nearest-first by great-circle distance from (lat, lng); limit caps the result count."),
-      continent: z.string().optional().describe("Exact match, e.g. \"Europe\"."),
-      country: z.string().optional().describe("Exact match, e.g. \"FR\"."),
-      city: z.string().optional().describe("Exact match, e.g. \"paris\"."),
+      description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
+      inputSchema: {
+        near: z
+          .object({
+            lat: z.number(),
+            lng: z.number(),
+            limit: z.number().int().positive().optional(),
+          })
+          .optional()
+          .describe("Sort nearest-first by great-circle distance from (lat, lng); limit caps the result count."),
+        continent: z.string().optional().describe("Exact match, e.g. \"Europe\"."),
+        country: z.string().optional().describe("Exact match, e.g. \"FR\"."),
+        city: z.string().optional().describe("Exact match, e.g. \"paris\"."),
+      },
     },
     async ({ near, continent, country, city }) => {
       ensurePresence(server);

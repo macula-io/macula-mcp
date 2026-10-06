@@ -14,7 +14,7 @@ async function meshWatch(): Promise<{ handler: Handler; description: string }> {
   let handler: Handler | undefined;
   let description = "";
   const server = {
-    tool: (_n: string, d: string, _s: unknown, fn: Handler) => {
+    registerTool: (_n: string, { description: d }: { description: string }, fn: Handler) => {
       description = d;
       handler = fn;
     },
