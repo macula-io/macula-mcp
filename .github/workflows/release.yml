@@ -78,10 +78,20 @@ jobs:
       # "v=MCPv1" TXT record on the macula.io apex, whose private key is the
       # MCP_REGISTRY_KEY secret. The registry checks that the npm package's
       # mcpName equals server.json's name, so this runs after npm publish.
+      # npm can take 20 minutes to serve a fresh version (v0.43.1's first
+      # registry publish was refused with a 404 for it), so the step waits
+      # until npm serves this exact version before publishing.
       - name: Publish to the MCP Registry
         env:
           MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
+          for attempt in $(seq 1 40); do
+            npm view "@macula-io/mcp@${VERSION}" version >/dev/null 2>&1 && break
+            echo "npm does not serve @macula-io/mcp@${VERSION} yet (attempt ${attempt}/40)"
+            sleep 30
+          done
+          npm view "@macula-io/mcp@${VERSION}" version
           curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
           ./mcp-publisher login dns --domain macula.io --private-key "$MCP_REGISTRY_KEY"
           ./mcp-publisher publish
