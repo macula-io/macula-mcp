@@ -63,6 +63,7 @@ function open(): DatabaseSync {
   // first schema; older rows have NULL, which reads as "not attested".
   const cols = new Set((db.prepare("PRAGMA table_info(observed_facts)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("publisher")) db.exec("ALTER TABLE observed_facts ADD COLUMN publisher TEXT");
+  if (!cols.has("message_id")) keepOneRowPerMessage(db);
   db.exec(`CREATE INDEX IF NOT EXISTS observed_facts_topic_idx ON observed_facts (topic, observed_at)`);
   // What a listener lost on a topic: events that reached a subscription and
   // were discarded while its reader was behind. Kept beside the facts, so a
@@ -80,6 +81,30 @@ function open(): DatabaseSync {
   return db;
 }
 
+/**
+ * One row per (topic, message_id). Every macula-mcp process on a machine
+ * shares this file and records every arrival it sees, so N sessions turned
+ * one broadcast into N rows: mesh_read_inbox showed it N times, and a room
+ * wait woke on a copy of a message it had already seen (macula-mcp#8).
+ * A payload without a string message_id is not an envelope and keeps every
+ * arrival. Run once, when the column is missing: backfills it from the
+ * payloads already recorded and drops their repeats, keeping the first.
+ */
+function keepOneRowPerMessage(d: DatabaseSync): void {
+  d.exec("ALTER TABLE observed_facts ADD COLUMN message_id TEXT");
+  d.exec(`UPDATE observed_facts SET message_id = json_extract(raw_json, '$.message_id')
+          WHERE json_valid(raw_json) AND json_type(raw_json, '$.message_id') = 'text'`);
+  d.exec(`DELETE FROM observed_facts WHERE message_id IS NOT NULL AND id NOT IN
+            (SELECT MIN(id) FROM observed_facts WHERE message_id IS NOT NULL GROUP BY topic, message_id)`);
+  d.exec(`CREATE UNIQUE INDEX observed_facts_message_idx ON observed_facts (topic, message_id) WHERE message_id IS NOT NULL`);
+}
+
+function messageIdOf(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const id = (payload as Record<string, unknown>).message_id;
+  return typeof id === "string" ? id : null;
+}
+
 export interface ObservedFact {
   id: number;
   topic: string;
@@ -89,6 +114,8 @@ export interface ObservedFact {
   observed_at: string;
   /** Station-attested publisher node id (hex), or null for rows recorded before it was kept. */
   publisher: string | null;
+  /** The envelope's message_id, or null for a payload that carries none. */
+  message_id: string | null;
 }
 
 /**
@@ -109,15 +136,23 @@ function extractSenderText(payload: unknown): { sender: string | null; text: str
   return { sender: p.from, text };
 }
 
-/** Records one observed fact. Never idempotent/deduped -- every arrival is its own row, a transcript, not a cache of latest state. `publisher` is what the station said, kept apart from anything the payload claims. */
+/** Records one observed fact: a transcript, not a cache of latest state, so every message is its own row. A message_id already recorded on the topic is a copy (another process sharing this file saw it too) and is ignored, first row wins; see keepOneRowPerMessage. `publisher` is what the station said, kept apart from anything the payload claims. */
 export function recordFact(rec: { topic: string; payload: unknown; at: string; publisher?: string }): void {
   const { sender, text } = extractSenderText(rec.payload);
   open()
     .prepare(
-      `INSERT INTO observed_facts (topic, sender, text, raw_json, observed_at, publisher)
-       VALUES (@topic, @sender, @text, @raw_json, @at, @publisher)`,
+      `INSERT OR IGNORE INTO observed_facts (topic, sender, text, raw_json, observed_at, publisher, message_id)
+       VALUES (@topic, @sender, @text, @raw_json, @at, @publisher, @message_id)`,
     )
-    .run({ topic: rec.topic, sender, text, raw_json: JSON.stringify(rec.payload), at: rec.at, publisher: rec.publisher ?? null });
+    .run({
+      topic: rec.topic,
+      sender,
+      text,
+      raw_json: JSON.stringify(rec.payload),
+      at: rec.at,
+      publisher: rec.publisher ?? null,
+      message_id: messageIdOf(rec.payload),
+    });
 }
 
 export interface TranscriptPage {

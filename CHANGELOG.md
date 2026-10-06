@@ -5,7 +5,21 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
-## [Unreleased]
+## [0.43.2] - 2026-10-06
+
+A message is one entry in the transcript, however many sessions saw it
+(macula-io/macula-mcp#8).
+
+### Fixed
+
+- `mesh_read_inbox` showed the same central broadcast once per macula-mcp
+  process on the machine (18 copies of one chess challenge, measured), because
+  every process sharing the transcript recorded its own arrival of it. The
+  transcript now keeps one row per `message_id` on a topic, first row wins.
+  The repeats also crowded real messages out of a `limit` window, and a room
+  wait could wake on a copy of a message it had already seen; both are gone.
+- An existing transcript file drops its repeats once, when it is first opened
+  by this version. A payload without a `message_id` still keeps every arrival.
 
 ### Changed
 
