@@ -25,11 +25,12 @@ function restoring(...names: string[]): () => void {
 }
 
 describe("nodeKeyPath", () => {
-  const restore = restoring("MACULA_MCP_IDENTITY");
+  const restore = restoring("MACULA_MCP_IDENTITY", "MACULA_MCP_AGENT");
   afterEach(restore);
 
   it("is one key per session scope, persisted under the config directory, never the temp dir", () => {
     delete process.env.MACULA_MCP_IDENTITY;
+    delete process.env.MACULA_MCP_AGENT;
     const path = nodeKeyPath();
     const scope = process.env.CLAUDE_CODE_SESSION_ID ?? `ppid-${process.ppid}`;
     expect(path).toBe(join(homedir(), ".config", "macula-mcp", "keys", `${scope}.key`));
@@ -37,8 +38,43 @@ describe("nodeKeyPath", () => {
   });
 
   it("MACULA_MCP_IDENTITY pins the key file", () => {
+    delete process.env.MACULA_MCP_AGENT;
     process.env.MACULA_MCP_IDENTITY = "/tmp/pinned.key";
     expect(nodeKeyPath()).toBe("/tmp/pinned.key");
+  });
+
+  it("MACULA_MCP_AGENT names one key per agent, the same in every session that agent runs", () => {
+    delete process.env.MACULA_MCP_IDENTITY;
+    process.env.MACULA_MCP_AGENT = "neptunus";
+    expect(nodeKeyPath()).toBe(join(homedir(), ".config", "macula-mcp", "keys", "agent-neptunus.key"));
+  });
+
+  it("an agent name is case-insensitive: Neptunus and neptunus are one agent", () => {
+    delete process.env.MACULA_MCP_IDENTITY;
+    process.env.MACULA_MCP_AGENT = "Neptunus";
+    expect(nodeKeyPath()).toBe(join(homedir(), ".config", "macula-mcp", "keys", "agent-neptunus.key"));
+  });
+
+  it("an empty MACULA_MCP_AGENT is unset", () => {
+    delete process.env.MACULA_MCP_IDENTITY;
+    process.env.MACULA_MCP_AGENT = "";
+    const scope = process.env.CLAUDE_CODE_SESSION_ID ?? `ppid-${process.ppid}`;
+    expect(nodeKeyPath()).toBe(join(homedir(), ".config", "macula-mcp", "keys", `${scope}.key`));
+  });
+
+  it("refuses an agent name that is not a plain word, naming it: the name becomes a file name", () => {
+    delete process.env.MACULA_MCP_IDENTITY;
+    for (const bad of ["../x", "a/b", ".hidden", "-x", "a b", "x".repeat(65)]) {
+      process.env.MACULA_MCP_AGENT = bad;
+      expect(() => nodeKeyPath()).toThrow(MeshError);
+      expect(() => nodeKeyPath()).toThrow(/MACULA_MCP_AGENT/);
+    }
+  });
+
+  it("refuses MACULA_MCP_AGENT together with MACULA_MCP_IDENTITY, naming both: two answers to one question", () => {
+    process.env.MACULA_MCP_IDENTITY = "/tmp/pinned.key";
+    process.env.MACULA_MCP_AGENT = "neptunus";
+    expect(() => nodeKeyPath()).toThrow(/MACULA_MCP_AGENT.*MACULA_MCP_IDENTITY|MACULA_MCP_IDENTITY.*MACULA_MCP_AGENT/);
   });
 });
 
