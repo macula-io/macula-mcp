@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [Unreleased]
+
+### Fixed
+
+- `mesh_call`'s seal report refuses a `provider` that is not a node id (64
+  lowercase hex), by name, sealed or not. It used to pass any value through, and
+  a malformed one only showed up later as `signer_not_provider` or a failed pin
+  in `mesh_recall` (#20).
+
 ## [0.44.1] - 2026-10-06
 
 ### Security

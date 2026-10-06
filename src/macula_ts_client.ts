@@ -205,8 +205,14 @@ export async function callWithReport(args: CallArgs): Promise<CallResult & { sea
 
 /** The report on the wire's shape. A key id goes out only on a sealed report,
  * held here rather than trusted from below; a sealed report naming no key
- * breaks the SDK's contract and is refused by name, never shown as sealed. */
+ * breaks the SDK's contract and is refused by name, never shown as sealed.
+ * The provider must be a node id (64 lowercase hex): mesh_recall pins and
+ * compares it, so a malformed one is refused here, by name, rather than
+ * failing later as signer_not_provider. */
 function sealOf(report: SealReport): Seal {
+  if (!/^[0-9a-f]{64}$/.test(report.provider)) {
+    throw new MeshError(`the call's seal report names provider "${report.provider}", not a node id (64 lowercase hex): refusing it`);
+  }
   if (report.sealed === 0) return { sealed: 0, provider: report.provider };
   if (report.sealKeyId === undefined) {
     throw new MeshError(`the call's sealed report names no seal key id (provider ${report.provider}): refusing to report it as sealed`);

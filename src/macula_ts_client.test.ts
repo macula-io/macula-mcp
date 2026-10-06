@@ -157,6 +157,20 @@ describe("call", () => {
     await expect(callWithReport({ procedure: "x/y" })).rejects.toThrow(/sealed report names no seal key id/);
   });
 
+  it("callWithReport refuses a seal report whose provider is not a 64-hex node id, by name", async () => {
+    // Sealed and unsealed alike: the provider is what mesh_recall pins and compares, so a
+    // malformed one is refused here instead of surfacing later as signer_not_provider.
+    for (const provider of ["cd".repeat(31), "cd".repeat(33), "CD".repeat(32), "zz".repeat(32), ""]) {
+      pool.callReport.mockResolvedValueOnce({ result: 1, report: { sealed: 1, provider, sealKeyId: "0123456789abcdef" } });
+      await expect(callWithReport({ procedure: "x/y" })).rejects.toThrow(`seal report names provider "${provider}"`);
+      pool.callReport.mockResolvedValueOnce({ result: 1, report: { sealed: 0, provider } });
+      await expect(callWithReport({ procedure: "x/y" })).rejects.toThrow(`seal report names provider "${provider}"`);
+    }
+    // A well-formed provider passes through unchanged.
+    pool.callReport.mockResolvedValueOnce({ result: 1, report: { sealed: 0, provider: "0a".repeat(32) } });
+    expect((await callWithReport({ procedure: "x/y" })).seal).toStrictEqual({ sealed: 0, provider: "0a".repeat(32) });
+  });
+
   it("brings a station's relay error back as a MeshError with its code", async () => {
     pool.call.mockRejectedValueOnce(new RelayError("unknown_next_peer"));
     await expect(call({ procedure: "x/y" })).rejects.toMatchObject({ code: "unknown_next_peer", from: "station" });
