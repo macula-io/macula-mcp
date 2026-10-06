@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 the git tags this repo actually publishes from (`.github/workflows/release.yml`
 fires on a `v*` tag push, not on every commit to `main`).
 
+## [0.44.1] - 2026-10-06
+
+### Security
+
+- `@modelcontextprotocol/sdk` is raised to `^1.32.1` (was `^1.30.0`) for
+  GHSA-6qxp-vccf-f47h (high): before 1.31.0 its OAuth client could send
+  credentials to an authorization server the MCP server chose. The advisory
+  was published after 0.44.0 (macula-io/macula-mcp#26).
+
 ## [0.44.0] - 2026-10-06
 
 ### Security
