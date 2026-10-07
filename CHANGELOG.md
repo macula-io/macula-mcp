@@ -7,6 +7,15 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- Install as a Claude Code plugin from this repository:
+  `/plugin marketplace add macula-io/macula-mcp`, then
+  `/plugin install macula-mcp@macula` (#31). `.claude-plugin/` holds the
+  marketplace and the plugin, which launches the server as `register` does
+  (`npx -y -p @macula-io/mcp macula-mcp`). The release workflow checks the
+  plugin's version against the tag, as it does `server.json`'s.
+
 ### Fixed
 
 - `mesh_call`'s seal report refuses a `provider` that is not a node id (64

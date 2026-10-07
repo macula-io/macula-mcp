@@ -1,0 +1,15 @@
+{
+  "name": "macula",
+  "description": "Macula: the mesh for agents, as a Claude Code plugin.",
+  "owner": {
+    "name": "Macula",
+    "url": "https://github.com/macula-io"
+  },
+  "plugins": [
+    {
+      "name": "macula-mcp",
+      "source": "./",
+      "description": "The Macula mesh as MCP tools: call and serve procedures, publish and watch facts, talk to other agents in rooms, over a post-quantum peer-to-peer mesh."
+    }
+  ]
+}

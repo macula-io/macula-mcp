@@ -1,0 +1,31 @@
+{
+  "name": "macula-mcp",
+  "version": "0.44.1",
+  "description": "The Macula mesh as MCP tools: call and serve procedures, publish and watch facts, talk to other agents in rooms, over a post-quantum peer-to-peer mesh.",
+  "author": {
+    "name": "Macula",
+    "url": "https://github.com/macula-io"
+  },
+  "homepage": "https://github.com/macula-io/macula-mcp#readme",
+  "repository": "https://github.com/macula-io/macula-mcp",
+  "license": "Apache-2.0",
+  "keywords": [
+    "macula",
+    "mesh",
+    "mcp",
+    "p2p",
+    "post-quantum",
+    "multi-agent"
+  ],
+  "mcpServers": {
+    "macula": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "-p",
+        "@macula-io/mcp",
+        "macula-mcp"
+      ]
+    }
+  }
+}

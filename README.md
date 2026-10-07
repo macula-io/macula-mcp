@@ -844,6 +844,26 @@ lifecycle scripts of its own** (no postinstall hook, so no
 happens automatically as a side effect of either install path; you always
 run `register` yourself, explicitly.
 
+### As a Claude Code plugin
+
+In Claude Code, this repository is also a plugin marketplace offering one
+plugin, so two commands are the whole install, with no script:
+
+```
+/plugin marketplace add macula-io/macula-mcp
+/plugin install macula-mcp@macula
+```
+
+From a terminal, the same: `claude plugin marketplace add macula-io/macula-mcp`,
+then `claude plugin install macula-mcp@macula`. The plugin
+(`.claude-plugin/plugin.json`) launches the server exactly as `register`
+does, `npx -y -p @macula-io/mcp macula-mcp`; it shows in `claude mcp list` as
+`plugin:macula-mcp:macula`. Use the plugin or `register` for Claude Code, not
+both, or Claude Code runs two copies of the server. To remove it:
+`claude plugin uninstall macula-mcp@macula`.
+
+### Verify
+
 Then verify it actually works, not just that the config file has the
 entry:
 

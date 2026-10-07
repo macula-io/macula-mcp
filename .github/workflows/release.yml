@@ -22,7 +22,7 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Validate version matches package.json and server.json
+      - name: Validate version matches package.json, server.json and the Claude Code plugin
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
           if [ "$PKG_VERSION" != "${{ steps.version.outputs.VERSION }}" ]; then
@@ -35,6 +35,11 @@ jobs:
               exit 1
             fi
           done
+          PLUGIN_VERSION="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          if [ "$PLUGIN_VERSION" != "${{ steps.version.outputs.VERSION }}" ]; then
+            echo "::error::Tag version (${{ steps.version.outputs.VERSION }}) doesn't match .claude-plugin/plugin.json version ($PLUGIN_VERSION)"
+            exit 1
+          fi
 
       # Rebuilds and re-runs the offline suite here rather than trusting
       # an artifact from the CI workflow -- this workflow triggers off a
