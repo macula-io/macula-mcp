@@ -33,7 +33,7 @@
 // and credential store as the long-running macula-mcp server process
 // alongside it.
 
-import { fileURLToPath } from "node:url";
+import { isRunDirectly } from "./run_directly.js";
 import { carriedPublicKey, selfNodeId } from "../macula_ts_client.js";
 import { parseRealmName, realmBaseURL } from "../realm_name.js";
 import {
@@ -249,7 +249,7 @@ async function main(): Promise<void> {
 // Guarded so this file can be imported (realm_bin.test.ts imports
 // parseArgs/emit/membershipEvent) without running the CLI as a side
 // effect of import -- same convention as bin/status.ts.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isRunDirectly(import.meta.url)) {
   main().catch((e) => {
     console.error(`[macula-mcp realm] fatal: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);

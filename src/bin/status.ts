@@ -6,9 +6,9 @@
 // Read-only: never writes config, never touches the mesh. Safe to
 // run any time.
 
+import { isRunDirectly } from "./run_directly.js";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { detect } from "../install/platform.js";
 import { ALL, type ClientAdapter } from "../install/mcp_clients/index.js";
@@ -91,7 +91,7 @@ function pad(s: string): string {
 
 // Guarded so this file can be imported (status.test.ts imports
 // hasMaculaEntry) without running the CLI as a side effect of import.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isRunDirectly(import.meta.url)) {
   main().catch((e) => {
     console.error(`[macula-mcp status] fatal: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
