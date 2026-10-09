@@ -19,7 +19,7 @@ import { selfNodeId } from "./macula_ts_client.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
-import { recentFacts } from "./lobby_transcript.js";
+import { factsAfter, recentFacts } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, threadEnvelopes } from "./envelope.js";
 import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./rings.js";
 import { petname } from "./petname.js";
@@ -128,6 +128,24 @@ const DESCRIPTION_TERSE =
   "threaded room messages you're in; recent help broadcasts on central. Instant local read, never " +
   "blocks. Rooms show what was recorded while watched. " + DROPPED_DESCRIPTION_TERSE;
 
+/**
+ * One room's messages as a reader gets them: threaded, `attested` from the station's publisher, each with its
+ * transcript `seq`. Without `afterSeq`, the newest `limit`; with it, the first `limit` recorded after that seq, oldest
+ * first, so a poller that keeps the cursor never loses a message to a burst of others. `nextAfterSeq` is the highest
+ * row read, parsed or not: the cursor to pass next time (`afterSeq` again when nothing was read).
+ */
+export function roomMessages(args: { topic: string; afterSeq?: number; limit: number }) {
+  const read =
+    args.afterSeq === undefined
+      ? recentFacts({ topic: args.topic, limit: args.limit })
+      : { total: undefined, facts: factsAfter({ topic: args.topic, afterId: args.afterSeq, limit: args.limit }) };
+  const { messages, unparsed } = threadEnvelopes(
+    read.facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher, seq: f.id })),
+  );
+  const nextAfterSeq = read.facts.reduce((max, f) => Math.max(max, f.id), args.afterSeq ?? 0);
+  return { total: read.total, messages, unparsed, nextAfterSeq };
+}
+
 export function registerMeshReadInbox(server: McpServer): void {
   server.registerTool(
     "mesh_read_inbox",
@@ -141,10 +159,16 @@ export function registerMeshReadInbox(server: McpServer): void {
           .positive()
           .max(MAX_LIMIT)
           .default(DEFAULT_LIMIT)
-          .describe(`Most recent N messages per room, oldest-first within that window (default ${DEFAULT_LIMIT}).`),
+          .describe(`Most recent N messages per room, oldest-first within that window (default ${DEFAULT_LIMIT}); with after_seq, the first N after it.`),
+        after_seq: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Only messages recorded after this seq, oldest first: pass the previous read's next_after_seq to see each message exactly once."),
       },
     },
-    async ({ room_topic, limit }) => {
+    async ({ room_topic, limit, after_seq }) => {
       presence.ensurePresence(server);
       try {
         // presence.currentNodeId() is undefined until presence's async
@@ -160,8 +184,7 @@ export function registerMeshReadInbox(server: McpServer): void {
           return errorContent(`mesh_read_inbox: not in room ${room_topic} -- mesh_join_room it first, or see mesh_rooms.`);
         }
         const roomsOut = selected.map((room) => {
-          const { total, facts } = recentFacts({ topic: room.room_topic, limit });
-          const { messages, unparsed } = threadEnvelopes(facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })));
+          const { total, messages, unparsed, nextAfterSeq } = roomMessages({ topic: room.room_topic, afterSeq: after_seq, limit });
           const last = messages[messages.length - 1];
           const hint = waitingHint(room.room_topic, last, me);
           return {
@@ -171,8 +194,9 @@ export function registerMeshReadInbox(server: McpServer): void {
             purpose: room.purpose,
             participants_seen: room.participants_seen,
             participants_seen_petnames: room.participants_seen.map(petname),
-            total_received: total,
+            ...(total !== undefined ? { total_received: total } : {}),
             returned: messages.length,
+            next_after_seq: nextAfterSeq,
             unparsed,
             messages: messages.map(withFromPetname),
             dropped: room.dropped,
@@ -182,7 +206,7 @@ export function registerMeshReadInbox(server: McpServer): void {
         const central = room_topic
           ? undefined
           : threadEnvelopes(
-              recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at })),
+              recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher })),
             ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me).map(withFromPetname);
         const rings = room_topic || !me
           ? undefined

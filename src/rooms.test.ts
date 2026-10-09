@@ -142,6 +142,14 @@ describe("say", () => {
     expect(res.timed_out).toBeUndefined();
   });
 
+  it("addresses the message: `to` goes on the wire as lowercase node ids (crew-code#18)", async () => {
+    const { say } = await import("./rooms.js");
+    const topic = `agents.room.${"6".repeat(32)}`;
+    const res = await say({ room_topic: topic, kind: "question_asked", text: "ready?", to: ["C".repeat(64)] });
+    expect(res.sent.to).toEqual(["c".repeat(64)]);
+    expect(mocks.publish).toHaveBeenLastCalledWith(expect.objectContaining({ fact: expect.objectContaining({ to: ["c".repeat(64)] }) }));
+  });
+
   it("broadcasts on central without joining anything", async () => {
     const { say, listRooms } = await import("./rooms.js");
     const res = await say({ room_topic: "agents.lobby", kind: "help_requested", text: "anyone know erlang?" });

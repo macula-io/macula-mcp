@@ -188,3 +188,29 @@ describe("threadEnvelopes", () => {
     expect(messages).toHaveLength(1);
   });
 });
+
+describe("to: the envelope names its recipients (crew-code#18)", () => {
+  const BOB = "b".repeat(64);
+  it("keeps `to`, lowercased, so 'is it for me' never misses on case", () => {
+    const env = buildEnvelope({ room_topic: ROOM, from: ME, kind: "question_asked", text: "?", to: [BOB.toUpperCase()] });
+    expect(parseEnvelope({ ...env })?.to).toEqual([BOB]);
+  });
+  it("lowercases `from` too, so a reader compares node ids one way", () => {
+    const env = buildEnvelope({ room_topic: ROOM, from: ME.toUpperCase(), kind: "remark_made", text: "hi" });
+    expect(parseEnvelope({ ...env })?.from).toBe(ME);
+  });
+  it("leaves `to` out when there is none: a message to the whole room", () => {
+    const env = buildEnvelope({ room_topic: ROOM, from: ME, kind: "remark_made", text: "hi" });
+    expect("to" in (parseEnvelope({ ...env }) ?? {})).toBe(false);
+  });
+  it("refuses a `to` that is not 1..32 node ids, rather than reading it as 'to everyone'", () => {
+    const base = { message_id: ID, room_topic: ROOM, sent_at: 1, from: ME, kind: "remark_made", text: "x" };
+    for (const to of [[], ["bob"], [BOB.slice(1)], "b".repeat(64), Array.from({ length: 33 }, () => BOB)]) {
+      expect(envelopeProblems({ ...base, to })).toEqual(expect.arrayContaining([expect.stringContaining("to")]));
+      expect(parseEnvelope({ ...base, to })).toBeUndefined();
+    }
+  });
+  it("buildEnvelope refuses a bad `to` before anything is published", () => {
+    expect(() => buildEnvelope({ room_topic: ROOM, from: ME, kind: "remark_made", text: "x", to: ["bob"] })).toThrow(EnvelopeError);
+  });
+});

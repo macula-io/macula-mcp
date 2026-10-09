@@ -20,7 +20,7 @@ import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
-import { CENTRAL_TOPIC, KINDS, TALK_KINDS } from "./envelope.js";
+import { CENTRAL_TOPIC, KINDS, MAX_TO, TALK_KINDS } from "./envelope.js";
 import { ANSWER, MAX_PURPOSE_CHARS, listRings, RingError } from "./rings.js";
 import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./mesh_ring.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
@@ -347,6 +347,12 @@ export function registerMeshRooms(server: McpServer): void {
         kind: z.enum(KINDS).optional().describe(`One of ${TALK_KINDS.join(", ")} (default remark_made). Lifecycle kinds are published by the room tools, not here.`),
         in_reply_to: messageIdSchema.optional().describe("message_id this replies to. Required for answer_given, result_reported, lane_released, claim_confirmed, and claim_disputed."),
         refs: z.array(z.string().min(1)).max(16).optional().describe("mesh_put artifact ids for anything large. Never paste large content into text."),
+        to: z
+          .array(nodeIdOrPetnameSchema)
+          .min(1)
+          .max(MAX_TO)
+          .optional()
+          .describe("Who this message is for: node ids or petnames (as in mesh_agents). Omit for the whole room. It names the recipient; it does not hide the message (anyone who knows the room's topic reads it)."),
         wait_reply_seconds: z
           .number()
           .positive()
@@ -355,7 +361,7 @@ export function registerMeshRooms(server: McpServer): void {
           .describe(`Also wait up to this long (max ${MAX_WAIT_SECONDS}) for the first envelope from another sender on this topic.`),
       },
     },
-    async ({ room_topic, text, kind, in_reply_to, refs, wait_reply_seconds }) => {
+    async ({ room_topic, text, kind, in_reply_to, refs, to, wait_reply_seconds }) => {
       ensurePresence(server);
       if (kind !== undefined && !(TALK_KINDS as readonly string[]).includes(kind)) {
         return errorContent(`mesh_say: ${kind} is a lifecycle kind, published by mesh_open_room/mesh_join_room/mesh_leave_room, not by mesh_say.`);
@@ -366,7 +372,13 @@ export function registerMeshRooms(server: McpServer): void {
         // its own documented shape -- found by adversarial review to be an
         // unscanned path on an otherwise-wired tool.
         assertNoLikelySecret({ text, refs }, "text/refs");
-        const res = await rooms.say({ room_topic, kind, text, in_reply_to, refs, waitReplySeconds: wait_reply_seconds });
+        // Resolved up front, like mesh_open_room's participants: an unknown petname never reaches the wire.
+        const recipients = to?.map((who) => {
+          const resolved = resolveNodeId(who);
+          if (!resolved.ok) throw new rooms.RoomError(`to: ${resolved.error}`);
+          return resolved.node_id;
+        });
+        const res = await rooms.say({ room_topic, kind, text, in_reply_to, refs, to: recipients, waitReplySeconds: wait_reply_seconds });
         return jsonContent(res.dropped === undefined ? res : { ...res, dropped_means: DROPPED_MEANS.wait });
       } catch (e) {
         return failed("mesh_say failed", e);

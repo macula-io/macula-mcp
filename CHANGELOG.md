@@ -7,6 +7,25 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- **`to` on room messages** (crew-code#18): `mesh_say` takes `to` (node ids or petnames, 1 to 32) and the
+  envelope carries it as lowercase node ids; absent means the whole room. It names who a message is for; a room
+  is still readable by anyone who knows its topic. An envelope with a malformed `to` is unparsed, never read as
+  "to everyone".
+- **`mesh_read_inbox` reads by cursor**: every message carries `seq`, each room `next_after_seq`, and `after_seq`
+  returns only what was recorded after it, oldest first, so a poller sees every message once however many arrive
+  in between (the newest-N window could lose one to a burst).
+- **`macula-mcp-node-id`**: prints the node id this configuration's server uses (`MACULA_MCP_AGENT` or
+  `MACULA_MCP_IDENTITY`), loading or creating the key as the server does, so a launcher can list its agents' ids
+  before they start.
+
+### Fixed
+
+- `mesh_read_inbox` reported `attested: 0` for every message: it did not pass the station's publisher to the
+  threading. It does now, for rooms and for central.
+- An envelope's `from` is lowercased when read, so node ids compare one way.
+
 ## [0.45.0] - 2026-10-09
 
 ### Changed

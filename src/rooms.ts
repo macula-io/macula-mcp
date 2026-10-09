@@ -361,6 +361,8 @@ export interface SayArgs {
   text: string;
   in_reply_to?: string;
   refs?: string[];
+  /** Node ids (64 hex) this message is for; absent = the whole room. Resolved from petnames by the tool. */
+  to?: string[];
   waitReplySeconds?: number;
 }
 
@@ -401,6 +403,7 @@ export async function say(args: SayArgs): Promise<SayResult> {
     text: args.text,
     in_reply_to: args.in_reply_to,
     refs: args.refs,
+    to: args.to?.map((id) => id.toLowerCase()),
   });
   const cursor = lastFactId(topic);
   const lostBefore = lobbyObserver.dropped(topic);

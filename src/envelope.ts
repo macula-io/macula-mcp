@@ -68,6 +68,12 @@ export interface Envelope {
   text: string;
   /** mesh_artifact ids for anything large -- never inline content. */
   refs?: string[];
+  /**
+   * Node ids (64 hex, lowercase once parsed) this message is for; absent = the whole room. Who it is FOR,
+   * not who may read it: a room is readable by anyone who knows its topic. A reader that acts on
+   * messages addressed to it checks `attested` too: `to` is the sender's claim like every other field.
+   */
+  to?: string[];
   /** room_opened only: node ids the opener means to be in the room, itself included. */
   participants?: string[];
   /** room_opened only: why the room exists, one line. */
@@ -76,6 +82,8 @@ export interface Envelope {
 
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-fA-F]{64}$/;
+/** The most recipients one envelope names (the most participants a room is opened with). */
+export const MAX_TO = 32;
 
 export function isKind(s: unknown): s is Kind {
   return typeof s === "string" && (KINDS as readonly string[]).includes(s);
@@ -110,6 +118,7 @@ export interface BuildInput {
   participants?: string[];
   purpose?: string;
   from_citizen?: string;
+  to?: string[];
 }
 
 /** Builds a fresh, valid envelope (new message_id, sent_at = now) or throws EnvelopeError naming every problem. Optional keys are omitted, not sent as null. */
@@ -124,6 +133,7 @@ export function buildEnvelope(input: BuildInput): Envelope {
     ...(input.in_reply_to !== undefined ? { in_reply_to: input.in_reply_to } : {}),
     ...(input.from_citizen !== undefined ? { from_citizen: input.from_citizen } : {}),
     ...(input.refs !== undefined ? { refs: input.refs } : {}),
+    ...(input.to !== undefined ? { to: input.to } : {}),
     ...(input.participants !== undefined ? { participants: input.participants } : {}),
     ...(input.purpose !== undefined ? { purpose: input.purpose } : {}),
   };
@@ -171,6 +181,9 @@ export function envelopeProblems(payload: unknown): string[] {
   if (p.participants !== undefined && !(Array.isArray(p.participants) && p.participants.every((n) => typeof n === "string" && HEX64.test(n)))) {
     problems.push("participants, when present, must be a list of 64-hex node ids");
   }
+  if (p.to !== undefined && !(Array.isArray(p.to) && p.to.length >= 1 && p.to.length <= MAX_TO && p.to.every((n) => typeof n === "string" && HEX64.test(n)))) {
+    problems.push(`to, when present, must be a list of 1..${MAX_TO} 64-hex node ids`);
+  }
   if (p.purpose !== undefined && typeof p.purpose !== "string") problems.push("purpose, when present, must be a string");
 
   return problems;
@@ -184,13 +197,14 @@ export function parseEnvelope(payload: unknown): Envelope | undefined {
     message_id: p.message_id as string,
     room_topic: p.room_topic as string,
     sent_at: p.sent_at as number,
-    from: p.from as string,
+    from: (p.from as string).toLowerCase(),
     kind: p.kind as Kind,
     text: p.text as string,
   };
   if (p.in_reply_to !== undefined) env.in_reply_to = p.in_reply_to as string;
   if (p.from_citizen !== undefined) env.from_citizen = p.from_citizen as string;
   if (p.refs !== undefined) env.refs = p.refs as string[];
+  if (p.to !== undefined) env.to = (p.to as string[]).map((n) => n.toLowerCase());
   if (p.participants !== undefined) env.participants = p.participants as string[];
   if (p.purpose !== undefined) env.purpose = p.purpose as string;
   return env;
@@ -211,6 +225,8 @@ export interface ObservedEnvelope extends Envelope {
    * anything that matters (who joined, who replied, who opened).
    */
   attested: 0 | 1;
+  /** The transcript row id this message was recorded under: increasing per machine, a cursor for mesh_read_inbox's after_seq. Absent when the caller read no transcript rows. */
+  seq?: number;
 }
 
 /** Whether `from` is backed by the station's own record of who published the fact. */
@@ -226,8 +242,8 @@ export function isAttested(from: string, publisher: string | null | undefined): 
  * -- the window is a page of a transcript, not the whole history. Facts
  * that aren't envelopes are counted, not dropped silently.
  */
-export function threadEnvelopes(rows: { payload: unknown; observed_at: string; publisher?: string | null }[]): { messages: ObservedEnvelope[]; unparsed: number } {
-  const parsed: { env: Envelope; observed_at: string; publisher?: string | null }[] = [];
+export function threadEnvelopes(rows: { payload: unknown; observed_at: string; publisher?: string | null; seq?: number }[]): { messages: ObservedEnvelope[]; unparsed: number } {
+  const parsed: { env: Envelope; observed_at: string; publisher?: string | null; seq?: number }[] = [];
   let unparsed = 0;
   for (const row of rows) {
     const env = parseEnvelope(row.payload);
@@ -235,7 +251,7 @@ export function threadEnvelopes(rows: { payload: unknown; observed_at: string; p
       unparsed += 1;
       continue;
     }
-    parsed.push({ env, observed_at: row.observed_at, publisher: row.publisher });
+    parsed.push({ env, observed_at: row.observed_at, publisher: row.publisher, seq: row.seq });
   }
   const byId = new Map<string, Envelope>();
   for (const p of parsed) byId.set(p.env.message_id, p.env);
@@ -259,7 +275,7 @@ export function threadEnvelopes(rows: { payload: unknown; observed_at: string; p
   };
   const messages: ObservedEnvelope[] = parsed.map((p) => {
     const { root, depth } = resolve(p.env);
-    return { ...p.env, observed_at: p.observed_at, thread_root: root, depth, attested: isAttested(p.env.from, p.publisher) ? 1 : 0 };
+    return { ...p.env, observed_at: p.observed_at, thread_root: root, depth, attested: isAttested(p.env.from, p.publisher) ? 1 : 0, ...(p.seq !== undefined ? { seq: p.seq } : {}) };
   });
   return { messages, unparsed };
 }
