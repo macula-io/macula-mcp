@@ -629,29 +629,32 @@ consults this variable at all.
 What joining buys today is attribution: a person vouches for this agent, the
 citizens entry shows their handle, and a provider this agent serves can carry
 the realm certificate. Nothing on the mesh checks the certificate on a *call*;
-a realm-gated procedure checks a UCAN chain, which this server presents from a
-person's note (next section).
+a realm-gated procedure checks a UCAN, which this server presents from its own
+membership (next section).
 
-#### Calling a realm-gated procedure as yourself (a person's note)
+#### Calling a realm-gated procedure as yourself (a person binds this server)
 
 A procedure gated on realm membership (`realm_member_required`, mcl-search's
-web search for one) serves a caller whose UCAN chain is rooted at the realm's
-key. You join the realm once, as a person, with macula-cli, and hand this
-server a short note; there is one way in, the chain file macula-cli writes:
+web search for one) serves a caller whose UCAN is rooted at the realm's key.
+You join the realm once, as a person verified by email, with macula-cli, and
+bind this server's node to you once (macula-realm#46):
 
 ```bash
 macula-cli person init                              # once: your person key
 macula-cli person join -realm io.macula             # once: confirm at the join URL, signed in as you
-macula-cli person delegate -realm io.macula -realm-key @io_macula.key \
-  -to <this server's node_id> -ttl 24h -out ~/.config/macula-mcp/note.ucan
+macula-cli person bind -seed ... -realm io.macula -realm-key @io_macula.key \
+  -to <this server's node_id>
 ```
 
 This server's node_id is in `mesh://identity`; name the agent with
 `MACULA_MCP_AGENT` (or pin `MACULA_MCP_IDENTITY`) so it stays the same across
-sessions, or the note stops matching. Point `MACULA_MCP_UCAN` at the chain file and
-call with `ucan: 1`. The note is revoked only by its expiry, so delegate again
-when it runs out; the file is read at each call, so no restart is needed.
-`mesh_join_realm`'s own device membership is separate and is not presented.
+sessions. The realm admits the node on its own membership with you as its
+sponsor. Set `MACULA_MCP_AUTOJOIN_REALM=io.macula` and this server fetches the
+node's token through `issue_membership_ucan` at presence start, and renews every
+stored membership before it runs out, checking every 10 minutes. `mesh_call` with `ucan: 1` presents the node's own token for the realm
+it calls. When you are revoked, resign, or unbind it (`macula-cli person
+unbind`), the next renewal is refused and the token runs out; `ucan: 1` then
+refuses by name.
 
 #### Joining a different realm (multi-realm, v0.27.0)
 
@@ -902,7 +905,6 @@ installing without registering any client) and troubleshooting.
 | `MACULA_MCP_KEM_ADVERTISE`     | `1` names this server's KEM key (in memory, rotated daily) in the advertisements of everything it serves that is not `confidential: "off"`, `~<node_id>/ring` included (shared content is always served in the clear), so callers seal their calls to it; `mesh_serve` `confidential: "required"` needs it. Past one advertisement lifetime (about five minutes) a caller that cannot seal (older than macula 13, macula-go 0.18 or @macula-io/ts 0.24) is refused `sealed_required`, ring included. Turn it on only once every station you serve through runs macula 12.11 or later and your callers run those. Unset or empty is `0`; any value but `0` or `1` is refused by name. | `0` (no key named: served in the clear) |
 | `MACULA_MCP_AGENT`             | Name this agent: its identity key is `~/.config/macula-mcp/keys/agent-<name>.key`, created on first use (owner-readable only) and the same in every session launched with that name, so a crew of agents each keeps one stable node_id across restarts. Letters, digits, `_` and `-`, case-insensitive, at most 64; anything else is refused. Set it in the launch environment of each agent (the MCP server inherits it), not in a shared MCP config, or every agent becomes one. Refused together with `MACULA_MCP_IDENTITY`. | unset: the per-session key below |
 | `MACULA_MCP_IDENTITY`          | Pin this server's one identity key (an ML-DSA node key, `pq_hybrid`) to a fixed file, for an identity that survives across harness sessions. The key file is created on first use, readable by its owner only. | one key per logical session: `~/.config/macula-mcp/keys/<scope>.key`, scoped by `CLAUDE_CODE_SESSION_ID` else the parent pid (a restart of this same session reuses it, a different session gets its own) |
-| `MACULA_MCP_UCAN`              | A file holding the UCAN `mesh_call` presents when a call passes `ucan: 1`: the token, minted for this server's node, on the first line, and its chain's parents (proofs) on the lines after, one per line; `macula-cli person delegate -out` writes one (see [Calling a realm-gated procedure as yourself](#calling-a-realm-gated-procedure-as-yourself-a-persons-note)). Read at each such call, so a renewed token is picked up without a restart. A call without `ucan: 1` sends no token. `ucan: 1` with this unset, unreadable or empty is refused by name, never sent without one. | unset |
 | `MACULA_MCP_AUTOJOIN_REALM`    | A realm to join silently at the device tier on presence start (see `device_membership.ts`). A realm other than io.macula also needs its key in `MACULA_MESH_REALMS`. | unset (off) |
 | `MACULA_MCP_NO_CITIZENSHIP`    | Set to anything to skip registering this agent in mcl-citizens (see [Citizenship](#citizenship)); `mesh://identity` then reports `citizenship.disabled`.                              | unset: register on presence start, renew every 5 min |
 | `MACULA_MCP_CITIZEN_DISPLAY_NAME` | The name this agent shows in mcl-citizens. Pins it outright.                                                                                                                   | `operator_name`, else the realm handle (once joined), else the harness label, else `"macula-mcp agent"` |

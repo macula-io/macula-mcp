@@ -37,7 +37,7 @@
 import { realmIdOf } from "./mesh_config.js";
 import type { JsonValue } from "@macula-io/ts";
 import { call, carriedPublicKey, MEMBERSHIP_UCAN_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
-import { loadCredential, storeCredential, type RealmCredential } from "./realm.js";
+import { listCredentials, loadCredential, storeCredential, type RealmCredential, type RealmTier } from "./realm.js";
 
 /**
  * The procedure string is NOT a constant -- macula_topic:build/6 embeds
@@ -142,7 +142,7 @@ export async function joinDevice(input: { realmName: string }): Promise<RealmCre
     joined_at: new Date().toISOString(),
     citizen_did: outcome.citizen_did,
     ucan: outcome.ucan,
-    tier: "device",
+    tier: tierOf(outcome.ucan),
   };
 }
 
@@ -164,4 +164,75 @@ export async function ensureAutoJoin(input: { nodeId: string }): Promise<void> {
   } catch (e) {
     console.error(`device_membership: silent auto-join of ${input.nodeId} against ${realmName} failed: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Renewal (macula-realm#46 step 2). A person binds this node once (macula-cli
+// person bind); the realm admits it on its own membership and mints its token
+// through issue_membership_ucan, the same request as a join, for as long as
+// the person is a member. This server renews every stored membership before it
+// runs out, so mesh_call ucan: 1 always has the node's own current token.
+// ---------------------------------------------------------------------------
+
+/** Renew a membership this close to its expiry, or past it. */
+const RENEW_BEFORE_SECONDS = 20 * 60;
+
+/** How often the renewal check runs; jittered so a crew's servers spread out. */
+const RENEW_CHECK_MS = 10 * 60 * 1000;
+
+function claimsOf(ucan: string): { exp?: unknown; cap?: unknown } | undefined {
+  const part = ucan.split(".")[1];
+  if (part === undefined) return undefined;
+  try {
+    return JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as { exp?: unknown; cap?: unknown };
+  } catch {
+    return undefined;
+  }
+}
+
+/** A token's expiry (seconds since the epoch), or undefined when it carries none. Pure. */
+export function tokenExpiry(ucan: string): number | undefined {
+  const exp = claimsOf(ucan)?.exp;
+  return typeof exp === "number" ? exp : undefined;
+}
+
+/** "citizen" for a token granting the email-verified tier (a person's, or a client a person bound), else "device". Pure. */
+export function tierOf(ucan: string): RealmTier {
+  const cap = claimsOf(ucan)?.cap;
+  const grants = Array.isArray(cap) ? cap.map((c) => (c as { can?: unknown }).can) : [];
+  return grants.includes("member/email-verified") ? "citizen" : "device";
+}
+
+function runsOutSoon(ucan: string | undefined, nowSeconds: number): boolean {
+  if (ucan === undefined) return false;
+  const exp = tokenExpiry(ucan);
+  return exp !== undefined && exp - nowSeconds < RENEW_BEFORE_SECONDS;
+}
+
+/**
+ * Renews each of this node's stored memberships that runs out within 20
+ * minutes (or already has), keeping the rest of the credential and taking the
+ * tier from the new token. A refusal (the person unbound this node, or was
+ * revoked) keeps the old credential, which then expires; mesh_call refuses it
+ * by name. Never throws.
+ */
+export async function renewMemberships(input: { nodeId: string }): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  for (const held of listCredentials(input.nodeId).filter((m) => runsOutSoon(m.ucan, now))) {
+    try {
+      const renewed = await joinDevice({ realmName: held.realm });
+      const { realm, ...cred } = held;
+      storeCredential({ ...cred, citizen_did: renewed.citizen_did, ucan: renewed.ucan, tier: renewed.tier }, realm);
+    } catch (e) {
+      console.error(`device_membership: renewing ${input.nodeId}'s membership in ${held.realm} failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
+/** Checks for renewal now and every 10 minutes (jittered) while the process runs; the timer never keeps it alive. */
+export function keepMembershipsRenewed(input: { nodeId: string }): NodeJS.Timeout {
+  void renewMemberships(input);
+  const timer = setInterval(() => void renewMemberships(input), RENEW_CHECK_MS + Math.floor(Math.random() * 60_000));
+  timer.unref();
+  return timer;
 }

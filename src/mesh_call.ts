@@ -11,10 +11,11 @@
 // nothing more in the args.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { readFile } from "node:fs/promises";
 import { z } from "zod";
-import { MeshError, splitRealmPrefix } from "./mesh_config.js";
-import { callWithReport, type Seal } from "./macula_ts_client.js";
+import { IO_MACULA_REALM_ID, MeshError, realmIdOf, splitRealmPrefix } from "./mesh_config.js";
+import { callWithReport, selfNodeId, type Seal } from "./macula_ts_client.js";
+import { listCredentials } from "./realm.js";
+import { tokenExpiry } from "./device_membership.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
@@ -38,33 +39,39 @@ const DESCRIPTION_FULL =
   "(confidential \"preferred\", the default); confidential \"required\" never calls a provider that names " +
   "none and fails with code=confidentiality and its reason instead. code=sealed_refused from the provider " +
   "means it could not open the sealed call even after one reseal to the key it named. " +
-  "ucan: 1 presents this server's UCAN (the file MACULA_MCP_UCAN names) to a gated procedure; a gated " +
+  "ucan: 1 presents this node's own membership in the realm called (a person binds the node once) to a gated procedure; a gated " +
   "provider that refuses it, or a call made without one, fails with code=unauthorized.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. */
-const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form. prove_ownership: 1 signs args with an ownership proof, for a provider that reads one. Sealed to a provider that names a KEM key; confidential "required" refuses one that names none. The result's seal says whether this call went sealed (1) or in the clear (0), and means spells it out. ucan: 1 presents this server's UCAN (MACULA_MCP_UCAN) to a gated procedure.`;
+const DESCRIPTION_TERSE = `Invoke a procedure advertised on the mesh, by direct dial to a trusted provider. Returns the provider's result. Realm defaults to io.macula. Bytes appear as {"$bytes": "<base64>"}; send and pass them back in the same form. prove_ownership: 1 signs args with an ownership proof, for a provider that reads one. Sealed to a provider that names a KEM key; confidential "required" refuses one that names none. The result's seal says whether this call went sealed (1) or in the clear (0), and means spells it out. ucan: 1 presents this node's own membership in that realm to a gated procedure.`;
 
 /**
- * The UCAN this server presents when a call asks for it: the file
- * MACULA_MCP_UCAN names holds the token on its first line and its chain's
- * parents (proofs) on the lines after, one token each. Read at each call, so a
- * renewed token is picked up without a restart. A call that asks for a UCAN
- * when none is configured is refused by name, never sent without one.
+ * The UCAN this server presents when a call asks for it: this node's own
+ * membership in the realm the call goes to, as the realm issued it and this
+ * server renews it (device_membership.ts). A person binds the node once
+ * (macula-cli person bind, macula-realm#46); there is no other token. A call
+ * that asks for one this node does not hold, or holds expired, is refused by
+ * name, never sent without one.
  */
-export async function presentedUcan(): Promise<{ ucan: string; proofs: string[] }> {
-  const path = process.env.MACULA_MCP_UCAN;
-  if (!path) {
-    throw new MeshError("ucan: 1 asks for a UCAN, but MACULA_MCP_UCAN is not set: point it at a file holding the token.");
+export async function presentedUcan(realm: string | undefined): Promise<{ ucan: string }> {
+  const target = realm ?? IO_MACULA_REALM_ID;
+  const nodeId = await selfNodeId();
+  const held = listCredentials(nodeId).find((m) => realmIdOf(m.realm) === target && typeof m.ucan === "string");
+  if (!held?.ucan) {
+    throw new MeshError(
+      `ucan: 1 asks for this node's membership, but it has no membership in this realm: ask your person to bind it ` +
+        `(macula-cli person bind -to ${nodeId}), and set MACULA_MCP_AUTOJOIN_REALM to that realm so this server ` +
+        `fetches its token and keeps it renewed.`,
+    );
   }
-  let text: string;
-  try {
-    text = await readFile(path, "utf8");
-  } catch (e) {
-    throw new MeshError(`MACULA_MCP_UCAN names ${path}, which cannot be read: ${(e as Error).message}`);
+  const exp = tokenExpiry(held.ucan);
+  if (exp !== undefined && exp <= Math.floor(Date.now() / 1000)) {
+    throw new MeshError(
+      `ucan: 1: this node's membership in ${held.realm} expired at ${new Date(exp * 1000).toISOString()} and its renewal ` +
+        `is failing; the realm may have ended it (its person unbound it, or was revoked).`,
+    );
   }
-  const [ucan, ...proofs] = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== "");
-  if (ucan === undefined) throw new MeshError(`MACULA_MCP_UCAN names ${path}, which holds no token.`);
-  return { ucan, proofs };
+  return { ucan: held.ucan };
 }
 
 /** The seal report with what it says, in words an agent cannot mistake: sealed
@@ -122,10 +129,11 @@ export function registerMeshCall(server: McpServer): void {
           .union([z.literal(0), z.literal(1)])
           .optional()
           .describe(
-            "1 presents this server's UCAN to a gated procedure: the token in the file MACULA_MCP_UCAN names " +
-              "(first line), with its chain's parents (the lines after). A gated provider checks it before its " +
-              "handler runs and refuses with code=unauthorized. 0 or omitted: no token is sent, so a gated " +
-              "procedure refuses the call. Fails by name when asked for and none is configured.",
+            "1 presents this node's own membership in the realm called to a gated procedure: the token the " +
+              "realm issued it (a person binds the node once with macula-cli person bind), renewed by this " +
+              "server. A gated provider checks it before its handler runs and refuses with code=unauthorized. " +
+              "0 or omitted: no token is sent, so a gated procedure refuses the call. Fails by name when this " +
+              "node holds no membership in that realm, or holds an expired one.",
           ),
         timeout_ms: z.number().int().positive().optional().describe("How long to wait for the result, in milliseconds (5000 by default)."),
         realm: z
@@ -146,7 +154,7 @@ export function registerMeshCall(server: McpServer): void {
       try {
         assertNoLikelySecret(args, "args");
         const { procedure, realm } = splitRealmPrefix(rawProcedure, rawRealm);
-        const presented = ucan === 1 ? await presentedUcan() : {};
+        const presented = ucan === 1 ? await presentedUcan(realm) : {};
         const res = await callWithReport({ procedure, callArgs: args, timeoutMs: timeout_ms, realm, bytes: "tagged",
           proveOwnership: prove_ownership === 1, confidential, ...presented });
         return jsonContent({ result: res.payload, duration_ms: res.duration_ms, seal: withMeaning(res.seal) });

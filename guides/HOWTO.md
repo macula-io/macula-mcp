@@ -142,8 +142,8 @@ Errors carry their code: `code=handler_error, from=provider` is the
 service saying no; `code=unknown_next_peer, from=station` is a station that
 could not relay; "no trusted provider" is nothing trusted advertising it in
 that realm (wrong realm, a realm key this server lacks, or a service that is
-down). With `MACULA_MCP_UCAN` set it refuses by name: post-quantum UCANs
-are macula-io/macula-go#2.
+down). With `ucan: 1` it presents this node's own membership in that realm,
+and refuses by name when the node holds none or an expired one.
 
 ### `mesh_publish`
 

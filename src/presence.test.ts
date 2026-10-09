@@ -31,6 +31,7 @@ vi.mock("./realm.js", () => ({
 }));
 vi.mock("./device_membership.js", () => ({
   ensureAutoJoin: vi.fn().mockResolvedValue(undefined),
+  keepMembershipsRenewed: vi.fn().mockReturnValue(undefined),
 }));
 
 import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";

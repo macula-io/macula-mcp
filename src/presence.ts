@@ -57,6 +57,8 @@ interface PresenceState {
   hello: Subscription;
   goodbye: Subscription;
   heartbeatTimer: NodeJS.Timeout;
+  /** Renews this node's memberships before they run out (device_membership.ts); set once membership starts. */
+  renewTimer?: NodeJS.Timeout;
 }
 
 let state: PresenceState | undefined;
@@ -231,6 +233,7 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   // Visible first, then realm membership and citizenship: both bounded,
   // neither fails presence.
   await deviceMembership.ensureAutoJoin({ nodeId });
+  state.renewTimer = deviceMembership.keepMembershipsRenewed({ nodeId });
   const citizen = await citizenship.start({
     nodeId,
     displayName: citizenship.displayName(args.operatorName, args.connectedVia, realm.orgHandle(nodeId)),
@@ -299,6 +302,7 @@ export async function stop(): Promise<StopResult> {
   if (!s) return { said_goodbye: false };
   state = undefined;
   clearInterval(s.heartbeatTimer);
+  if (s.renewTimer) clearInterval(s.renewTimer);
   let saidGoodbye = false;
   try {
     await publish({ topic: GOODBYE_TOPIC, fact: { node_id: s.nodeId, at: new Date().toISOString() } });

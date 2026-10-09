@@ -7,6 +7,21 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Changed
+
+- **`mesh_call` `ucan: 1` presents this node's own membership** in the realm it calls (macula-realm#46
+  step 2). A person binds the node once (`macula-cli person bind`, 0.15.0); the realm admits it on its own
+  membership, sponsored by the person. This server renews every stored membership through
+  `issue_membership_ucan` before it runs out (checked every 10 minutes), keeping the credential and taking
+  the tier from the new token. A node with no membership in that realm, or an expired one, is refused by
+  name, with what to do. A device membership the realm upgrades (a bound client is minted at its person's
+  tier) is stored as `citizen`.
+
+### Removed
+
+- `MACULA_MCP_UCAN` and its chain file (a token plus its parents, as `macula-cli person delegate` wrote one).
+  A bound node holds its own membership, which the realm ends with its person; a note could only expire.
+
 ### Added
 
 - Install as a Claude Code plugin from this repository:

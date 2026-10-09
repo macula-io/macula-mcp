@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   selfNodeId: vi.fn(),
   loadCredential: vi.fn(),
   storeCredential: vi.fn(),
+  listCredentials: vi.fn(),
 }));
 vi.mock("./macula_ts_client.js", () => ({
   proveDeviceRequest: mocks.proveDeviceRequest,
@@ -24,7 +25,16 @@ vi.mock("./macula_ts_client.js", () => ({
 vi.mock("./realm.js", () => ({
   loadCredential: mocks.loadCredential,
   storeCredential: mocks.storeCredential,
+  listCredentials: mocks.listCredentials,
 }));
+
+/** A membership token as the realm mints one: only its claims are read. */
+function token(expSeconds: number, can = "member/email-verified"): string {
+  const part = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${part({ alg: "ML-DSA-87" })}.${part({ aud: NODE, exp: expSeconds, cap: [{ with: "mri:realm:io.macula", can }] })}.sig`;
+}
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 beforeEach(() => {
   mocks.selfNodeId.mockResolvedValue(NODE);
@@ -164,6 +174,56 @@ describe("ensureAutoJoin", () => {
     mocks.call.mockRejectedValue(new Error("unknown_next_peer"));
     const { ensureAutoJoin } = await import("./device_membership.js");
     await expect(ensureAutoJoin({ nodeId: NODE })).resolves.toBeUndefined();
+    expect(mocks.storeCredential).not.toHaveBeenCalled();
+  });
+});
+
+// macula-realm#46 step 2: a person binds this node once, and the node renews
+// its own membership through issue_membership_ucan before it runs out.
+describe("tokenExpiry and tierOf", () => {
+  it("read the expiry and the tier from the token's claims", async () => {
+    const { tokenExpiry, tierOf } = await import("./device_membership.js");
+    expect(tokenExpiry(token(1_900_000_000))).toBe(1_900_000_000);
+    expect(tierOf(token(1, "member/email-verified"))).toBe("citizen");
+    expect(tierOf(token(1, "member/device-verified"))).toBe("device");
+  });
+
+  it("read nothing from what is not a token", async () => {
+    const { tokenExpiry, tierOf } = await import("./device_membership.js");
+    expect(tokenExpiry("not-a-token")).toBeUndefined();
+    expect(tierOf("not-a-token")).toBe("device");
+  });
+});
+
+describe("renewMemberships", () => {
+  const stored = (realm: string, ucan: string, tier = "device") =>
+    ({ realm, node_id: NODE, portal: realm, org_identity: `mri:org:${realm}`, refresh_token: "", joined_at: "2026-10-01T00:00:00Z",
+       cert_pem: "PEM", citizen_did: NODE, ucan, tier });
+
+  it("renews a membership that runs out within 20 minutes, keeping the rest of the credential and taking the tier from the new token", async () => {
+    const fresh = token(nowSeconds() + 3600, "member/email-verified");
+    mocks.listCredentials.mockReturnValue([stored("io.macula", token(nowSeconds() + 600))]);
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: fresh }, duration_ms: 1 });
+    const { renewMemberships } = await import("./device_membership.js");
+    await renewMemberships({ nodeId: NODE });
+
+    expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ procedure: "io.macula/_realm/_realm/identity/issue_membership_ucan_v1" }));
+    expect(mocks.storeCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ ucan: fresh, tier: "citizen", joined_at: "2026-10-01T00:00:00Z", cert_pem: "PEM" }), "io.macula");
+  });
+
+  it("leaves a membership with time to run alone", async () => {
+    mocks.listCredentials.mockReturnValue([stored("io.macula", token(nowSeconds() + 7200))]);
+    const { renewMemberships } = await import("./device_membership.js");
+    await renewMemberships({ nodeId: NODE });
+    expect(mocks.call).not.toHaveBeenCalled();
+  });
+
+  it("keeps the old credential and never throws when the realm refuses (the person unbound it, or was revoked)", async () => {
+    mocks.listCredentials.mockReturnValue([stored("io.macula", token(nowSeconds() - 60))]);
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { error: "not_admitted: this node's membership ended" }, duration_ms: 1 });
+    const { renewMemberships } = await import("./device_membership.js");
+    await expect(renewMemberships({ nodeId: NODE })).resolves.toBeUndefined();
     expect(mocks.storeCredential).not.toHaveBeenCalled();
   });
 });

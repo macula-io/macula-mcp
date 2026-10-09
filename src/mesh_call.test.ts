@@ -1,15 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 const REALM = "abb81b5a614b63551b400b810648c0c8a78efad845442630c94b46cc95d2fcd1";
 const PROVIDER = "cd".repeat(32);
 
-const mocks = vi.hoisted(() => ({ callWithReport: vi.fn(), ensurePresence: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({ callWithReport: mocks.callWithReport }));
+const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
+
+const mocks = vi.hoisted(() => ({ callWithReport: vi.fn(), ensurePresence: vi.fn(), selfNodeId: vi.fn(), listCredentials: vi.fn() }));
+vi.mock("./macula_ts_client.js", () => ({ callWithReport: mocks.callWithReport, selfNodeId: mocks.selfNodeId }));
 vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
+vi.mock("./realm.js", () => ({ listCredentials: mocks.listCredentials }));
+
+/** A membership token as the realm mints one: only its claims are read here. */
+function token(expSeconds: number, can = "member/email-verified"): string {
+  const part = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${part({ alg: "ML-DSA-87" })}.${part({ aud: NODE, exp: expSeconds, cap: [{ with: "mri:realm:io.macula", can }] })}.sig`;
+}
+
+function membership(realm: string, ucan: string) {
+  return { realm, node_id: NODE, portal: realm, org_identity: `mri:org:${realm}`, refresh_token: "", joined_at: "", ucan, tier: "citizen" };
+}
 
 type Handler = (args: Record<string, unknown>) => Promise<{ isError?: boolean; content: { text: string }[] }>;
 
@@ -22,7 +32,6 @@ async function meshCall(): Promise<Handler> {
 }
 
 afterEach(() => {
-  delete process.env.MACULA_MCP_UCAN;
   vi.resetAllMocks();
 });
 
@@ -71,32 +80,42 @@ describe("mesh_call", () => {
     expect(body.seal).toStrictEqual({ sealed: 0, provider: PROVIDER, means: expect.stringMatching(/NOT sealed.*in the clear/) });
   });
 
-  it("presents the configured UCAN and its proofs only when the call asks for it", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mesh-call-ucan-"));
-    const file = join(dir, "ucan");
-    await writeFile(file, "token.child\nproof.parent\n\n");
-    process.env.MACULA_MCP_UCAN = file;
+  // macula-realm#46 step 2: a person binds this server's node once; the node
+  // holds its own membership and renews it. ucan: 1 presents that token, for
+  // the realm the call goes to, and nothing else.
+  it("presents this node's own membership in the realm called, only when the call asks for it", async () => {
+    const live = token(Math.floor(Date.now() / 1000) + 3600);
+    mocks.selfNodeId.mockResolvedValue(NODE);
+    mocks.listCredentials.mockReturnValue([membership("elsewhere", token(Math.floor(Date.now() / 1000) + 3600)), membership("io.macula", live)]);
     mocks.callWithReport.mockResolvedValue({ procedure: "p/q", payload: 1, duration_ms: 3, seal: { sealed: 0, provider: PROVIDER } });
     const handler = await meshCall();
+
     await handler({ procedure: "p/q", ucan: 1 });
-    expect(mocks.callWithReport).toHaveBeenLastCalledWith(expect.objectContaining({ ucan: "token.child", proofs: ["proof.parent"] }));
+    expect(mocks.callWithReport.mock.lastCall![0]).toMatchObject({ ucan: live });
+    expect(mocks.callWithReport.mock.lastCall![0]).not.toHaveProperty("proofs");
+
     await handler({ procedure: "p/q" });
     expect(mocks.callWithReport.mock.lastCall![0]).not.toHaveProperty("ucan");
-    expect(mocks.callWithReport.mock.lastCall![0]).not.toHaveProperty("proofs");
   });
 
-  it("refuses by name a call that asks for a UCAN none is configured for, before anything is sent", async () => {
-    const handler = await meshCall();
-    const unset = await handler({ procedure: "p/q", ucan: 1 });
-    expect(unset.isError).toBe(true);
-    expect(unset.content[0]!.text).toMatch(/MACULA_MCP_UCAN is not set/);
-    const dir = await mkdtemp(join(tmpdir(), "mesh-call-ucan-"));
-    const empty = join(dir, "empty");
-    await writeFile(empty, "\n");
-    process.env.MACULA_MCP_UCAN = empty;
-    expect((await handler({ procedure: "p/q", ucan: 1 })).content[0]!.text).toMatch(/holds no token/);
-    process.env.MACULA_MCP_UCAN = join(dir, "missing");
-    expect((await handler({ procedure: "p/q", ucan: 1 })).content[0]!.text).toMatch(/cannot be read/);
+  it("refuses by name, before anything is sent, a call asking for a membership this node does not hold in that realm", async () => {
+    mocks.selfNodeId.mockResolvedValue(NODE);
+    mocks.listCredentials.mockReturnValue([membership("elsewhere", token(Math.floor(Date.now() / 1000) + 3600))]);
+    const res = await (await meshCall())({ procedure: "p/q", ucan: 1 });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/no membership in this realm/);
+    expect(res.content[0]!.text).toContain(`person bind -to ${NODE}`);
+    expect(mocks.callWithReport).not.toHaveBeenCalled();
+  });
+
+  it("refuses by name a membership that has expired, saying its renewal is failing", async () => {
+    mocks.selfNodeId.mockResolvedValue(NODE);
+    mocks.listCredentials.mockReturnValue([membership("io.macula", token(Math.floor(Date.now() / 1000) - 60))]);
+    const res = await (await meshCall())({ procedure: "p/q", ucan: 1 });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/expired/);
     expect(mocks.callWithReport).not.toHaveBeenCalled();
   });
 
