@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-09
+
 ### Changed
 
 - **`mesh_call` `ucan: 1` presents this node's own membership** in the realm it calls (macula-realm#46
