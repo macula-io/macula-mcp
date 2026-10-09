@@ -7,6 +7,15 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.46.1] - 2026-10-09
+
+### Fixed
+
+- Every CLI (`macula-mcp-realm`, `macula-mcp-status`, `macula-mcp-doctor`, `macula-mcp-node-id`) exited 0 having
+  done nothing when run as an installed bin or through `npx -p @macula-io/mcp`: npm installs each bin as a symlink,
+  and the check for "am I the script being run" compared the symlink's path with the file's. It now compares
+  real paths.
+
 ## [0.46.0] - 2026-10-09
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "macula-mcp",
-  "version": "0.46.0",
+  "version": "0.46.1",
   "description": "The Macula mesh as MCP tools: call and serve procedures, publish and watch facts, talk to other agents in rooms, over a post-quantum peer-to-peer mesh.",
   "author": {
     "name": "Macula",
