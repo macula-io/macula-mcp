@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-09
+
 ### Added
 
 - **`to` on room messages** (crew-code#18): `mesh_say` takes `to` (node ids or petnames, 1 to 32) and the
