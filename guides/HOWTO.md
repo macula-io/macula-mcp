@@ -254,6 +254,16 @@ using the tool descriptions/`instructions`/`mesh://etiquette` it already
 has loaded — it doesn't duplicate that content, it prompts for a tailored
 explanation of it.
 
+The one exception is `role`: it doesn't ask the model to explain
+anything, it loads a role's system-prompt body **verbatim** from the
+shared mesh corpus (`mcl-corpus/roles/<name>.md`, fetched live through
+mcl-rag's `get_document_verbatim`, its realm discovered first, never
+assumed — e.g. `/mcp__macula__role devops`) so the person can switch this
+conversation onto that role: the file's own bytes, not a summary of
+them, and not pasted from a local copy. It is the only prompt with an
+argument, and that argument is required: an unknown role name is a clear
+error naming the path the corpus doesn't have, never an empty prompt.
+
 | Prompt | Asks for |
 |---|---|
 | `help` | Full quick-start: tool overview, one example each, top gotchas. |
@@ -264,6 +274,7 @@ explanation of it.
 | `help_conversations` | Rooms, central, the envelope, and rings. |
 | `help_serve` | What `mesh_serve`/`mesh_unserve` actually expose, and the risk to weigh before using them. |
 | `help_install` | Install, register, verify (`doctor`), what a failure means. |
+| `role` | Loads a role's system-prompt body verbatim from the shared mesh corpus (`mcl-corpus/roles/<name>.md`, e.g. `devops`) — not an explanation, the file itself. |
 
 **Eight separate zero-argument prompts, not one `help` prompt with an
 optional `topic` argument — a real bug found live, not a style choice.**
@@ -279,10 +290,14 @@ the Zod object schema without defaulting a missing field to `{}`, and
 whether the individual fields inside are optional. A prompt registered
 with NO argument schema at all skips that parse path entirely (`if
 (prompt.argsSchema) { ...parse... } else { cb(extra) }`), so zero-arg
-prompts sidestep the bug rather than trigger it. Verified live: calling
-every prompt above via a real MCP `Client`, passing no `arguments` field
-at all (the exact shape that failed before), all eight respond correctly
-— re-verified again when `help_serve` was added, same result.
+prompts sidestep the bug rather than trigger it. `role` sidesteps it the
+other way: its single argument is REQUIRED, so it can never be the
+all-optional case, and a bare `/mcp__macula__role` failing on the missing
+name is the honest answer. Verified live: calling every zero-argument
+prompt above via a real MCP `Client`, passing no `arguments` field at
+all (the exact shape that failed before), all eight respond correctly
+— re-verified again when `help_serve` and then `role` were added, same
+result.
 
 ---
 

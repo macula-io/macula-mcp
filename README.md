@@ -788,7 +788,7 @@ queryable.
 
 ## Prompts
 
-For a HUMAN in the conversation, not the agent, surfaces as a slash command in clients that support MCP prompts (e.g. `/mcp__macula__help` in Claude Code). Eight zero-argument prompts rather than one with a topic argument: `@modelcontextprotocol/sdk` 1.30.0 errors on a bare invocation (no `arguments` field at all, the normal way to invoke a plain slash command) of a prompt whose args are all optional, so separate prompts sidestep it.
+For a HUMAN in the conversation, not the agent, surfaces as a slash command in clients that support MCP prompts (e.g. `/mcp__macula__help` in Claude Code). Eight zero-argument help prompts rather than one with a topic argument: `@modelcontextprotocol/sdk` 1.30.0 errors on a bare invocation (no `arguments` field at all, the normal way to invoke a plain slash command) of a prompt whose args are all optional, so separate prompts sidestep it. The ninth, `role`, is not a help text: it takes a required argument and does real mesh I/O, loading that role's system-prompt body verbatim from the shared mesh corpus.
 
 | Prompt             | Asks the model to explain                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------ |
@@ -800,6 +800,7 @@ For a HUMAN in the conversation, not the agent, surfaces as a slash command in c
 | `help_conversations` | Rooms and central: `mesh_open_room`/`mesh_join_room`/`mesh_say`/`mesh_read_inbox`/`mesh_leave_room`/`mesh_rooms`, and the envelope. |
 | `help_serve`       | What `mesh_serve`/`mesh_unserve` actually expose, and the risk to weigh before using them. |
 | `help_install`     | Install, register, verify (`doctor`), what a failure means.                              |
+| `role`             | Loads that role's system-prompt body verbatim from the shared mesh corpus (`mcl-corpus/roles/<name>.md`, fetched live through mcl-rag), e.g. `devops`. An unknown role is a clear error, not an empty prompt. |
 
 ## Prerequisites
 

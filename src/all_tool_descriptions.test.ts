@@ -48,7 +48,7 @@ function discoverRegisterModules(): RegisterEntry[] {
 
 type ToolHandler = (args: Record<string, unknown>) => unknown;
 
-/** Captures every server.registerTool(name, { description, ... }, cb) call; server.resource()/server.prompt() are harmless no-ops here (mesh_etiquette/mesh_identity/mesh_help use those, not tools -- out of scope for description-cost, since resources/prompts aren't sent on every turn the way tool schemas are). The deprecated server.tool() throws, so a tool registered through it fails this suite by name (macula-mcp#6). */
+/** Captures every server.registerTool(name, { description, ... }, cb) call; server.resource()/server.prompt()/server.registerPrompt() are harmless no-ops here (mesh_etiquette/mesh_identity/mesh_help/mesh_role use those, not tools -- out of scope for description-cost, since resources/prompts aren't sent on every turn the way tool schemas are). The deprecated server.tool() throws, so a tool registered through it fails this suite by name (macula-mcp#6). */
 function capturingServer(): { server: McpServer; descriptions: Map<string, string> } {
   const descriptions = new Map<string, string>();
   const server = {
@@ -60,6 +60,7 @@ function capturingServer(): { server: McpServer; descriptions: Map<string, strin
     },
     resource: () => {},
     prompt: () => {},
+    registerPrompt: () => {},
   } as unknown as McpServer;
   return { server, descriptions };
 }

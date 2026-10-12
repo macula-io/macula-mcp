@@ -27,6 +27,7 @@ import * as presence from "./presence.js";
 import { registerIdentity } from "./mesh_identity.js";
 import { registerEtiquette } from "./mesh_etiquette.js";
 import { registerHelp } from "./mesh_help.js";
+import { registerRole } from "./mesh_role.js";
 import { registerMeshCall } from "./mesh_call.js";
 import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshDht } from "./mesh_dht.js";
@@ -155,8 +156,11 @@ registerIdentity(server);
 registerEtiquette(server);
 
 // Prompts — in-conversation help for a HUMAN (slash command in clients
-// that support MCP prompts), not the agent; see mesh_help.ts.
+// that support MCP prompts), not the agent; see mesh_help.ts. role is
+// the one prompt that does real mesh I/O -- it loads a role's
+// system-prompt body verbatim from the shared corpus; see mesh_role.ts.
 registerHelp(server);
+registerRole(server);
 
 // Tools — actions on the shared pool (see macula_ts_client.ts). Every one
 // below (mesh_read_inbox and the room tools included) also

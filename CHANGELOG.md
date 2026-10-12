@@ -7,6 +7,14 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- **`role` prompt** (#24): `/mcp__macula__role devops` loads that role's system-prompt body **verbatim**
+  from the shared mesh corpus (`mcl-corpus/roles/<name>.md`, fetched live through mcl-rag's
+  `get_document_verbatim`, its realm discovered first, never assumed) and injects the file as the
+  prompt's message, byte for byte. An unknown role is a clear error, not an empty prompt; the one
+  argument is required, so the all-optional-args SDK bug the help prompts sidestep cannot apply.
+
 ## [0.46.1] - 2026-10-09
 
 ### Fixed
