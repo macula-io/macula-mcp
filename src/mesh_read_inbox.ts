@@ -20,7 +20,7 @@ import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { factsAfter, recentFacts } from "./lobby_transcript.js";
-import { CENTRAL_TOPIC, threadEnvelopes } from "./envelope.js";
+import { CENTRAL_TOPIC, LIFECYCLE_KINDS, threadEnvelopes } from "./envelope.js";
 import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./rings.js";
 import { petname } from "./petname.js";
 import { toolDescription } from "./tool_description.js";
@@ -116,7 +116,8 @@ const DESCRIPTION_FULL =
   "is waiting for mesh_answer_ring -- then recent answered ones, both directions), the rooms you are in, " +
   "threaded (each message carries thread_root and depth from its in_reply_to chain), and recent " +
   "help_requested/help_offered broadcasts on central from other agents. Instant, a local SQLite read, " +
-  "never blocks. Pass room_topic to read one room only. Rooms show what this machine's transcript " +
+  "never blocks. Pass room_topic to read one room only. A room's lifecycle envelopes (joins, leaves, " +
+  "opened, closed) are left out unless include_lifecycle: 1; participants_seen says who is there. Rooms show what this machine's transcript " +
   "recorded while a macula-mcp process sharing it was watching them -- nothing from before any of them " +
   "joined. Each room carries `dropped`, and " +
   "`central_dropped` is central's. " +
@@ -133,8 +134,11 @@ const DESCRIPTION_TERSE =
  * transcript `seq`. Without `afterSeq`, the newest `limit`; with it, the first `limit` recorded after that seq, oldest
  * first, so a poller that keeps the cursor never loses a message to a burst of others. `nextAfterSeq` is the highest
  * row read, parsed or not: the cursor to pass next time (`afterSeq` again when nothing was read).
+ * The room's lifecycle envelopes (room_opened, participant_joined/left, room_closed) are left out unless
+ * `includeLifecycle` is 1 (crew-code#31): they were most of what a reader re-read, and participants_seen already
+ * says who is in the room. The cursor still moves past them.
  */
-export function roomMessages(args: { topic: string; afterSeq?: number; limit: number }) {
+export function roomMessages(args: { topic: string; afterSeq?: number; limit: number; includeLifecycle?: number }) {
   const read =
     args.afterSeq === undefined
       ? recentFacts({ topic: args.topic, limit: args.limit })
@@ -143,7 +147,9 @@ export function roomMessages(args: { topic: string; afterSeq?: number; limit: nu
     read.facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher, seq: f.id })),
   );
   const nextAfterSeq = read.facts.reduce((max, f) => Math.max(max, f.id), args.afterSeq ?? 0);
-  return { total: read.total, messages, unparsed, nextAfterSeq };
+  const lifecycle: readonly string[] = LIFECYCLE_KINDS;
+  const shown = args.includeLifecycle === 1 ? messages : messages.filter((m) => !lifecycle.includes(m.kind));
+  return { total: read.total, messages: shown, unparsed, nextAfterSeq };
 }
 
 export function registerMeshReadInbox(server: McpServer): void {
@@ -166,9 +172,16 @@ export function registerMeshReadInbox(server: McpServer): void {
           .nonnegative()
           .optional()
           .describe("Only messages recorded after this seq, oldest first: pass the previous read's next_after_seq to see each message exactly once."),
+        include_lifecycle: z
+          .number()
+          .int()
+          .min(0)
+          .max(1)
+          .default(0)
+          .describe("1 also returns the room's lifecycle envelopes (room_opened, participant_joined/left, room_closed); by default they are left out, and participants_seen says who is in the room."),
       },
     },
-    async ({ room_topic, limit, after_seq }) => {
+    async ({ room_topic, limit, after_seq, include_lifecycle }) => {
       presence.ensurePresence(server);
       try {
         // presence.currentNodeId() is undefined until presence's async
@@ -184,7 +197,7 @@ export function registerMeshReadInbox(server: McpServer): void {
           return errorContent(`mesh_read_inbox: not in room ${room_topic} -- mesh_join_room it first, or see mesh_rooms.`);
         }
         const roomsOut = selected.map((room) => {
-          const { total, messages, unparsed, nextAfterSeq } = roomMessages({ topic: room.room_topic, afterSeq: after_seq, limit });
+          const { total, messages, unparsed, nextAfterSeq } = roomMessages({ topic: room.room_topic, afterSeq: after_seq, limit, includeLifecycle: include_lifecycle });
           const last = messages[messages.length - 1];
           const hint = waitingHint(room.room_topic, last, me);
           return {

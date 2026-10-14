@@ -42,4 +42,25 @@ describe("roomMessages: the cursor read a poller uses (crew-code#18)", () => {
     for (let i = 0; i < 60; i++) recordFact({ topic: ROOM2, payload: env({ text: `junk ${i}` }), at: "t", publisher: THEM });
     expect(roomMessages({ topic: ROOM2, afterSeq: 0, limit: 50 }).messages[0]?.text).toBe("for me");
   });
+
+  // crew-code#31: a room's lifecycle envelopes (room_opened, participant_joined/left, room_closed) were most of what a
+  // member re-read from its inbox. participants_seen already says who is there, so a read leaves them out unless asked.
+  it("leaves the room's lifecycle envelopes out, and the cursor still moves past them", () => {
+    recordFact({ topic: ROOM2, payload: env({ kind: "room_opened", text: "" }), at: "t", publisher: THEM });
+    recordFact({ topic: ROOM2, payload: env({ kind: "participant_joined", text: "" }), at: "t", publisher: ME });
+    recordFact({ topic: ROOM2, payload: env({ text: "talk" }), at: "t", publisher: THEM });
+    recordFact({ topic: ROOM2, payload: env({ kind: "participant_left", text: "" }), at: "t", publisher: ME });
+    recordFact({ topic: ROOM2, payload: env({ kind: "room_closed", text: "" }), at: "t", publisher: THEM });
+    const read = roomMessages({ topic: ROOM2, afterSeq: 0, limit: 50 });
+    expect(read.messages.map((m) => m.text)).toEqual(["talk"]);
+    expect(read.nextAfterSeq).toBe(5);
+    expect(roomMessages({ topic: ROOM2, limit: 50 }).messages.map((m) => m.kind)).toEqual(["remark_made"]);
+  });
+
+  it("keeps the lifecycle envelopes when asked to", () => {
+    recordFact({ topic: ROOM2, payload: env({ kind: "participant_joined", text: "" }), at: "t", publisher: ME });
+    recordFact({ topic: ROOM2, payload: env({ text: "talk" }), at: "t", publisher: THEM });
+    const kinds = roomMessages({ topic: ROOM2, limit: 50, includeLifecycle: 1 }).messages.map((m) => m.kind);
+    expect(kinds).toEqual(["participant_joined", "remark_made"]);
+  });
 });

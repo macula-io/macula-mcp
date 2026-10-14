@@ -144,7 +144,7 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
         ? "They are in the room. mesh_say on it; mesh_read_inbox to read."
         : dropped !== undefined && dropped > 0
           ? `Accepted, but their participant_joined was not seen, and the room's feed discarded ${dropped} event(s) while waiting: it may have been one of them, and then mesh_read_inbox will not show it. mesh_say on the room to check they are there.`
-          : "Accepted, but their participant_joined was not seen in time. mesh_read_inbox will show it when it lands; you can mesh_say already."
+          : "Accepted, but their participant_joined was not seen in time. mesh_read_inbox lists them in the room's participants_seen once it lands; you can mesh_say already."
       : reply.answer === ANSWER.deferred
         ? "Their model will answer later. The room stays open; mesh_rooms shows the ring as awaiting. Do not write into the room until they join."
         : "Declined. Leave the room if you opened it for this.";

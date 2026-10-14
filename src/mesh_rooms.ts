@@ -86,7 +86,7 @@ function summarizeInvites(invited: InviteOutcome[], announcedOnCentral: 0 | 1): 
   const unreachable = invited.filter((r) => ("unreachable" in r && r.unreachable === 1) || "failed" in r).length;
   const parts: string[] = [];
   if (joined > 0) parts.push(`${joined} joined`);
-  if (acceptedPending > 0) parts.push(`${acceptedPending} accepted (not yet seen joining -- mesh_read_inbox will show it)`);
+  if (acceptedPending > 0) parts.push(`${acceptedPending} accepted (not yet seen joining -- mesh_read_inbox lists them in participants_seen once they do)`);
   if (deferred > 0) parts.push(`${deferred} deferred (their model will decide; mesh_rooms shows them as awaiting)`);
   if (declined > 0) parts.push(`${declined} declined`);
   if (unreachable > 0) parts.push(`${unreachable} unreachable (ring again once mesh_agents shows them present)`);
