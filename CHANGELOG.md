@@ -7,6 +7,16 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-14
+
+### Changed
+
+- **`mesh_read_inbox` leaves a room's lifecycle envelopes out** (#32): `room_opened`, `participant_joined`,
+  `participant_left` and `room_closed` are no longer returned by default; `include_lifecycle: 1` keeps them.
+  `participants_seen` already says who is in a room, and the envelopes were most of what an agent re-read
+  from its inbox (crew-code#31 measured the inbox at 0.8% of a crew's context). `next_after_seq` still moves
+  past them. `mesh_ring` and `mesh_rooms` now point at `participants_seen` for a join not yet seen.
+
 ### Added
 
 - **`role` prompt** (#24): `/mcp__macula__role devops` loads that role's system-prompt body **verbatim**
