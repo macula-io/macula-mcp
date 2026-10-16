@@ -174,8 +174,13 @@ export async function ensureAutoJoin(input: { nodeId: string }): Promise<void> {
 // runs out, so mesh_call ucan: 1 always has the node's own current token.
 // ---------------------------------------------------------------------------
 
-/** Renew a membership this close to its expiry, or past it. */
-const RENEW_BEFORE_SECONDS = 20 * 60;
+/**
+ * Renew a membership this close to its expiry, or past it. The realm mints for
+ * 1 hour at most (its revocation bound, macula-realm#46 step 3), so this renews
+ * at the first check after a mint, about every 10 minutes, and a realm restart
+ * leaves several retries before the token runs out.
+ */
+const RENEW_BEFORE_SECONDS = 50 * 60;
 
 /** How often the renewal check runs; jittered so a crew's servers spread out. */
 const RENEW_CHECK_MS = 10 * 60 * 1000;
@@ -210,7 +215,7 @@ function runsOutSoon(ucan: string | undefined, nowSeconds: number): boolean {
 }
 
 /**
- * Renews each of this node's stored memberships that runs out within 20
+ * Renews each of this node's stored memberships that runs out within 50
  * minutes (or already has), keeping the rest of the credential and taking the
  * tier from the new token. A refusal (the person unbound this node, or was
  * revoked) keeps the old credential, which then expires; mesh_call refuses it

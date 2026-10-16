@@ -200,7 +200,7 @@ describe("renewMemberships", () => {
     ({ realm, node_id: NODE, portal: realm, org_identity: `mri:org:${realm}`, refresh_token: "", joined_at: "2026-10-01T00:00:00Z",
        cert_pem: "PEM", citizen_did: NODE, ucan, tier });
 
-  it("renews a membership that runs out within 20 minutes, keeping the rest of the credential and taking the tier from the new token", async () => {
+  it("renews a membership that runs out within 50 minutes, keeping the rest of the credential and taking the tier from the new token", async () => {
     const fresh = token(nowSeconds() + 3600, "member/email-verified");
     mocks.listCredentials.mockReturnValue([stored("io.macula", token(nowSeconds() + 600))]);
     mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: fresh }, duration_ms: 1 });
@@ -210,6 +210,23 @@ describe("renewMemberships", () => {
     expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ procedure: "io.macula/_realm/_realm/identity/issue_membership_ucan_v1" }));
     expect(mocks.storeCredential).toHaveBeenCalledWith(
       expect.objectContaining({ ucan: fresh, tier: "citizen", joined_at: "2026-10-01T00:00:00Z", cert_pem: "PEM" }), "io.macula");
+  });
+
+  // macula-realm#46 step 3: the realm mints for 1 hour at most, so a token is
+  // renewed at the first check after its mint, leaving several retries before exp.
+  it("renews a 1-hour token at the first check after its mint, 11 minutes in", async () => {
+    mocks.listCredentials.mockReturnValue([stored("io.macula", token(nowSeconds() + 3600 - 11 * 60))]);
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: token(nowSeconds() + 3600) }, duration_ms: 1 });
+    const { renewMemberships } = await import("./device_membership.js");
+    await renewMemberships({ nodeId: NODE });
+    expect(mocks.call).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a token minted moments ago alone", async () => {
+    mocks.listCredentials.mockReturnValue([stored("io.macula", token(nowSeconds() + 3600 - 60))]);
+    const { renewMemberships } = await import("./device_membership.js");
+    await renewMemberships({ nodeId: NODE });
+    expect(mocks.call).not.toHaveBeenCalled();
   });
 
   it("leaves a membership with time to run alone", async () => {
