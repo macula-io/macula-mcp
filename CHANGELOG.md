@@ -7,6 +7,16 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.47.1] - 2026-10-16
+
+### Changed
+
+- **A stored realm membership renews about every 10 minutes** (macula-realm#46 step 3): it is renewed once
+  it has less than 50 minutes left, where it was 20. The realm is moving to 1 hour membership tokens (its
+  revocation bound), and under those the old threshold left a single renewal attempt before the token ran
+  out, so one realm restart in that window cost a member its membership. Against a realm still minting
+  longer tokens nothing changes until the last 50 minutes.
+
 ## [0.47.0] - 2026-10-14
 
 ### Changed
