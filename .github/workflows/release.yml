@@ -76,7 +76,18 @@ jobs:
       # itself. --provenance attaches a signed build-provenance
       # attestation (this exact commit/workflow run) to the published
       # package, free once OIDC is already wired up.
-      - run: npm publish --access public --provenance
+      # A pre-release version (0.48.0-rc.1) publishes under the dist-tag next,
+      # so `latest`, what `npm i @macula-io/mcp` and the installers resolve,
+      # stays the last plain release; npm 11 refuses a pre-release without
+      # --tag anyway. Before the wire 1.0 flag day (macula-fleet#27) that is
+      # what keeps every installed mcp on the live fleet's wire.
+      - name: Publish
+        run: |
+          set -euo pipefail
+          case "${{ steps.version.outputs.VERSION }}" in
+            *-*) npm publish --access public --provenance --tag next ;;
+            *) npm publish --access public --provenance ;;
+          esac
 
       # The official MCP Registry lists this package as io.macula/macula-mcp.
       # The io.macula namespace is proven by DNS: an Ed25519 public key in a
@@ -86,7 +97,10 @@ jobs:
       # npm can take 20 minutes to serve a fresh version (v0.43.1's first
       # registry publish was refused with a 404 for it), so the step waits
       # until npm serves this exact version before publishing.
+      # A pre-release is not listed: the registry would offer it as the
+      # newest io.macula/macula-mcp.
       - name: Publish to the MCP Registry
+        if: ${{ !contains(steps.version.outputs.VERSION, '-') }}
         env:
           MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
           VERSION: ${{ steps.version.outputs.VERSION }}

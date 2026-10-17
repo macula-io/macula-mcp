@@ -7,6 +7,23 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.48.0-rc.1] - 2026-10-17
+
+Wire 1.0, a release candidate under the npm dist-tag `next`: `latest` stays 0.47.1 for the live fleet
+until the wire 1.0 flag day (macula-fleet#27).
+
+### Changed
+
+- **Built on `@macula-io/ts` 0.31** (`^0.31.0-rc.5`), which speaks wire 1.0 (macula 15) and nothing older. This
+  mcp reaches wire 1.0 stations only; a pre-1.0 station refuses it at the handshake. The 10 minute membership
+  renewal from 0.47.1 is unchanged, and it is what keeps a member admitted under the realm's 1 hour
+  membership tokens (macula-realm#46).
+- Through ts 0.31.0-rc.4, `mesh_serve`, `mesh_watch` and the presence subscriptions return once a station has
+  accepted the registration, and with no link up they fail at once ("no link") where they used to attach on
+  the next redial. Presence and the ring service already retry, so an agent that starts before its first link
+  is up becomes present on a later tool call.
+- A pre-release version publishes under the dist-tag `next` and is not listed on the MCP Registry.
+
 ## [0.47.1] - 2026-10-16
 
 ### Changed
