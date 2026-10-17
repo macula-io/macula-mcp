@@ -76,7 +76,7 @@ jobs:
       # itself. --provenance attaches a signed build-provenance
       # attestation (this exact commit/workflow run) to the published
       # package, free once OIDC is already wired up.
-      # A pre-release version (0.48.0-rc.1) publishes under the dist-tag next,
+      # A pre-release version (such as 0.48.0-rc.1) publishes under the dist-tag next,
       # so `latest`, what `npm i @macula-io/mcp` and the installers resolve,
       # stays the last plain release; npm 11 refuses a pre-release without
       # --tag anyway. Before the wire 1.0 flag day (macula-fleet#27) that is

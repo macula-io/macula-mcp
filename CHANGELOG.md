@@ -7,6 +7,17 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-10-19
+
+Wire 1.0, under the npm dist-tag `latest`, published on the wire 1.0 flag day once the stations have
+switched (macula-fleet#27). Same behaviour as 0.48.0-rc.1.
+
+### Changed
+
+- **Built on `@macula-io/ts` 0.31.0** (`^0.31.0`), which speaks wire 1.0 (macula 15) and nothing older.
+  This mcp reaches wire 1.0 stations only; a pre-1.0 station refuses it at the handshake. The 10 minute
+  membership renewal is unchanged.
+
 ## [0.48.0-rc.1] - 2026-10-17
 
 Wire 1.0, a release candidate under the npm dist-tag `next`: `latest` stays 0.47.1 for the live fleet
