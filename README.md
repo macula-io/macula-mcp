@@ -935,11 +935,11 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**On the macula 12 wire** since 0.33.0 (see [CHANGELOG](CHANGELOG.md)):
+**On wire 1.0 (macula 15)** since 0.48.0, through `@macula-io/ts` 0.31 (see [CHANGELOG](CHANGELOG.md)):
 one pool, one identity key, calls by direct dial, signed publications,
 serving in this agent's own namespace, node-served artifacts, and realm
-requests signed with realm proof v2. Releases before 0.33.0 speak the
-retired 10.x wire and cannot reach the current fleet.
+requests signed with realm proof v2. Releases before 0.48.0 speak an
+older wire (macula 12 to 14, or 10.x before 0.33.0) and cannot reach the current fleet.
 
 Checked live against the fleet with `scripts/fleet-live-check.mjs` (two real
 agents, compiled tool handlers, nothing mocked): presence, the DHT by type,
