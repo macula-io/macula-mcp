@@ -5,7 +5,14 @@ on:
     tags: ["v*"]
 
 jobs:
+
+  # The release guard. version-root names the directory whose manifest
+  # carries the version this repository publishes; the default is the root.
+  release-guard:
+    name: The release guard
+    uses: macula-io/macula-ci-images/.github/workflows/release-guard.yml@2660ee4ce1c51ce3d2bf14043ebc8a2784065cd9
   publish:
+    needs: [release-guard]
     name: publish to npm
     runs-on: ubuntu-latest
     permissions:
