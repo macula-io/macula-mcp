@@ -79,6 +79,88 @@ export type PlaceRingResult =
       next_step: string;
     };
 
+/** The room a ring is carried in: the given one (which must be joined), or a fresh one for the pair. */
+async function ringRoomTopic(args: PlaceRingArgs, to: string): Promise<string> {
+  if (args.room_topic === undefined) {
+    return (await rooms.openRoom({ purpose: args.purpose, participants: [to] })).room_topic;
+  }
+  if (!rooms.isJoined(args.room_topic)) {
+    throw new rooms.RoomError(`not in room ${args.room_topic} -- open or join it first, or omit room_topic`);
+  }
+  return args.room_topic;
+}
+
+/** Delivers the ring; an unreachable callee is a result, not an error. */
+async function deliverRing(procedure: string, ring: ReturnType<typeof buildRingArgs>): Promise<{ ok: true; payload: unknown } | { ok: false; reason: string }> {
+  try {
+    // ~<to>/ring is in `to`'s own namespace: the only provider this call can
+    // trust is `to`, so whatever answers IS `to`, and `to` reads this agent
+    // as the verified caller. Nothing else to prove on either side.
+    const res = await call({ procedure, callArgs: { ...ring }, timeoutMs: CALL_TIMEOUT_MS });
+    return { ok: true, payload: res.payload };
+  } catch (e) {
+    return { ok: false, reason: `unreachable: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/** Whether a reply is an answer to this exact ring. */
+function isReplyTo(reply: ReturnType<typeof parseRingReply>, ring: ReturnType<typeof buildRingArgs>): reply is NonNullable<ReturnType<typeof parseRingReply>> {
+  return reply !== undefined && (reply.ring_id === undefined || reply.ring_id === ring.ring_id);
+}
+
+/** What an accepted ring's join wait learned. */
+async function waitForJoinOutcome(
+  args: PlaceRingArgs,
+  roomTopic: string,
+  to: string,
+  cursor: number,
+  lostBefore: number,
+): Promise<{ joined?: 0 | 1; dropped?: number }> {
+  const seconds = args.waitJoinSeconds ?? DEFAULT_WAIT_JOIN_SECONDS;
+  if (seconds <= 0) return { joined: 0 };
+  const joined = await waitForJoin({ room_topic: roomTopic, who: to, afterId: cursor, seconds });
+  return { joined, dropped: lobbyObserver.dropped(roomTopic) - lostBefore };
+}
+
+/** The one-line "what now" a caller reads after an answer. */
+function acceptedNextStep(joined: 0 | 1 | undefined, dropped: number | undefined): string {
+  if (joined === 1) return "They are in the room. mesh_say on it; mesh_read_inbox to read.";
+  if (dropped !== undefined && dropped > 0) {
+    return `Accepted, but their participant_joined was not seen, and the room's feed discarded ${dropped} event(s) while waiting: it may have been one of them, and then mesh_read_inbox will not show it. mesh_say on the room to check they are there.`;
+  }
+  return "Accepted, but their participant_joined was not seen in time. mesh_read_inbox lists them in the room's participants_seen once it lands; you can mesh_say already.";
+}
+
+/** The one-line "what now" a caller reads after an answer. */
+function nextStepFor(answer: 1 | 2 | 3, joined: 0 | 1 | undefined, dropped: number | undefined): string {
+  if (answer === ANSWER.accepted) return acceptedNextStep(joined, dropped);
+  if (answer === ANSWER.deferred) {
+    return "Their model will answer later. The room stays open; mesh_rooms shows the ring as awaiting. Do not write into the room until they join.";
+  }
+  return "Declined. Leave the room if you opened it for this.";
+}
+
+/** The answered ring, with the join wait's findings present only when there are some. */
+function answeredResult(
+  ring: ReturnType<typeof buildRingArgs>,
+  to: string,
+  roomTopic: string,
+  reply: NonNullable<ReturnType<typeof parseRingReply>>,
+  wait: { joined?: 0 | 1; dropped?: number },
+): PlaceRingResult {
+  return {
+    ring_id: ring.ring_id,
+    to,
+    room_topic: roomTopic,
+    answer: reply.answer,
+    answer_label: answerLabel(reply.answer),
+    ...(reply.reason !== undefined ? { reason: reply.reason } : {}),
+    ...(wait.joined !== undefined ? { joined: wait.joined } : {}),
+    ...(wait.dropped !== undefined ? { dropped: wait.dropped, dropped_means: DROPPED_MEANS.wait } : {}),
+    next_step: nextStepFor(reply.answer, wait.joined, wait.dropped),
+  };
+}
+
 /**
  * The whole ring, as one function the tool and the two-process check
  * both call: open (or check) the room, record the outgoing ring, sign,
@@ -93,72 +175,35 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   const to = resolved.node_id;
   const me = presence.currentNodeId() ?? (await selfNodeId());
   if (to === me) throw new RingError("that is this agent's own node id");
-  let roomTopic = args.room_topic;
-  if (roomTopic === undefined) {
-    roomTopic = (await rooms.openRoom({ purpose: args.purpose, participants: [to] })).room_topic;
-  } else if (!rooms.isJoined(roomTopic)) {
-    throw new rooms.RoomError(`not in room ${roomTopic} -- open or join it first, or omit room_topic`);
-  }
+  const roomTopic = await ringRoomTopic(args, to);
   const ring = buildRingArgs({ from: me, to, purpose: args.purpose, room_topic: roomTopic });
   const procedure = ringProcedure(to);
   recordRing({ ...ring, self: me, direction: "out", peer: to });
   const cursor = lastFactId(roomTopic);
   const lostBefore = lobbyObserver.dropped(roomTopic);
 
-  let payload: unknown;
-  try {
-    // ~<to>/ring is in `to`'s own namespace: the only provider this call can
-    // trust is `to`, so whatever answers IS `to`, and `to` reads this agent
-    // as the verified caller. Nothing else to prove on either side.
-    payload = (await call({ procedure, callArgs: { ...ring }, timeoutMs: CALL_TIMEOUT_MS })).payload;
-  } catch (e) {
-    const reason = `unreachable: ${e instanceof Error ? e.message : String(e)}`;
-    answerRing(ring.ring_id, "out", null, reason);
+  const delivery = await deliverRing(procedure, ring);
+  if (!delivery.ok) {
+    answerRing(ring.ring_id, "out", null, delivery.reason);
     return {
       ring_id: ring.ring_id,
       to,
       room_topic: roomTopic,
       unreachable: 1,
-      reason,
+      reason: delivery.reason,
       next_step: "They are not serving their ring endpoint right now (not present, or MACULA_MCP_NO_RING). The room stays open; ring again when mesh_agents shows them.",
     };
   }
 
-  const reply = parseRingReply(payload);
-  if (!reply || (reply.ring_id !== undefined && reply.ring_id !== ring.ring_id)) {
+  const reply = parseRingReply(delivery.payload);
+  if (!isReplyTo(reply, ring)) {
     answerRing(ring.ring_id, "out", null, "malformed reply");
-    throw new RingError(`${procedure} answered with something that is not a reply to this ring: ${JSON.stringify(payload)}`);
+    throw new RingError(`${procedure} answered with something that is not a reply to this ring: ${JSON.stringify(delivery.payload)}`);
   }
   answerRing(ring.ring_id, "out", reply.answer, reply.reason);
 
-  let joined: 0 | 1 | undefined;
-  let dropped: number | undefined;
-  if (reply.answer === ANSWER.accepted) {
-    const seconds = args.waitJoinSeconds ?? DEFAULT_WAIT_JOIN_SECONDS;
-    joined = seconds > 0 ? await waitForJoin({ room_topic: roomTopic, who: to, afterId: cursor, seconds }) : 0;
-    if (seconds > 0) dropped = lobbyObserver.dropped(roomTopic) - lostBefore;
-  }
-  const nextStep =
-    reply.answer === ANSWER.accepted
-      ? joined === 1
-        ? "They are in the room. mesh_say on it; mesh_read_inbox to read."
-        : dropped !== undefined && dropped > 0
-          ? `Accepted, but their participant_joined was not seen, and the room's feed discarded ${dropped} event(s) while waiting: it may have been one of them, and then mesh_read_inbox will not show it. mesh_say on the room to check they are there.`
-          : "Accepted, but their participant_joined was not seen in time. mesh_read_inbox lists them in the room's participants_seen once it lands; you can mesh_say already."
-      : reply.answer === ANSWER.deferred
-        ? "Their model will answer later. The room stays open; mesh_rooms shows the ring as awaiting. Do not write into the room until they join."
-        : "Declined. Leave the room if you opened it for this.";
-  return {
-    ring_id: ring.ring_id,
-    to,
-    room_topic: roomTopic,
-    answer: reply.answer,
-    answer_label: answerLabel(reply.answer),
-    ...(reply.reason !== undefined ? { reason: reply.reason } : {}),
-    ...(joined !== undefined ? { joined } : {}),
-    ...(dropped !== undefined ? { dropped, dropped_means: DROPPED_MEANS.wait } : {}),
-    next_step: nextStep,
-  };
+  const wait = reply.answer === ANSWER.accepted ? await waitForJoinOutcome(args, roomTopic, to, cursor, lostBefore) : {};
+  return answeredResult(ring, to, roomTopic, reply, wait);
 }
 
 const DESCRIPTION_FULL =

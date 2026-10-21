@@ -142,6 +142,74 @@ export function buildEnvelope(input: BuildInput): Envelope {
   return env;
 }
 
+function isHexString(re: RegExp, v: unknown): v is string {
+  return typeof v === "string" && re.test(v);
+}
+
+function booleanKeyProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  for (const [key, value] of Object.entries(p)) {
+    if (typeof value === "boolean") problems.push(`boolean at "${key}" -- the wire has no bool type, use 0/1`);
+  }
+  return problems;
+}
+
+/** message_id, room_topic and sent_at: what makes an envelope addressable and timed. */
+function identityProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  if (!isHexString(HEX32, p.message_id)) problems.push("message_id must be 32 lowercase hex chars");
+  if (typeof p.room_topic !== "string" || !isConversationTopic(p.room_topic)) {
+    problems.push(`room_topic must be "${CENTRAL_TOPIC}" or "${ROOM_TOPIC_PREFIX}<32 hex>"`);
+  }
+  if (!Number.isInteger(p.sent_at) || (p.sent_at as number) < 0) problems.push("sent_at must be a non-negative integer (unix ms)");
+  return problems;
+}
+
+/** from, kind and text: who sent it, what it is, and its (possibly empty) body. */
+function senderProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  if (!isHexString(HEX64, p.from)) problems.push("from must be a 64-hex node id");
+  if (!isKind(p.kind)) problems.push(`kind must be one of ${KINDS.join(", ")}`);
+  if (typeof p.text !== "string") problems.push("text must be a string (may be empty)");
+  return problems;
+}
+
+/** in_reply_to, and the kinds that cannot go without it. */
+function replyProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  if (p.in_reply_to !== undefined && !isHexString(HEX32, p.in_reply_to)) {
+    problems.push("in_reply_to, when present, must be a 32-hex message_id");
+  }
+  if (isKind(p.kind) && REPLY_REQUIRED_KINDS.has(p.kind) && p.in_reply_to === undefined) {
+    problems.push(`${p.kind} must carry in_reply_to`);
+  }
+  return problems;
+}
+
+/** from_citizen and refs: the optional sender and content references. */
+function referenceProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  if (p.from_citizen !== undefined && (typeof p.from_citizen !== "string" || p.from_citizen.length === 0)) {
+    problems.push("from_citizen, when present, must be a non-empty string");
+  }
+  if (p.refs !== undefined && !(Array.isArray(p.refs) && p.refs.every((r) => typeof r === "string" && r.length > 0))) {
+    problems.push("refs, when present, must be a list of non-empty strings");
+  }
+  return problems;
+}
+
+/** participants and to: lists of 64-hex node ids, `to` also bounded by MAX_TO. */
+function recipientProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  if (p.participants !== undefined && !(Array.isArray(p.participants) && p.participants.every((n) => typeof n === "string" && HEX64.test(n)))) {
+    problems.push("participants, when present, must be a list of 64-hex node ids");
+  }
+  if (p.to !== undefined && !(Array.isArray(p.to) && p.to.length >= 1 && p.to.length <= MAX_TO && p.to.every((n) => typeof n === "string" && HEX64.test(n)))) {
+    problems.push(`to, when present, must be a list of 1..${MAX_TO} 64-hex node ids`);
+  }
+  return problems;
+}
+
 /**
  * Every way a payload fails to be an envelope, as human-readable
  * strings; empty means valid. Exported (rather than a boolean) so a
@@ -151,41 +219,15 @@ export function buildEnvelope(input: BuildInput): Envelope {
 export function envelopeProblems(payload: unknown): string[] {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return ["not an object"];
   const p = payload as Record<string, unknown>;
-  const problems: string[] = [];
-
-  for (const [key, value] of Object.entries(p)) {
-    if (typeof value === "boolean") problems.push(`boolean at "${key}" -- the wire has no bool type, use 0/1`);
-  }
-
-  if (typeof p.message_id !== "string" || !HEX32.test(p.message_id)) problems.push("message_id must be 32 lowercase hex chars");
-  if (typeof p.room_topic !== "string" || !isConversationTopic(p.room_topic)) {
-    problems.push(`room_topic must be "${CENTRAL_TOPIC}" or "${ROOM_TOPIC_PREFIX}<32 hex>"`);
-  }
-  if (!Number.isInteger(p.sent_at) || (p.sent_at as number) < 0) problems.push("sent_at must be a non-negative integer (unix ms)");
-  if (typeof p.from !== "string" || !HEX64.test(p.from)) problems.push("from must be a 64-hex node id");
-  if (!isKind(p.kind)) problems.push(`kind must be one of ${KINDS.join(", ")}`);
-  if (typeof p.text !== "string") problems.push("text must be a string (may be empty)");
-
-  if (p.in_reply_to !== undefined && (typeof p.in_reply_to !== "string" || !HEX32.test(p.in_reply_to))) {
-    problems.push("in_reply_to, when present, must be a 32-hex message_id");
-  }
-  if (isKind(p.kind) && REPLY_REQUIRED_KINDS.has(p.kind) && p.in_reply_to === undefined) {
-    problems.push(`${p.kind} must carry in_reply_to`);
-  }
-  if (p.from_citizen !== undefined && (typeof p.from_citizen !== "string" || p.from_citizen.length === 0)) {
-    problems.push("from_citizen, when present, must be a non-empty string");
-  }
-  if (p.refs !== undefined && !(Array.isArray(p.refs) && p.refs.every((r) => typeof r === "string" && r.length > 0))) {
-    problems.push("refs, when present, must be a list of non-empty strings");
-  }
-  if (p.participants !== undefined && !(Array.isArray(p.participants) && p.participants.every((n) => typeof n === "string" && HEX64.test(n)))) {
-    problems.push("participants, when present, must be a list of 64-hex node ids");
-  }
-  if (p.to !== undefined && !(Array.isArray(p.to) && p.to.length >= 1 && p.to.length <= MAX_TO && p.to.every((n) => typeof n === "string" && HEX64.test(n)))) {
-    problems.push(`to, when present, must be a list of 1..${MAX_TO} 64-hex node ids`);
-  }
+  const problems = [
+    ...booleanKeyProblems(p),
+    ...identityProblems(p),
+    ...senderProblems(p),
+    ...replyProblems(p),
+    ...referenceProblems(p),
+    ...recipientProblems(p),
+  ];
   if (p.purpose !== undefined && typeof p.purpose !== "string") problems.push("purpose, when present, must be a string");
-
   return problems;
 }
 

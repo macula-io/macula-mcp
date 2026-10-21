@@ -152,6 +152,63 @@ export function roomMessages(args: { topic: string; afterSeq?: number; limit: nu
   return { total: read.total, messages: shown, unparsed, nextAfterSeq };
 }
 
+/** One joined room's window of messages, with its polling hint. */
+function roomSummary(room: rooms.RoomListing, args: { after_seq?: number; limit: number; include_lifecycle: number }, me: string) {
+  const { total, messages, unparsed, nextAfterSeq } = roomMessages({ topic: room.room_topic, afterSeq: args.after_seq, limit: args.limit, includeLifecycle: args.include_lifecycle });
+  const last = messages[messages.length - 1];
+  const hint = waitingHint(room.room_topic, last, me);
+  return {
+    room_topic: room.room_topic,
+    opened_by: room.opened_by,
+    opened_by_petname: petname(room.opened_by),
+    purpose: room.purpose,
+    participants_seen: room.participants_seen,
+    participants_seen_petnames: room.participants_seen.map(petname),
+    ...(total !== undefined ? { total_received: total } : {}),
+    returned: messages.length,
+    next_after_seq: nextAfterSeq,
+    unparsed,
+    messages: messages.map(withFromPetname),
+    dropped: room.dropped,
+    ...(hint ? { poll_hint: hint } : {}),
+  };
+}
+
+/** Central's help broadcasts, minus this agent's own. */
+function centralBroadcasts(limit: number, me: string) {
+  return threadEnvelopes(
+    recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher })),
+  ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me).map(withFromPetname);
+}
+
+/** This agent's pending and recently answered rings. */
+function ringsView(me: string) {
+  return {
+    pending: pendingIncoming(me).map(ringView),
+    recent: listRings({ self: me, limit: 20 }).filter((r) => r.answer !== null || r.reason !== null).map(ringView),
+  };
+}
+
+/** Rings belong to the whole-inbox read, never to a single room's transcript. */
+function ringsForInbox(roomTopic: string | undefined, me: string) {
+  return roomTopic || !me ? undefined : ringsView(me);
+}
+
+/** Central's help broadcasts belong to the whole-inbox read, never to a single room's transcript. */
+function centralForInbox(roomTopic: string | undefined, limit: number, me: string) {
+  return roomTopic ? undefined : centralBroadcasts(limit, me);
+}
+
+/** The read_inbox reply, with the optional sections present only when they have something to say. */
+function inboxContent(rings: ReturnType<typeof ringsView> | undefined, roomsOut: ReturnType<typeof roomSummary>[], central: ReturnType<typeof centralBroadcasts> | undefined, central_dropped: number) {
+  return jsonContent({
+    ...(rings !== undefined ? { rings } : {}),
+    rooms: roomsOut,
+    ...(central !== undefined ? { central_broadcasts: central, central_dropped } : {}),
+    dropped_means: DROPPED_MEANS.transcript,
+  });
+}
+
 export function registerMeshReadInbox(server: McpServer): void {
   server.registerTool(
     "mesh_read_inbox",
@@ -196,43 +253,10 @@ export function registerMeshReadInbox(server: McpServer): void {
         if (room_topic && selected.length === 0) {
           return errorContent(`mesh_read_inbox: not in room ${room_topic} -- mesh_join_room it first, or see mesh_rooms.`);
         }
-        const roomsOut = selected.map((room) => {
-          const { total, messages, unparsed, nextAfterSeq } = roomMessages({ topic: room.room_topic, afterSeq: after_seq, limit, includeLifecycle: include_lifecycle });
-          const last = messages[messages.length - 1];
-          const hint = waitingHint(room.room_topic, last, me);
-          return {
-            room_topic: room.room_topic,
-            opened_by: room.opened_by,
-            opened_by_petname: petname(room.opened_by),
-            purpose: room.purpose,
-            participants_seen: room.participants_seen,
-            participants_seen_petnames: room.participants_seen.map(petname),
-            ...(total !== undefined ? { total_received: total } : {}),
-            returned: messages.length,
-            next_after_seq: nextAfterSeq,
-            unparsed,
-            messages: messages.map(withFromPetname),
-            dropped: room.dropped,
-            ...(hint ? { poll_hint: hint } : {}),
-          };
-        });
-        const central = room_topic
-          ? undefined
-          : threadEnvelopes(
-              recentFacts({ topic: CENTRAL_TOPIC, limit }).facts.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher })),
-            ).messages.filter((m) => (m.kind === "help_requested" || m.kind === "help_offered") && m.from !== me).map(withFromPetname);
-        const rings = room_topic || !me
-          ? undefined
-          : {
-              pending: pendingIncoming(me).map(ringView),
-              recent: listRings({ self: me, limit: 20 }).filter((r) => r.answer !== null || r.reason !== null).map(ringView),
-            };
-        return jsonContent({
-          ...(rings !== undefined ? { rings } : {}),
-          rooms: roomsOut,
-          ...(central !== undefined ? { central_broadcasts: central, central_dropped } : {}),
-          dropped_means: DROPPED_MEANS.transcript,
-        });
+        const roomsOut = selected.map((room) => roomSummary(room, { after_seq, limit, include_lifecycle }, me));
+        const central = centralForInbox(room_topic, limit, me);
+        const rings = ringsForInbox(room_topic, me);
+        return inboxContent(rings, roomsOut, central, central_dropped);
       } catch (e) {
         return errorContent(e instanceof Error ? e.message : String(e));
       }

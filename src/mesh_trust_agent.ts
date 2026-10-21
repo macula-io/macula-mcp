@@ -34,22 +34,30 @@ import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
 import { toolDescription } from "./tool_description.js";
 
+/** What to say when the file's allowlist entry was recorded but contact_policy did not change: closed/open stay authoritative. */
+function explainUnchangedPolicy(res: AllowlistMutationResult): string | undefined {
+  if (res.policy_changed !== 0 || res.contact_policy === undefined) return undefined;
+  if (res.policy_label === "closed") {
+    return `added to the allowlist, but contact_policy is "closed" -- ring_service.ts declines everyone under closed without even consulting the allowlist. Change contact_policy yourself (edit ${res.path}, or set MACULA_MCP_CONTACT_POLICY) if you want this peer through while staying closed to everyone else.`;
+  }
+  if (res.policy_label === "open") {
+    return `added to the allowlist, but contact_policy is already "open" -- everyone is already accepted, so this entry has no additional effect right now (it will matter if you switch to "allowlist" later).`;
+  }
+  return undefined;
+}
+
 /** What the caller should understand about a mutation beyond the raw fields -- the file changed, but is that change actually in effect right now? */
 function explain(res: AllowlistMutationResult, verb: "added" | "removed"): string {
   if (res.ok === 0) return res.error ?? "failed";
   if (process.env.MACULA_MCP_CONTACT_POLICY) {
     return `${verb} in ${res.path}, but MACULA_MCP_CONTACT_POLICY=${process.env.MACULA_MCP_CONTACT_POLICY} overrides contact_policy for this process -- the file change has no effect until that env var is unset.`;
   }
-  if (verb === "added" && res.policy_changed === 0 && res.contact_policy !== undefined) {
-    if (res.policy_label === "closed") {
-      return `added to the allowlist, but contact_policy is "closed" -- ring_service.ts declines everyone under closed without even consulting the allowlist. Change contact_policy yourself (edit ${res.path}, or set MACULA_MCP_CONTACT_POLICY) if you want this peer through while staying closed to everyone else.`;
+  if (verb === "added") {
+    const unchanged = explainUnchangedPolicy(res);
+    if (unchanged !== undefined) return unchanged;
+    if (res.policy_changed === 1) {
+      return `added, and switched contact_policy from its "ask" default to "allowlist" in ${res.path} -- rings from this peer are now auto-accepted, everyone else is still asked.`;
     }
-    if (res.policy_label === "open") {
-      return `added to the allowlist, but contact_policy is already "open" -- everyone is already accepted, so this entry has no additional effect right now (it will matter if you switch to "allowlist" later).`;
-    }
-  }
-  if (verb === "added" && res.policy_changed === 1) {
-    return `added, and switched contact_policy from its "ask" default to "allowlist" in ${res.path} -- rings from this peer are now auto-accepted, everyone else is still asked.`;
   }
   return `${verb} in ${res.path}.`;
 }

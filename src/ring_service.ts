@@ -53,7 +53,10 @@ import {
   ringProblems,
   ringProcedure,
   type Answer,
+  type RingAnswerArgs,
   type RingAnswerReply,
+  type RingArgs,
+  type RingRecord,
   type RingReply,
 } from "./rings.js";
 
@@ -186,16 +189,71 @@ export interface HandleDeps {
 
 export type HandleReply = RingReply | RingAnswerReply | { answer: Answer; reason: string };
 
+function isRingAnswer(payload: unknown): boolean {
+  return typeof payload === "object" && payload !== null && (payload as Record<string, unknown>).kind === "ring_answer";
+}
+
+/** One ring per caller per RING_RATE_LIMIT_MS. */
+function rateLimited(caller: string, now: number): boolean {
+  return (lastRingAt.get(caller) ?? 0) + RING_RATE_LIMIT_MS > now;
+}
+
+/** The operator's standing policy decides an otherwise-valid ring. */
+async function decideRing(
+  policy: ContactPolicy,
+  ring: RingArgs,
+  accept: () => Promise<HandleReply>,
+  decline: (reason: string, recordedReason: string) => RingReply,
+  defer: (reason: string) => RingReply,
+): Promise<HandleReply> {
+  switch (policy.contact_policy) {
+    case POLICY.open:
+      return accept();
+    case POLICY.closed:
+      return decline("closed: this agent's operator does not take rings", "closed");
+    case POLICY.allowlist:
+      if (isAllowlisted(policy, ring.from)) return accept();
+      return decline("declined: not on this agent's allowlist", "not on allowlist");
+    default:
+      return defer("deferred: this agent's model will answer");
+  }
+}
+
+function activeNodeId(deps: HandleDeps): string | undefined {
+  return deps.nodeId ?? state?.nodeId;
+}
+
+function policyFor(deps: HandleDeps): ContactPolicy {
+  return deps.policy ?? loadContactPolicy();
+}
+
+/** from must be the verified caller, and the ring must name this agent. */
+function addresseeProblem(ring: RingArgs, caller: string, nodeId: string): string | undefined {
+  if (ring.from !== caller) return "unverified: from is not the verified caller";
+  if (ring.to !== nodeId) return "wrong callee: this ring names another node id";
+  return undefined;
+}
+
+/** An outgoing ring of ours, to this peer, in this room. */
+function isOurOutgoingRing(ring: RingRecord | undefined, ans: RingAnswerArgs, nodeId: string): ring is RingRecord {
+  return ring !== undefined && ring.direction === "out" && ring.peer === ans.from && ring.room_topic === ans.room_topic;
+}
+
+/** The first answer stands: accepted and declined are both final. */
+function alreadyAnswered(ring: RingRecord): boolean {
+  return ring.answer === ANSWER.accepted || ring.answer === ANSWER.declined;
+}
+
 /**
  * Decides one inbound call on the ring procedure: a ring (the invite) or a
  * ring_answer (a callee answering a ring this agent placed and it
  * deferred). Pure enough to unit-test with nothing served.
  */
 export async function handleRing(payload: unknown, deps: HandleDeps): Promise<HandleReply> {
-  const nodeId = deps.nodeId ?? state?.nodeId;
+  const nodeId = activeNodeId(deps);
   if (!nodeId) return { answer: ANSWER.declined, reason: "ring service is not active" };
   const caller = deps.caller.toLowerCase();
-  if (typeof payload === "object" && payload !== null && (payload as Record<string, unknown>).kind === "ring_answer") {
+  if (isRingAnswer(payload)) {
     return handleRingAnswer(payload, nodeId, caller);
   }
   const problems = ringProblems(payload);
@@ -209,17 +267,17 @@ export async function handleRing(payload: unknown, deps: HandleDeps): Promise<Ha
     return reply(ANSWER.declined, { reason });
   };
 
-  if (ring.from !== caller) return reply(ANSWER.declined, { reason: "unverified: from is not the verified caller" });
-  if (ring.to !== nodeId) return reply(ANSWER.declined, { reason: "wrong callee: this ring names another node id" });
+  const addressee = addresseeProblem(ring, caller, nodeId);
+  if (addressee !== undefined) return reply(ANSWER.declined, { reason: addressee });
 
-  if ((lastRingAt.get(caller) ?? 0) + RING_RATE_LIMIT_MS > now) return decline("rate limited: try again shortly", "rate limited");
+  if (rateLimited(caller, now)) return decline("rate limited: try again shortly", "rate limited");
   lastRingAt.set(caller, now);
 
   if (pendingSummary(nodeId, ring.from).from_peer >= MAX_PENDING_PER_PEER) {
     return decline("declined: you already have a pending ring with this agent", "too many pending from this peer");
   }
 
-  const policy = deps.policy ?? loadContactPolicy();
+  const policy = policyFor(deps);
   const accept = async (): Promise<RingReply> => {
     if (!rooms.isJoined(ring.room_topic) && rooms.joinedRoomCount() >= MAX_JOINED_ROOMS) {
       return decline("declined: this agent has reached its room limit", "too many joined rooms");
@@ -229,20 +287,12 @@ export async function handleRing(payload: unknown, deps: HandleDeps): Promise<Ha
     recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at, answer: ANSWER.accepted });
     return reply(ANSWER.accepted, { room_topic: ring.room_topic });
   };
-  switch (policy.contact_policy) {
-    case POLICY.open:
-      return accept();
-    case POLICY.closed:
-      return decline("closed: this agent's operator does not take rings", "closed");
-    case POLICY.allowlist:
-      if (isAllowlisted(policy, ring.from)) return accept();
-      return decline("declined: not on this agent's allowlist", "not on allowlist");
-    default: {
-      // ask: this agent's model decides, later (mesh_answer_ring).
-      recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at });
-      return reply(ANSWER.deferred, { room_topic: ring.room_topic, reason: "deferred: this agent's model will answer" });
-    }
-  }
+  const defer = (reason: string): RingReply => {
+    // ask: this agent's model decides, later (mesh_answer_ring).
+    recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at });
+    return reply(ANSWER.deferred, { room_topic: ring.room_topic, reason });
+  };
+  return decideRing(policy, ring, accept, decline, defer);
 }
 
 /** A callee answering a ring this agent placed and it deferred: it must be the verified caller, and the callee of that ring. The first answer stands. */
@@ -253,10 +303,10 @@ function handleRingAnswer(payload: unknown, nodeId: string, caller: string): Han
   if (ans.from !== caller) return { answer: ANSWER.declined, reason: "unverified: from is not the verified caller" };
   if (ans.to !== nodeId) return { answer: ANSWER.declined, reason: "wrong callee: this answer names another node id" };
   const ring = getRing(ans.ring_id, nodeId);
-  if (!ring || ring.direction !== "out" || ring.peer !== ans.from || ring.room_topic !== ans.room_topic) {
+  if (!isOurOutgoingRing(ring, ans, nodeId)) {
     return { answer: ANSWER.declined, reason: "unknown ring: no outgoing ring with that id to that agent in that room" };
   }
-  if (ring.answer === ANSWER.accepted || ring.answer === ANSWER.declined) {
+  if (alreadyAnswered(ring)) {
     return { ring_id: ans.ring_id, received: 1, already_answered: 1 };
   }
   answerRing(ans.ring_id, ring.direction, ans.answer, ans.reason);
@@ -279,6 +329,37 @@ export interface AnswerPendingResult {
   notify_error?: string;
 }
 
+/** On accept, the room must exist and be joined before the answer is recorded, so the caller sees it become two-sided. */
+async function joinRoomForAcceptedAnswer(
+  args: AnswerPendingArgs,
+  ring: RingRecord,
+  deps: { joinRoom?: (args: { room_topic: string; openedBy?: string }) => Promise<unknown> },
+): Promise<void> {
+  if (args.answer !== ANSWER.accepted) return;
+  if (!rooms.isJoined(ring.room_topic) && rooms.joinedRoomCount() >= MAX_JOINED_ROOMS) {
+    throw new Error(`this agent has reached its room limit (${MAX_JOINED_ROOMS}) -- decline instead, or leave a room first`);
+  }
+  const joinRoom = deps.joinRoom ?? rooms.joinRoom;
+  await joinRoom({ room_topic: ring.room_topic, openedBy: ring.peer });
+}
+
+/** Carries the answer back to the original caller; an unreachable caller is recorded, not thrown. */
+async function notifyCaller(
+  ring: RingRecord,
+  answerArgs: ReturnType<typeof buildRingAnswerArgs>,
+  result: Omit<AnswerPendingResult, "caller_notified" | "notify_error">,
+): Promise<AnswerPendingResult> {
+  try {
+    const res = await call({ procedure: ringProcedure(ring.peer), callArgs: { ...answerArgs }, timeoutMs: NOTIFY_TIMEOUT_MS });
+    if (!parseRingAnswerReply(res.payload)) {
+      return { ...result, caller_notified: 0, notify_error: `caller answered with something that is not an acknowledgement: ${JSON.stringify(res.payload)}` };
+    }
+    return { ...result, caller_notified: 1 };
+  } catch (e) {
+    return { ...result, caller_notified: 0, notify_error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /**
  * This agent's model answering a ring the policy deferred: on accept, join
  * the room first (tap + participant_joined) so the caller sees the room
@@ -295,26 +376,12 @@ export async function answerPendingRing(
   const ring = getRing(args.ring_id, nodeId);
   if (!ring || ring.direction !== "in") throw new Error(`no incoming ring ${args.ring_id}`);
   if (ring.answer !== null) throw new Error(`ring ${args.ring_id} was already answered (${ring.answer})`);
-  if (args.answer === ANSWER.accepted) {
-    if (!rooms.isJoined(ring.room_topic) && rooms.joinedRoomCount() >= MAX_JOINED_ROOMS) {
-      throw new Error(`this agent has reached its room limit (${MAX_JOINED_ROOMS}) -- decline instead, or leave a room first`);
-    }
-    const joinRoom = deps.joinRoom ?? rooms.joinRoom;
-    await joinRoom({ room_topic: ring.room_topic, openedBy: ring.peer });
-  }
+  await joinRoomForAcceptedAnswer(args, ring, deps);
   answerRing(args.ring_id, ring.direction, args.answer, args.reason);
 
   const answerArgs = buildRingAnswerArgs({ from: nodeId, to: ring.peer, ring_id: ring.ring_id, answer: args.answer, room_topic: ring.room_topic, reason: args.reason });
   const result = { ring_id: ring.ring_id, answer: args.answer, peer: ring.peer, room_topic: ring.room_topic };
-  try {
-    const res = await call({ procedure: ringProcedure(ring.peer), callArgs: { ...answerArgs }, timeoutMs: NOTIFY_TIMEOUT_MS });
-    if (!parseRingAnswerReply(res.payload)) {
-      return { ...result, caller_notified: 0, notify_error: `caller answered with something that is not an acknowledgement: ${JSON.stringify(res.payload)}` };
-    }
-    return { ...result, caller_notified: 1 };
-  } catch (e) {
-    return { ...result, caller_notified: 0, notify_error: e instanceof Error ? e.message : String(e) };
-  }
+  return notifyCaller(ring, answerArgs, result);
 }
 
 /** Withdraws the ring endpoint (best effort) and cancels a pending first-registration retry. */

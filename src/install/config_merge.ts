@@ -95,6 +95,37 @@ export async function mergeMcpServer(
 }
 
 /**
+ * The result when the entry is already there: unchanged when it matches,
+ * skipped_conflict when it differs and --force was not given. Undefined
+ * means the write should go ahead.
+ */
+function existingEntryResult(
+  path: string,
+  name: string,
+  current: Record<string, unknown> | undefined,
+  entry: McpServerEntry | Record<string, unknown>,
+  force: boolean | undefined,
+): MergeResult | undefined {
+  if (current && deepEqual(current, entry)) {
+    return {
+      outcome: "unchanged",
+      configPath: path,
+      message: `entry '${name}' already present and matches; no-op`,
+    };
+  }
+  if (current && !force) {
+    return {
+      outcome: "skipped_conflict",
+      configPath: path,
+      message:
+        `entry '${name}' already present with different settings. ` +
+        `Re-run with --force to replace, or remove the entry manually.`,
+    };
+  }
+  return undefined;
+}
+
+/**
  * Same as mergeMcpServer, for a client whose servers live under another
  * top-level key and/or with another entry shape (opencode: `mcp`, with
  * `{type, command: string[], enabled}`; Goose: `extensions`, YAML not
@@ -113,23 +144,8 @@ export async function mergeEntry(
   const servers = (existing[containerKey] as Record<string, Record<string, unknown>>) ?? {};
   const current = servers[name];
 
-  if (current && deepEqual(current, entry)) {
-    return {
-      outcome: "unchanged",
-      configPath: path,
-      message: `entry '${name}' already present and matches; no-op`,
-    };
-  }
-
-  if (current && !opts.force) {
-    return {
-      outcome: "skipped_conflict",
-      configPath: path,
-      message:
-        `entry '${name}' already present with different settings. ` +
-        `Re-run with --force to replace, or remove the entry manually.`,
-    };
-  }
+  const settled = existingEntryResult(path, name, current, entry, opts.force);
+  if (settled) return settled;
 
   const next = {
     ...existing,
@@ -194,17 +210,17 @@ export async function removeEntry(
   };
 }
 
+function sameKeys(a: object, b: object): boolean {
+  const ka = Object.keys(a).sort();
+  const kb = Object.keys(b).sort();
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i]);
+}
+
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  const ka = Object.keys(a as object).sort();
-  const kb = Object.keys(b as object).sort();
-  if (ka.length !== kb.length) return false;
-  for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return false;
-  for (const k of ka) {
-    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
-  }
-  return true;
+  if (!sameKeys(a, b)) return false;
+  return Object.keys(a).every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
 
 // Silence unused-warning for object-destructure rest pattern above.

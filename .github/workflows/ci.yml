@@ -6,6 +6,20 @@ on:
   pull_request:
 
 jobs:
+  # The structural floor (macula-io/macula-codebase-checks#9): deep nesting
+  # and tangled functions fail the build. The thresholds are declared in
+  # eslint.config.mjs, with no baseline and no inline disables.
+  lint:
+    name: structural floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.20.0"
+      - run: npm ci
+      - run: npm run lint
+
   typecheck:
     name: typecheck
     runs-on: ubuntu-latest

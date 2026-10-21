@@ -97,6 +97,42 @@ function scanString(s: string): string | undefined {
   return undefined;
 }
 
+/** Scans one array element at a time, in order. */
+function scanArray(value: unknown[], path: string): SecretMatch | undefined {
+  for (let i = 0; i < value.length; i++) {
+    const m = findLikelySecret(value[i], `${path}[${i}]`);
+    if (m) return m;
+  }
+  return undefined;
+}
+
+// The secret-looking-KEY=value pattern above needs to see the KEY
+// NAME, but a JSON-structured value ({"AWS_SECRET_ACCESS_KEY": "..."})
+// never puts the key inside the string leaf the recursive scan below
+// checks -- the value alone often carries no distinctive shape at all
+// (found by adversarial review 2026-09-04: this was the single most
+// realistic bypass, an agent restructuring a .env file's lines into
+// JSON object properties rather than pasting raw "KEY=value" text).
+// Synthesizing "key=value" and running the SAME pattern list against
+// it catches exactly this, at negligible cost, without needing a
+// separate key-only pattern.
+function scanKeyValue(k: string, v: unknown, path: string): SecretMatch | undefined {
+  if (typeof v !== "string" || v.length === 0) return undefined;
+  const kv = scanString(`${k}=${v}`);
+  return kv ? { patternName: kv, path: `${path}.${k}` } : undefined;
+}
+
+/** Scans one object's entries, checking KEY=value first and then recursing into the value. */
+function scanObject(value: Record<string, unknown>, path: string): SecretMatch | undefined {
+  for (const [k, v] of Object.entries(value)) {
+    const fromKeyValue = scanKeyValue(k, v, path);
+    if (fromKeyValue) return fromKeyValue;
+    const m = findLikelySecret(v, `${path}.${k}`);
+    if (m) return m;
+  }
+  return undefined;
+}
+
 /**
  * Walks `value` (a string, or a JSON-shaped structure of strings/numbers/
  * arrays/objects -- exactly what every category-1 tool's free-text/args
@@ -110,34 +146,8 @@ export function findLikelySecret(value: unknown, path: string): SecretMatch | un
     const name = scanString(value);
     return name ? { patternName: name, path } : undefined;
   }
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      const m = findLikelySecret(value[i], `${path}[${i}]`);
-      if (m) return m;
-    }
-    return undefined;
-  }
-  if (value && typeof value === "object") {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      // The secret-looking-KEY=value pattern above needs to see the KEY
-      // NAME, but a JSON-structured value ({"AWS_SECRET_ACCESS_KEY": "..."})
-      // never puts the key inside the string leaf the recursive scan below
-      // checks -- the value alone often carries no distinctive shape at all
-      // (found by adversarial review 2026-09-04: this was the single most
-      // realistic bypass, an agent restructuring a .env file's lines into
-      // JSON object properties rather than pasting raw "KEY=value" text).
-      // Synthesizing "key=value" and running the SAME pattern list against
-      // it catches exactly this, at negligible cost, without needing a
-      // separate key-only pattern.
-      if (typeof v === "string" && v.length > 0) {
-        const kv = scanString(`${k}=${v}`);
-        if (kv) return { patternName: kv, path: `${path}.${k}` };
-      }
-      const m = findLikelySecret(v, `${path}.${k}`);
-      if (m) return m;
-    }
-    return undefined;
-  }
+  if (Array.isArray(value)) return scanArray(value, path);
+  if (value && typeof value === "object") return scanObject(value as Record<string, unknown>, path);
   return undefined;
 }
 

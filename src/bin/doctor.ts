@@ -80,22 +80,26 @@ interface EntryInfo {
 // configured opencode entry read back as `undefined` here every time,
 // so doctor reported "not configured, skipping" for an install that
 // actually worked.
+/** Reads one client's real config and normalizes its `macula` entry, or undefined when there is none. */
+function entryFromConfigText(client: ClientAdapter, raw: string): EntryInfo | undefined {
+  if (raw.trim().length === 0) return undefined;
+  const parsed = (
+    client.CONFIG_FORMAT === "yaml" ? parseYaml(raw) : JSON.parse(raw)
+  ) as Record<string, unknown>;
+  const container = parsed[client.CONTAINER_KEY ?? "mcpServers"] as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  const entry = container?.macula;
+  if (!entry) return undefined;
+  if (client.toSpawnCommand) return client.toSpawnCommand(entry);
+  return { command: entry.command as string, args: (entry.args as string[] | undefined) ?? [] };
+}
+
 export async function readMaculaEntry(client: ClientAdapter): Promise<EntryInfo | undefined> {
   const configPath = client.configPath();
   if (!existsSync(configPath)) return undefined;
   try {
-    const raw = await readFile(configPath, "utf8");
-    if (raw.trim().length === 0) return undefined;
-    const parsed = (
-      client.CONFIG_FORMAT === "yaml" ? parseYaml(raw) : JSON.parse(raw)
-    ) as Record<string, unknown>;
-    const container = parsed[client.CONTAINER_KEY ?? "mcpServers"] as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    const entry = container?.macula;
-    if (!entry) return undefined;
-    if (client.toSpawnCommand) return client.toSpawnCommand(entry);
-    return { command: entry.command as string, args: (entry.args as string[] | undefined) ?? [] };
+    return entryFromConfigText(client, await readFile(configPath, "utf8"));
   } catch {
     return undefined;
   }

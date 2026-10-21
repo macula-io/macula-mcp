@@ -46,14 +46,58 @@ export function policyFilePath(): string {
   return process.env.MACULA_MCP_CONTACT_POLICY_FILE ?? join(homedir(), ".config", "macula-mcp", "contact_policy.json");
 }
 
+const POLICY_BY_NAME = new Map<string, Policy>([
+  ["open", POLICY.open],
+  ["1", POLICY.open],
+  ["ask", POLICY.ask],
+  ["2", POLICY.ask],
+  ["allowlist", POLICY.allowlist],
+  ["3", POLICY.allowlist],
+  ["closed", POLICY.closed],
+  ["4", POLICY.closed],
+]);
+
 /** "open" | "ask" | "allowlist" | "closed" | 1..4 (as string or number) -> a Policy, or undefined for anything else. */
 export function parsePolicy(raw: unknown): Policy | undefined {
   const s = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw.trim().toLowerCase() : "";
-  if (s === "open" || s === "1") return POLICY.open;
-  if (s === "ask" || s === "2") return POLICY.ask;
-  if (s === "allowlist" || s === "3") return POLICY.allowlist;
-  if (s === "closed" || s === "4") return POLICY.closed;
-  return undefined;
+  return POLICY_BY_NAME.get(s);
+}
+
+/** Validates one allowlist entry: a 64-hex node id, lowercased on the way in. */
+function allowlistEntries(value: unknown, problems: string[]): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    problems.push("allowlist must be a list of 64-hex node ids");
+    return [];
+  }
+  const allowlist: string[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string" && HEX64.test(entry)) allowlist.push(entry.toLowerCase());
+    else problems.push(`allowlist entry is not a 64-hex node id: ${JSON.stringify(entry)}`);
+  }
+  return allowlist;
+}
+
+/** Validates one offers entry: a non-empty short string, trimmed on the way in. */
+function offerEntries(value: unknown, problems: string[]): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    problems.push("offers must be a list of short strings");
+    return [];
+  }
+  const offers: string[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string" && entry.trim().length > 0 && entry.length <= 64) offers.push(entry.trim());
+    else problems.push(`offers entry must be a non-empty string of at most 64 chars: ${JSON.stringify(entry)}`);
+  }
+  return offers;
+}
+
+/** No booleans anywhere: name each boolean key rather than letting the policy check miss it. */
+function booleanKeyProblems(p: Record<string, unknown>, problems: string[]): void {
+  for (const [key, value] of Object.entries(p)) {
+    if (typeof value === "boolean") problems.push(`boolean at "${key}" -- use the policy names or 1..4, never true/false`);
+  }
 }
 
 /** Pure: turns file contents into the file's contribution, naming every problem instead of throwing. Exported for tests. */
@@ -69,36 +113,48 @@ export function parsePolicyFile(text: string): { contact_policy?: Policy; allowl
     return { allowlist: [], offers: [], problems: ["top level must be an object"] };
   }
   const p = parsed as Record<string, unknown>;
-  for (const [key, value] of Object.entries(p)) {
-    if (typeof value === "boolean") problems.push(`boolean at "${key}" -- use the policy names or 1..4, never true/false`);
-  }
+  booleanKeyProblems(p, problems);
   let contact_policy: Policy | undefined;
   if (p.contact_policy !== undefined) {
     contact_policy = parsePolicy(p.contact_policy);
     if (contact_policy === undefined) problems.push(`contact_policy must be open, ask, allowlist or closed (or 1..4), got ${JSON.stringify(p.contact_policy)}`);
   }
-  const allowlist: string[] = [];
-  if (p.allowlist !== undefined) {
-    if (!Array.isArray(p.allowlist)) problems.push("allowlist must be a list of 64-hex node ids");
-    else {
-      for (const entry of p.allowlist) {
-        if (typeof entry === "string" && HEX64.test(entry)) allowlist.push(entry.toLowerCase());
-        else problems.push(`allowlist entry is not a 64-hex node id: ${JSON.stringify(entry)}`);
-      }
-    }
-  }
-  const offers: string[] = [];
-  if (p.offers !== undefined) {
-    if (!Array.isArray(p.offers)) problems.push("offers must be a list of short strings");
-    else {
-      for (const entry of p.offers) {
-        if (typeof entry === "string" && entry.trim().length > 0 && entry.length <= 64) offers.push(entry.trim());
-        else problems.push(`offers entry must be a non-empty string of at most 64 chars: ${JSON.stringify(entry)}`);
-      }
-    }
-  }
+  const allowlist = allowlistEntries(p.allowlist, problems);
+  const offers = offerEntries(p.offers, problems);
   return { contact_policy, allowlist, offers, problems };
 }
+
+/** The file's text, or undefined when there is no file (the common case). */
+function readPolicyText(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** The env override, naming its own problem when it is set to something unusable. */
+function envPolicy(problems: string[]): Policy | undefined {
+  const raw = process.env.MACULA_MCP_CONTACT_POLICY;
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const parsed = parsePolicy(raw);
+  if (parsed === undefined) {
+    problems.push(`MACULA_MCP_CONTACT_POLICY must be open, ask, allowlist or closed (or 1..4), got ${JSON.stringify(raw)}`);
+  }
+  return parsed;
+}
+
+/** Where contact_policy came from: the env override, the file, or the built-in default. */
+function policySource(fromEnv: Policy | undefined, fromFile: Policy | undefined): ContactPolicy["source"] {
+  if (fromEnv !== undefined) return "env";
+  if (fromFile !== undefined) return "file";
+  return "default";
+}
+
+type PolicyFile = ReturnType<typeof parsePolicyFile>;
+
+/** What a missing policy file contributes: the defaults, and nothing to report. */
+const NO_POLICY_FILE: PolicyFile = { allowlist: [], offers: [], problems: [] };
 
 /**
  * The effective contact policy right now. Re-read on every call (a
@@ -107,26 +163,15 @@ export function parsePolicyFile(text: string): { contact_policy?: Policy; allowl
  */
 export function loadContactPolicy(): ContactPolicy {
   const path = policyFilePath();
-  let fileText: string | undefined;
-  try {
-    fileText = readFileSync(path, "utf8");
-  } catch {
-    fileText = undefined; // no file: the common case
-  }
-  const fromFile = fileText === undefined ? undefined : parsePolicyFile(fileText);
-  const envRaw = process.env.MACULA_MCP_CONTACT_POLICY;
-  const fromEnv = envRaw === undefined || envRaw.trim() === "" ? undefined : parsePolicy(envRaw);
-  const problems = [...(fromFile?.problems ?? [])];
-  if (envRaw !== undefined && envRaw.trim() !== "" && fromEnv === undefined) {
-    problems.push(`MACULA_MCP_CONTACT_POLICY must be open, ask, allowlist or closed (or 1..4), got ${JSON.stringify(envRaw)}`);
-  }
-  const contact_policy = fromEnv ?? fromFile?.contact_policy ?? POLICY.ask;
-  const source: ContactPolicy["source"] = fromEnv !== undefined ? "env" : fromFile?.contact_policy !== undefined ? "file" : "default";
+  const fileText = readPolicyText(path);
+  const fromFile = fileText === undefined ? NO_POLICY_FILE : parsePolicyFile(fileText);
+  const problems = [...fromFile.problems];
+  const fromEnv = envPolicy(problems);
   return {
-    contact_policy,
-    allowlist: fromFile?.allowlist ?? [],
-    offers: fromFile?.offers ?? [],
-    source,
+    contact_policy: fromEnv ?? fromFile.contact_policy ?? POLICY.ask,
+    allowlist: fromFile.allowlist,
+    offers: fromFile.offers,
+    source: policySource(fromEnv, fromFile.contact_policy),
     path,
     ...(problems.length > 0 ? { error: problems.join("; ") } : {}),
   };
@@ -207,6 +252,18 @@ function writeRawPolicyFile(path: string, raw: Record<string, unknown>): void {
   }
 }
 
+/** The file's allowlist, lowercased, ignoring anything that is not a string. */
+function rawAllowlist(raw: Record<string, unknown>): string[] {
+  if (!Array.isArray(raw.allowlist)) return [];
+  return (raw.allowlist as unknown[]).filter((e): e is string => typeof e === "string").map((e) => e.toLowerCase());
+}
+
+/** The policy to store after a trust, and whether that also changed it: only the unset or "ask" default flips to "allowlist". */
+function trustedPolicy(current: Policy | undefined): { policy: Policy; changed: boolean } {
+  if (current === undefined || current === POLICY.ask) return { policy: POLICY.allowlist, changed: true };
+  return { policy: current, changed: false };
+}
+
 /**
  * Adds `nodeId` to this operator's own allowlist, so the next ring from
  * that peer skips the "ask" round-trip -- the ergonomic path
@@ -231,11 +288,9 @@ export function addToAllowlist(nodeId: string): AllowlistMutationResult {
   const read = readRawPolicyFile(path);
   if ("error" in read) return { ok: 0, path, error: read.error };
   const raw = read.raw;
-  const existing = Array.isArray(raw.allowlist) ? (raw.allowlist as unknown[]).filter((e): e is string => typeof e === "string").map((e) => e.toLowerCase()) : [];
+  const existing = rawAllowlist(raw);
   const nextAllowlist = existing.includes(id) ? existing : [...existing, id];
-  const currentPolicy = parsePolicy(raw.contact_policy);
-  const policyChanged = currentPolicy === undefined || currentPolicy === POLICY.ask;
-  const nextPolicy: Policy = policyChanged ? POLICY.allowlist : currentPolicy;
+  const { policy: nextPolicy, changed: policyChanged } = trustedPolicy(parsePolicy(raw.contact_policy));
   raw.allowlist = nextAllowlist;
   raw.contact_policy = policyLabel(nextPolicy);
   try {
@@ -259,7 +314,7 @@ export function removeFromAllowlist(nodeId: string): AllowlistMutationResult {
   const read = readRawPolicyFile(path);
   if ("error" in read) return { ok: 0, path, error: read.error };
   const raw = read.raw;
-  const existing = Array.isArray(raw.allowlist) ? (raw.allowlist as unknown[]).filter((e): e is string => typeof e === "string").map((e) => e.toLowerCase()) : [];
+  const existing = rawAllowlist(raw);
   const nextAllowlist = existing.filter((e) => e !== id);
   raw.allowlist = nextAllowlist;
   const currentPolicy = parsePolicy(raw.contact_policy) ?? POLICY.ask;

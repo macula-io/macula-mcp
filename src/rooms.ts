@@ -42,7 +42,7 @@
 import { publish, selfNodeId as ownNodeId } from "./macula_ts_client.js";
 import * as presence from "./presence.js";
 import * as lobbyObserver from "./lobby_observer.js";
-import { factsAfter, lastFactId, recentFacts } from "./lobby_transcript.js";
+import { factsAfter, lastFactId, recentFacts, type ObservedFact } from "./lobby_transcript.js";
 import {
   buildEnvelope,
   CENTRAL_TOPIC,
@@ -242,38 +242,46 @@ export interface RoomListing extends RoomState {
   dropped: number;
 }
 
+/** One joined room's listing: its own state plus who was seen in its transcript. */
+function roomListing(room: RoomState): RoomListing {
+  const { total, facts } = recentFacts({ topic: room.room_topic, limit: CENTRAL_SCAN_LIMIT });
+  const present = new Map<string, 0 | 1>();
+  for (const f of facts) {
+    const env = parseEnvelope(JSON.parse(f.raw_json));
+    if (!env || !isAttestedFact(env, f.publisher)) continue;
+    present.set(env.from, env.kind === "participant_left" ? 0 : 1);
+  }
+  return {
+    ...room,
+    participants_seen: [...present.entries()].filter(([, p]) => p === 1).map(([n]) => n),
+    messages_received: total,
+    watched: lobbyObserver.isTapped(room.room_topic) ? 1 : 0,
+    dropped: lobbyObserver.dropped(room.room_topic),
+  };
+}
+
+/** A room announced on central that this agent has not joined, once per topic. */
+function seenRoom(f: ObservedFact, seenTopics: Set<string>): SeenRoom | undefined {
+  const env = parseEnvelope(JSON.parse(f.raw_json));
+  if (!env || env.kind !== "room_opened" || rooms.has(env.room_topic) || seenTopics.has(env.room_topic)) return undefined;
+  seenTopics.add(env.room_topic);
+  return {
+    room_topic: env.room_topic,
+    opened_by: env.from,
+    ...(env.purpose !== undefined ? { purpose: env.purpose } : {}),
+    ...(env.participants !== undefined ? { participants: env.participants } : {}),
+    observed_at: f.observed_at,
+  };
+}
+
 /** Rooms this agent is in, plus public rooms announced on central it hasn't joined, with what central's feed lost (DROPPED_MEANS). */
 export function listRooms(): { joined: RoomListing[]; seen_on_central: SeenRoom[]; central_dropped: number } {
-  const joined: RoomListing[] = [];
-  for (const room of rooms.values()) {
-    const { total, facts } = recentFacts({ topic: room.room_topic, limit: CENTRAL_SCAN_LIMIT });
-    const present = new Map<string, 0 | 1>();
-    for (const f of facts) {
-      const env = parseEnvelope(JSON.parse(f.raw_json));
-      if (!env || !isAttestedFact(env, f.publisher)) continue;
-      present.set(env.from, env.kind === "participant_left" ? 0 : 1);
-    }
-    joined.push({
-      ...room,
-      participants_seen: [...present.entries()].filter(([, p]) => p === 1).map(([n]) => n),
-      messages_received: total,
-      watched: lobbyObserver.isTapped(room.room_topic) ? 1 : 0,
-      dropped: lobbyObserver.dropped(room.room_topic),
-    });
-  }
+  const joined = [...rooms.values()].map(roomListing);
   const seen: SeenRoom[] = [];
   const seenTopics = new Set<string>();
   for (const f of recentFacts({ topic: CENTRAL_TOPIC, limit: CENTRAL_SCAN_LIMIT }).facts) {
-    const env = parseEnvelope(JSON.parse(f.raw_json));
-    if (!env || env.kind !== "room_opened" || rooms.has(env.room_topic) || seenTopics.has(env.room_topic)) continue;
-    seenTopics.add(env.room_topic);
-    seen.push({
-      room_topic: env.room_topic,
-      opened_by: env.from,
-      ...(env.purpose !== undefined ? { purpose: env.purpose } : {}),
-      ...(env.participants !== undefined ? { participants: env.participants } : {}),
-      observed_at: f.observed_at,
-    });
+    const room = seenRoom(f, seenTopics);
+    if (room !== undefined) seen.push(room);
   }
   return { joined, seen_on_central: seen, central_dropped: lobbyObserver.dropped(CENTRAL_TOPIC) };
 }

@@ -57,6 +57,22 @@ export interface RejectedRealmName {
   reason: string;
 }
 
+/** A realm name must not have an empty, leading, or trailing label. */
+function hasEmptyLabel(canonical: string): boolean {
+  return canonical.startsWith(".") || canonical.endsWith(".") || canonical.includes("..");
+}
+
+/** Names the problem with one label, or undefined when it is valid. */
+function labelProblem(label: string): string | undefined {
+  if (!LABEL.test(label)) {
+    return `"${label}" is not a valid label -- lowercase ASCII letters, digits, and internal hyphens only, must start and end with a letter or digit`;
+  }
+  if (label.startsWith("xn--")) {
+    return `"${label}" looks like punycode (xn--) -- rejected outright, the one lookalike class a plain character check cannot catch`;
+  }
+  return undefined;
+}
+
 /** Validates and canonicalizes a typed realm name. Pure -- no filesystem or network access. */
 export function parseRealmName(input: string): ParsedRealmName | RejectedRealmName {
   const trimmed = input.trim();
@@ -69,7 +85,7 @@ export function parseRealmName(input: string): ParsedRealmName | RejectedRealmNa
     return { ok: false, reason: "realm name must be ASCII only -- a non-ASCII character (including a lookalike of a Latin letter) is rejected outright, not folded" };
   }
   const canonical = trimmed.toLowerCase();
-  if (canonical.startsWith(".") || canonical.endsWith(".") || canonical.includes("..")) {
+  if (hasEmptyLabel(canonical)) {
     return { ok: false, reason: "realm name must not have an empty, leading, or trailing label" };
   }
   const labels = canonical.split(".");
@@ -77,15 +93,8 @@ export function parseRealmName(input: string): ParsedRealmName | RejectedRealmNa
     return { ok: false, reason: `realm name needs at least ${MIN_LABELS} labels (e.g. "io.macula", not just "io")` };
   }
   for (const label of labels) {
-    if (!LABEL.test(label)) {
-      return {
-        ok: false,
-        reason: `"${label}" is not a valid label -- lowercase ASCII letters, digits, and internal hyphens only, must start and end with a letter or digit`,
-      };
-    }
-    if (label.startsWith("xn--")) {
-      return { ok: false, reason: `"${label}" looks like punycode (xn--) -- rejected outright, the one lookalike class a plain character check cannot catch` };
-    }
+    const problem = labelProblem(label);
+    if (problem !== undefined) return { ok: false, reason: problem };
   }
   return { ok: true, canonical, labels };
 }

@@ -108,6 +108,97 @@ function isDirectoryError(e: unknown): boolean {
   return e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "EISDIR";
 }
 
+/** What one walked file contributed: ingested, skipped with a reason, or refused. */
+type IngestOutcome =
+  | { kind: "ingested"; entry: { path: string; document_id: string; chunks: number } }
+  | { kind: "skipped"; path: string; reason: string }
+  | { kind: "failed"; path: string; error: string };
+
+/** The source_path an ingested file is recorded under. */
+function sourcePathFor(prefix: string | undefined, rel: string): string {
+  return prefix ? `${prefix}/${rel}` : rel;
+}
+
+// Cheap first layer, before even opening the file: a filename
+// that's secret-bearing by convention (.env, id_rsa, .npmrc, ...)
+// gets refused regardless of what content-scanning would find --
+// defense in depth, not a replacement for it.
+/** Finds why a file cannot be uploaded, without opening it: secret-bearing names are refused outright. */
+function nameRefusal(rel: string): IngestOutcome | undefined {
+  if (!isExcludedPath(rel)) return undefined;
+  return { kind: "skipped", path: rel, reason: "filename matches a known secret-bearing convention (.env/.pem/.key/id_rsa/.ssh/.aws/.npmrc/credentials.json) -- refusing to read it at all" };
+}
+
+/** Refuses content that looks like it carries a secret. */
+function secretRefusal(content: string, rel: string): IngestOutcome | undefined {
+  const secretMatch = findLikelySecret(content, rel);
+  if (!secretMatch) return undefined;
+  return { kind: "failed", path: rel, error: `refusing to upload -- looks like it contains a ${secretMatch.patternName} (at ${secretMatch.path}). Redact it and re-run to include this file.` };
+}
+
+/** Uploads one file's content, naming a failed upload rather than throwing. */
+async function uploadFile(rel: string, ext: string, sourcePrefix: string | undefined, realm: string, content: string): Promise<IngestOutcome> {
+  const documentId = documentIdFor(rel);
+  try {
+    const res = await call({
+      procedure: UPLOAD_KNOWLEDGE_PROCEDURE,
+      callArgs: { document_id: documentId, source_path: sourcePathFor(sourcePrefix, rel), source_type: sourceTypeFor(ext), raw_bytes: content },
+      realm,
+    });
+    const payload = res.payload as { chunks?: number } | undefined;
+    return { kind: "ingested", entry: { path: rel, document_id: documentId, chunks: payload?.chunks ?? 0 } };
+  } catch (e) {
+    return { kind: "failed", path: rel, error: describeMeshError("upload_knowledge failed", e) };
+  }
+}
+
+/**
+ * Reads and uploads one file. Undefined means "silently not a candidate"
+ * (a directory that happens to end in a matching extension).
+ */
+async function ingestFile(
+  directory: string,
+  rel: string,
+  ext: string,
+  sourcePrefix: string | undefined,
+  realm: string,
+): Promise<IngestOutcome | undefined> {
+  const refused = nameRefusal(rel);
+  if (refused) return refused;
+  let content: string;
+  try {
+    content = await readFile(join(directory, rel), "utf8");
+  } catch (e) {
+    if (isDirectoryError(e)) return undefined; // a directory that happens to end in a matching extension
+    return { kind: "skipped", path: rel, reason: `unreadable or not valid UTF-8: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (content.trim().length === 0) return { kind: "skipped", path: rel, reason: "empty file" };
+  return secretRefusal(content, rel) ?? uploadFile(rel, ext, sourcePrefix, realm, content);
+}
+
+/** Walks the tree's candidates, sorting each outcome into ingested/skipped/failed. */
+async function collectDirectory(
+  directory: string,
+  relativePaths: string[],
+  includeExt: string[],
+  excludeDirs: string[],
+  sourcePrefix: string | undefined,
+  realm: string,
+): Promise<{ ingested: { path: string; document_id: string; chunks: number }[]; skipped: { path: string; reason: string }[]; failed: { path: string; error: string }[] }> {
+  const ingested: { path: string; document_id: string; chunks: number }[] = [];
+  const skipped: { path: string; reason: string }[] = [];
+  const failed: { path: string; error: string }[] = [];
+  for (const rel of relativePaths) {
+    if (isExcluded(rel, excludeDirs) || !includeExt.includes(extname(rel))) continue;
+    const outcome = await ingestFile(directory, rel, extname(rel), sourcePrefix, realm);
+    if (outcome === undefined) continue;
+    if (outcome.kind === "ingested") ingested.push(outcome.entry);
+    else if (outcome.kind === "skipped") skipped.push({ path: outcome.path, reason: outcome.reason });
+    else failed.push({ path: outcome.path, error: outcome.error });
+  }
+  return { ingested, skipped, failed };
+}
+
 const RECALL_DESCRIPTION_FULL =
   "Query the mesh's shared memory (mcl-rag, a realm-bound RAG service) for anything relevant to " +
   "query_text -- semantic retrieval, not keyword match. Auto-discovers which realm mcl-rag is " +
@@ -316,55 +407,7 @@ export function registerMeshMemory(server: McpServer): void {
       const discovery = await discoverRagRealm();
       if ("error" in discovery) return errorContent(discovery.error);
 
-      const ingested: { path: string; document_id: string; chunks: number }[] = [];
-      const skipped: { path: string; reason: string }[] = [];
-      const failed: { path: string; error: string }[] = [];
-
-      for (const rel of relativePaths) {
-        if (isExcluded(rel, excludeDirs)) continue;
-        const ext = extname(rel);
-        if (!includeExt.includes(ext)) continue;
-        // Cheap first layer, before even opening the file: a filename
-        // that's secret-bearing by convention (.env, id_rsa, .npmrc, ...)
-        // gets refused regardless of what content-scanning would find --
-        // defense in depth, not a replacement for it.
-        if (isExcludedPath(rel)) {
-          skipped.push({ path: rel, reason: "filename matches a known secret-bearing convention (.env/.pem/.key/id_rsa/.ssh/.aws/.npmrc/credentials.json) -- refusing to read it at all" });
-          continue;
-        }
-
-        let content: string;
-        try {
-          content = await readFile(join(directory, rel), "utf8");
-        } catch (e) {
-          if (isDirectoryError(e)) continue; // a directory that happens to end in a matching extension
-          skipped.push({ path: rel, reason: `unreadable or not valid UTF-8: ${e instanceof Error ? e.message : String(e)}` });
-          continue;
-        }
-        if (content.trim().length === 0) {
-          skipped.push({ path: rel, reason: "empty file" });
-          continue;
-        }
-        const secretMatch = findLikelySecret(content, rel);
-        if (secretMatch) {
-          failed.push({ path: rel, error: `refusing to upload -- looks like it contains a ${secretMatch.patternName} (at ${secretMatch.path}). Redact it and re-run to include this file.` });
-          continue;
-        }
-
-        const documentId = documentIdFor(rel);
-        const sourcePath = source_prefix ? `${source_prefix}/${rel}` : rel;
-        try {
-          const res = await call({
-            procedure: UPLOAD_KNOWLEDGE_PROCEDURE,
-            callArgs: { document_id: documentId, source_path: sourcePath, source_type: sourceTypeFor(ext), raw_bytes: content },
-            realm: discovery.realm,
-          });
-          const payload = res.payload as { chunks?: number } | undefined;
-          ingested.push({ path: rel, document_id: documentId, chunks: payload?.chunks ?? 0 });
-        } catch (e) {
-          failed.push({ path: rel, error: describeMeshError("upload_knowledge failed", e) });
-        }
-      }
+      const { ingested, skipped, failed } = await collectDirectory(directory, relativePaths, includeExt, excludeDirs, source_prefix, discovery.realm);
 
       return jsonContent({
         realm: discovery.realm,

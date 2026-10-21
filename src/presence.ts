@@ -171,26 +171,28 @@ function result(s: PresenceState, alreadyActive: boolean, citizen: citizenship.C
   };
 }
 
+/** An already-active presence re-asserts itself: the caller's non-empty overrides win, and both taps are re-established. */
+async function reassertPresence(args: StartArgs, s: PresenceState): Promise<StartResult> {
+  s.operatorName = args.operatorName ?? s.operatorName;
+  s.sessionName = args.sessionName ?? s.sessionName;
+  s.message = args.message ?? s.message;
+  s.model = args.model ?? s.model;
+  s.connectedVia = args.connectedVia ?? s.connectedVia;
+  // Re-asserts lobby observing even after an explicit mesh_unobserve_lobby:
+  // mesh_hello again means "make sure I'm fully present".
+  await lobbyObserver.start({});
+  await deviceMembership.ensureAutoJoin({ nodeId: s.nodeId });
+  const citizen = await citizenship.start({
+    nodeId: s.nodeId,
+    displayName: citizenship.displayName(s.operatorName, s.connectedVia, realm.orgHandle(s.nodeId)),
+  });
+  return result(s, true, citizen);
+}
+
 async function doStart(args: StartArgs): Promise<StartResult> {
   explicitlyLeft = false;
 
-  if (state) {
-    const s = state;
-    s.operatorName = args.operatorName ?? s.operatorName;
-    s.sessionName = args.sessionName ?? s.sessionName;
-    s.message = args.message ?? s.message;
-    s.model = args.model ?? s.model;
-    s.connectedVia = args.connectedVia ?? s.connectedVia;
-    // Re-asserts lobby observing even after an explicit mesh_unobserve_lobby:
-    // mesh_hello again means "make sure I'm fully present".
-    await lobbyObserver.start({});
-    await deviceMembership.ensureAutoJoin({ nodeId: s.nodeId });
-    const citizen = await citizenship.start({
-      nodeId: s.nodeId,
-      displayName: citizenship.displayName(s.operatorName, s.connectedVia, realm.orgHandle(s.nodeId)),
-    });
-    return result(s, true, citizen);
-  }
+  if (state) return reassertPresence(args, state);
 
   const nodeId = await selfNodeId();
   const intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, args.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);

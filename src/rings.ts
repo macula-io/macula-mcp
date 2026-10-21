@@ -74,23 +74,48 @@ export function buildRingArgs(input: { from: string; to: string; purpose: string
   return args;
 }
 
-/** Every way a payload fails to be ring args. Empty means valid. `from` must also be the verified caller, which only the callee can check (ring_service.ts). */
-export function ringProblems(payload: unknown): string[] {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return ["not an object"];
-  const p = payload as Record<string, unknown>;
-  const problems: string[] = [];
+function isHex32(v: unknown): v is string {
+  return typeof v === "string" && HEX32.test(v);
+}
+
+function isHex64(v: unknown): v is string {
+  return typeof v === "string" && HEX64.test(v);
+}
+
+function booleanKeyProblems(p: Record<string, unknown>, problems: string[]): void {
   for (const [key, value] of Object.entries(p)) {
     if (typeof value === "boolean") problems.push(`boolean at "${key}" -- the wire has no bool type, use 0/1`);
   }
+}
+
+/** kind, ring_id, from, to: what makes a ring attributable. */
+function ringHeaderProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
   if (p.kind !== "ring") problems.push('kind must be "ring"');
-  if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id)) problems.push("ring_id must be 32 lowercase hex chars");
-  if (typeof p.from !== "string" || !HEX64.test(p.from)) problems.push("from must be a 64-hex node id");
-  if (typeof p.to !== "string" || !HEX64.test(p.to)) problems.push("to must be a 64-hex node id");
+  if (!isHex32(p.ring_id)) problems.push("ring_id must be 32 lowercase hex chars");
+  if (!isHex64(p.from)) problems.push("from must be a 64-hex node id");
+  if (!isHex64(p.to)) problems.push("to must be a 64-hex node id");
+  return problems;
+}
+
+/** purpose, room_topic, sent_at: what a ring is for and where it lands. */
+function ringBodyProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
   if (typeof p.purpose !== "string" || p.purpose.trim().length === 0 || p.purpose.length > MAX_PURPOSE_CHARS) {
     problems.push(`purpose must be a non-empty string of at most ${MAX_PURPOSE_CHARS} chars`);
   }
   if (typeof p.room_topic !== "string" || !isRoomTopic(p.room_topic)) problems.push("room_topic must be agents.room.<32 hex>");
   if (!Number.isInteger(p.sent_at) || (p.sent_at as number) < 0) problems.push("sent_at must be a non-negative integer (unix ms)");
+  return problems;
+}
+
+/** Every way a payload fails to be ring args. Empty means valid. `from` must also be the verified caller, which only the callee can check (ring_service.ts). */
+export function ringProblems(payload: unknown): string[] {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return ["not an object"];
+  const p = payload as Record<string, unknown>;
+  const problems: string[] = [];
+  booleanKeyProblems(p, problems);
+  problems.push(...ringHeaderProblems(p), ...ringBodyProblems(p));
   return problems;
 }
 
@@ -143,21 +168,32 @@ export function buildRingAnswerArgs(input: { from: string; to: string; ring_id: 
   return args;
 }
 
+/** kind, ring_id, from, to and the answer itself: what makes a ring answer attributable and decisive. */
+function ringAnswerHeaderProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  if (p.kind !== "ring_answer") problems.push('kind must be "ring_answer"');
+  if (!isHex32(p.ring_id)) problems.push("ring_id must be 32 lowercase hex chars");
+  if (!isHex64(p.from)) problems.push("from must be a 64-hex node id");
+  if (!isHex64(p.to)) problems.push("to must be a 64-hex node id");
+  if (p.answer !== 1 && p.answer !== 2) problems.push("answer must be 1 (accepted) or 2 (declined)");
+  return problems;
+}
+
+/** room_topic, reason and sent_at: where the answer applies and why. */
+function ringAnswerBodyProblems(p: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  if (typeof p.room_topic !== "string" || !isRoomTopic(p.room_topic)) problems.push("room_topic must be agents.room.<32 hex>");
+  if (p.reason !== undefined && typeof p.reason !== "string") problems.push("reason, when present, must be a string");
+  if (!Number.isInteger(p.sent_at) || (p.sent_at as number) < 0) problems.push("sent_at must be a non-negative integer (unix ms)");
+  return problems;
+}
+
 export function ringAnswerProblems(payload: unknown): string[] {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return ["not an object"];
   const p = payload as Record<string, unknown>;
   const problems: string[] = [];
-  for (const [key, value] of Object.entries(p)) {
-    if (typeof value === "boolean") problems.push(`boolean at "${key}" -- the wire has no bool type, use 0/1`);
-  }
-  if (p.kind !== "ring_answer") problems.push('kind must be "ring_answer"');
-  if (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id)) problems.push("ring_id must be 32 lowercase hex chars");
-  if (typeof p.from !== "string" || !HEX64.test(p.from)) problems.push("from must be a 64-hex node id");
-  if (typeof p.to !== "string" || !HEX64.test(p.to)) problems.push("to must be a 64-hex node id");
-  if (p.answer !== 1 && p.answer !== 2) problems.push("answer must be 1 (accepted) or 2 (declined)");
-  if (typeof p.room_topic !== "string" || !isRoomTopic(p.room_topic)) problems.push("room_topic must be agents.room.<32 hex>");
-  if (p.reason !== undefined && typeof p.reason !== "string") problems.push("reason, when present, must be a string");
-  if (!Number.isInteger(p.sent_at) || (p.sent_at as number) < 0) problems.push("sent_at must be a non-negative integer (unix ms)");
+  booleanKeyProblems(p, problems);
+  problems.push(...ringAnswerHeaderProblems(p), ...ringAnswerBodyProblems(p));
   return problems;
 }
 
@@ -200,16 +236,31 @@ export interface RingReply {
   reason?: string;
 }
 
+function isAnswer(v: unknown): v is Answer {
+  return v === 1 || v === 2 || v === 3;
+}
+
+/** ring_id is optional on a reply, but when present it must be a 32-hex message id. */
+function optionalRingId(v: unknown): boolean {
+  return v === undefined || isHex32(v);
+}
+
+/** The reply's optional string fields, copied only when they are strings. */
+function optionalStrings(p: Record<string, unknown>, keys: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of keys) {
+    const value = p[key];
+    if (typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
 export function parseRingReply(payload: unknown): RingReply | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
   const p = payload as Record<string, unknown>;
-  if (p.answer !== 1 && p.answer !== 2 && p.answer !== 3) return undefined;
-  if (p.ring_id !== undefined && (typeof p.ring_id !== "string" || !HEX32.test(p.ring_id))) return undefined;
-  const reply: RingReply = { answer: p.answer };
-  if (typeof p.ring_id === "string") reply.ring_id = p.ring_id;
-  if (typeof p.room_topic === "string") reply.room_topic = p.room_topic;
-  if (typeof p.reason === "string") reply.reason = p.reason;
-  return reply;
+  if (!isAnswer(p.answer)) return undefined;
+  if (!optionalRingId(p.ring_id)) return undefined;
+  return { answer: p.answer, ...optionalStrings(p, ["ring_id", "room_topic", "reason"]) };
 }
 
 // ---- the local record of rings

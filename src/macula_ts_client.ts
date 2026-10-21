@@ -87,6 +87,12 @@ export async function resetForTests(): Promise<void> {
   keyPromise = undefined;
 }
 
+/** A confidentiality refusal, keeping the provider's named/found keys in the message. */
+function confidentialityError(e: ConfidentialityError): MeshError {
+  const keys = e.named === null && e.found === null ? "" : `, named=${e.named ?? "none"}, found=${e.found ?? "none"}`;
+  return new MeshError(`${e.message} (reason=${e.reason}${keys})`, "confidentiality");
+}
+
 /** Any error from the mesh as a MeshError, keeping a provider's or a station's code. */
 export function toMeshError(e: unknown): MeshError {
   if (e instanceof MeshError) return e;
@@ -94,10 +100,7 @@ export function toMeshError(e: unknown): MeshError {
   if (e instanceof RelayError) return new MeshError(e.message, e.code, "station");
   if (e instanceof NotSharedError) return new MeshError(e.message, "not_shared");
   if (e instanceof ContentUnavailableError) return new MeshError(e.message, "unavailable");
-  if (e instanceof ConfidentialityError) {
-    const keys = e.named === null && e.found === null ? "" : `, named=${e.named ?? "none"}, found=${e.found ?? "none"}`;
-    return new MeshError(`${e.message} (reason=${e.reason}${keys})`, "confidentiality");
-  }
+  if (e instanceof ConfidentialityError) return confidentialityError(e);
   if (e instanceof MaculaError) return new MeshError(e.message, e.kind);
   return new MeshError(messageOf(e));
 }

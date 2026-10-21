@@ -113,9 +113,15 @@ function emit(json: boolean, ev: SessionEvent): void {
     console.log(JSON.stringify(ev));
     return;
   }
+  emitHuman(ev);
+}
+
+/** The human-readable form of one session event. */
+function emitHuman(ev: SessionEvent): void {
+  const actor = ev.handle ?? ev.org_identity;
   switch (ev.event) {
     case "already_joined":
-      console.log(`already joined ${ev.realm} as ${ev.handle ?? ev.org_identity} (joined ${ev.joined_at})`);
+      console.log(`already joined ${ev.realm} as ${actor} (joined ${ev.joined_at})`);
       break;
     case "session":
       console.log(`\nJoin ${ev.realm}: show this link or QR to the person confirming --\n`);
@@ -124,7 +130,7 @@ function emit(json: boolean, ev: SessionEvent): void {
       console.log(`Waiting for confirmation (session expires ${ev.expires_at})...`);
       break;
     case "confirmed":
-      console.log(`\njoined ${ev.realm} as ${ev.handle ?? ev.org_identity}`);
+      console.log(`\njoined ${ev.realm} as ${actor}`);
       break;
     case "expired":
       console.log(`\nsession for ${ev.realm} expired before it was confirmed -- run this again for a fresh link`);
@@ -150,66 +156,68 @@ function membershipEvent(realmName: string, cred: RealmCredential): SessionEvent
   };
 }
 
-async function main(): Promise<void> {
-  const argv = process.argv.slice(2);
+interface JoinRun {
+  json: boolean;
+  realmName: string;
+  waitSeconds?: number;
+}
+
+/** What this command defers waiting for, when anything. */
+type JoinDeadline = number | undefined;
+
+type CreatedSession = Awaited<ReturnType<typeof createSession>>;
+
+/** Parses and validates the invocation, printing usage or an error when it cannot be run. Undefined means it cannot. */
+function joinRun(argv: string[]): JoinRun | undefined {
   const args = parseArgs(argv);
   if (args.help || !args.subcommand) {
     help();
     process.exitCode = args.help ? 0 : 2;
-    return;
+    return undefined;
   }
   if (args.subcommand !== "join") {
     console.error(`macula-mcp-realm: unknown subcommand %q (want "join")`.replace("%q", `"${args.subcommand}"`));
     process.exitCode = 2;
-    return;
+    return undefined;
   }
   if (!args.realmName) {
     console.error("macula-mcp-realm join: a realm name is required, e.g. macula-mcp-realm join io.macula");
     process.exitCode = 2;
-    return;
+    return undefined;
   }
+  return { json: args.json, realmName: args.realmName, waitSeconds: args.waitSeconds };
+}
 
-  const parsed = parseRealmName(args.realmName);
-  if (!parsed.ok) {
-    emit(args.json, { event: "error", realm: args.realmName, message: parsed.reason });
-    process.exitCode = 2;
-    return;
-  }
-  const { canonical } = parsed;
-
-  const nodeId = await selfNodeId();
-
-  const already = loadCredential(nodeId, canonical);
-  if (already) {
-    emit(args.json, { ...membershipEvent(canonical, already), event: "already_joined" });
-    return;
-  }
-
-  const baseURL = realmBaseURL(canonical);
-  let created;
+/** Opens the join session, or reports why it could not. */
+async function createJoinSession(
+  canonical: string,
+  nodeId: string,
+  baseURL: string,
+  json: boolean,
+): Promise<CreatedSession | undefined> {
   try {
     // A realm proof v2 for the realm being joined, over the body as sent.
     const body = joinRequest({ nodeId, publicKey: await carriedPublicKey(), connectedVia: "macula-mcp-realm CLI" });
-    created = await createSession(await signedJoinRequest(body, canonical), fetch, baseURL);
+    return await createSession(await signedJoinRequest(body, canonical), fetch, baseURL);
   } catch (e) {
-    emit(args.json, { event: "error", realm: canonical, message: e instanceof Error ? e.message : String(e) });
+    emit(json, { event: "error", realm: canonical, message: e instanceof Error ? e.message : String(e) });
     process.exitCode = 1;
-    return;
+    return undefined;
   }
+}
 
-  emit(args.json, {
-    event: "session",
-    realm: canonical,
-    join_url: created.join_url,
-    expires_at: created.expires_at,
-    qr_terminal: await qrTerminal(created.join_url),
-    ...(args.json ? { qr_png_base64: await qrPngBase64(created.join_url) } : {}),
-  });
-
-  const deadline = args.waitSeconds !== undefined ? Date.now() + args.waitSeconds * 1000 : undefined;
+/** Blocks until the person on the other end confirms, the session expires, or our own deadline passes. */
+async function waitForConfirmation(
+  run: JoinRun,
+  canonical: string,
+  created: CreatedSession,
+  nodeId: string,
+  baseURL: string,
+  deadline: JoinDeadline,
+): Promise<void> {
   for (;;) {
     if (deadline !== undefined && Date.now() >= deadline) {
-      emit(args.json, { event: "timeout", realm: canonical, waited_seconds: args.waitSeconds });
+      emit(run.json, { event: "timeout", realm: canonical, waited_seconds: run.waitSeconds });
       process.exitCode = 1;
       return;
     }
@@ -228,22 +236,62 @@ async function main(): Promise<void> {
         tier: "citizen",
       };
       storeCredential(cred, canonical);
-      emit(args.json, membershipEvent(canonical, cred));
+      emit(run.json, membershipEvent(canonical, cred));
       return;
     }
     if (outcome.status === "expired") {
-      emit(args.json, { event: "expired", realm: canonical });
+      emit(run.json, { event: "expired", realm: canonical });
       process.exitCode = 1;
       return;
     }
     if (outcome.status === "error") {
-      emit(args.json, { event: "error", realm: canonical, message: outcome.message });
+      emit(run.json, { event: "error", realm: canonical, message: outcome.message });
       process.exitCode = 1;
       return;
     }
     // pending -- wait and poll again.
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
+}
+
+async function joinRealm(run: JoinRun): Promise<void> {
+  const parsed = parseRealmName(run.realmName);
+  if (!parsed.ok) {
+    emit(run.json, { event: "error", realm: run.realmName, message: parsed.reason });
+    process.exitCode = 2;
+    return;
+  }
+  const { canonical } = parsed;
+
+  const nodeId = await selfNodeId();
+
+  const already = loadCredential(nodeId, canonical);
+  if (already) {
+    emit(run.json, { ...membershipEvent(canonical, already), event: "already_joined" });
+    return;
+  }
+
+  const baseURL = realmBaseURL(canonical);
+  const created = await createJoinSession(canonical, nodeId, baseURL, run.json);
+  if (created === undefined) return;
+
+  emit(run.json, {
+    event: "session",
+    realm: canonical,
+    join_url: created.join_url,
+    expires_at: created.expires_at,
+    qr_terminal: await qrTerminal(created.join_url),
+    ...(run.json ? { qr_png_base64: await qrPngBase64(created.join_url) } : {}),
+  });
+
+  const deadline = run.waitSeconds !== undefined ? Date.now() + run.waitSeconds * 1000 : undefined;
+  await waitForConfirmation(run, canonical, created, nodeId, baseURL, deadline);
+}
+
+async function main(): Promise<void> {
+  const run = joinRun(process.argv.slice(2));
+  if (!run) return;
+  await joinRealm(run);
 }
 
 // Guarded so this file can be imported (realm_bin.test.ts imports

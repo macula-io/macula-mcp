@@ -236,23 +236,39 @@ export type SessionStatus =
   | { status: "expired" }
   | { status: "error"; message: string };
 
+function stringOrUndefined(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+/** A reply that says the join session is gone. */
+function isExpiredReply(httpStatus: number, b: Record<string, unknown>): boolean {
+  return httpStatus === 410 || b.error === "session_expired";
+}
+
+/** A 200 carrying everything a confirmed membership needs. */
+function isConfirmedBody(b: Record<string, unknown>): boolean {
+  return b.status === "confirmed" && typeof b.org_identity === "string" && typeof b.refresh_token === "string";
+}
+
+function confirmedStatus(b: Record<string, unknown>): SessionStatus {
+  return {
+    status: "confirmed",
+    refresh_token: b.refresh_token as string,
+    org_identity: b.org_identity as string,
+    cert_pem: stringOrUndefined(b.cert_pem),
+    oauth_account: stringOrUndefined(b.oauth_account),
+    oauth_provider: stringOrUndefined(b.oauth_provider),
+    citizen_did: stringOrUndefined(b.citizen_did),
+    ucan: stringOrUndefined(b.ucan),
+  };
+}
+
 /** Shape a poll reply. Pure. */
 export function parseSessionStatus(httpStatus: number, body: unknown): SessionStatus {
   const b = (body ?? {}) as Record<string, unknown>;
-  if (httpStatus === 410 || b.error === "session_expired") return { status: "expired" };
+  if (isExpiredReply(httpStatus, b)) return { status: "expired" };
   if (httpStatus === 200 && b.status === "pending") return { status: "pending", expires_at: String(b.expires_at ?? "") };
-  if (httpStatus === 200 && b.status === "confirmed" && typeof b.org_identity === "string" && typeof b.refresh_token === "string") {
-    return {
-      status: "confirmed",
-      refresh_token: b.refresh_token,
-      org_identity: b.org_identity,
-      cert_pem: typeof b.cert_pem === "string" ? b.cert_pem : undefined,
-      oauth_account: typeof b.oauth_account === "string" ? b.oauth_account : undefined,
-      oauth_provider: typeof b.oauth_provider === "string" ? b.oauth_provider : undefined,
-      citizen_did: typeof b.citizen_did === "string" ? b.citizen_did : undefined,
-      ucan: typeof b.ucan === "string" ? b.ucan : undefined,
-    };
-  }
+  if (httpStatus === 200 && isConfirmedBody(b)) return confirmedStatus(b);
   const detail = typeof b.error === "string" ? b.error : JSON.stringify(body);
   return { status: "error", message: `realm answered HTTP ${httpStatus}: ${detail}` };
 }
@@ -285,6 +301,14 @@ export async function pollSession(sessionId: string, fetchImpl: FetchLike = fetc
  * reads correctly on the dark backgrounds most terminals and chat clients
  * use; scanners accept the inverted case on a light one.
  */
+/** One half-block glyph: light modules are blocks, dark ones spaces (see qrTerminal's doc). */
+function halfBlockGlyph(top: boolean, bottom: boolean): string {
+  if (!top && !bottom) return "\u2588";
+  if (!top && bottom) return "\u2580";
+  if (top && !bottom) return "\u2584";
+  return " ";
+}
+
 export function qrTerminal(url: string): Promise<string> {
   const qr = QRCode.create(url, { errorCorrectionLevel: "M" });
   const size = qr.modules.size;
@@ -304,7 +328,7 @@ export function qrTerminal(url: string): Promise<string> {
       const top = dark(row, col);
       const bottom = row + 1 < height ? dark(row + 1, col) : false;
       // light = block, dark = space (see the doc comment above)
-      line += !top && !bottom ? "\u2588" : !top && bottom ? "\u2580" : top && !bottom ? "\u2584" : " ";
+      line += halfBlockGlyph(top, bottom);
     }
     lines.push(line);
   }
@@ -413,36 +437,51 @@ function expired(iso: string): boolean {
   return Number.isFinite(t) && t <= Date.now();
 }
 
+/** Records a confirmed join and clears the pending session. */
+function confirmedJoin(p: Pending, outcome: Extract<SessionStatus, { status: "confirmed" }>): void {
+  storeCredential({
+    node_id: p.node_id,
+    portal: realmUrl(),
+    org_identity: outcome.org_identity,
+    account: outcome.oauth_account,
+    cert_pem: outcome.cert_pem,
+    refresh_token: outcome.refresh_token,
+    joined_at: new Date().toISOString(),
+    citizen_did: outcome.citizen_did,
+    ucan: outcome.ucan,
+    tier: "citizen",
+  });
+  lastError = undefined;
+  clearPending();
+}
+
+/** Applies one poll reply to the pending session's state. */
+function applyPollOutcome(p: Pending, outcome: SessionStatus): void {
+  if (outcome.status === "confirmed") {
+    confirmedJoin(p, outcome);
+    return;
+  }
+  if (outcome.status === "expired") {
+    lastError = "the join session expired before it was confirmed; call mesh_join_realm again for a fresh link";
+    clearPending();
+    return;
+  }
+  if (outcome.status === "error") {
+    lastError = outcome.message;
+    return;
+  }
+  if (expired(outcome.expires_at)) {
+    lastError = "the join session expired before it was confirmed; call mesh_join_realm again for a fresh link";
+    clearPending();
+  }
+}
+
 async function pollOnce(fetchImpl: FetchLike): Promise<void> {
   if (!pending || pending.polling) return;
   const p = pending;
   p.polling = true;
   try {
-    const outcome = await pollSession(p.session_id, fetchImpl);
-    if (outcome.status === "confirmed") {
-      storeCredential({
-        node_id: p.node_id,
-        portal: realmUrl(),
-        org_identity: outcome.org_identity,
-        account: outcome.oauth_account,
-        cert_pem: outcome.cert_pem,
-        refresh_token: outcome.refresh_token,
-        joined_at: new Date().toISOString(),
-        citizen_did: outcome.citizen_did,
-        ucan: outcome.ucan,
-        tier: "citizen",
-      });
-      lastError = undefined;
-      clearPending();
-    } else if (outcome.status === "expired") {
-      lastError = "the join session expired before it was confirmed; call mesh_join_realm again for a fresh link";
-      clearPending();
-    } else if (outcome.status === "error") {
-      lastError = outcome.message;
-    } else if (expired(outcome.expires_at)) {
-      lastError = "the join session expired before it was confirmed; call mesh_join_realm again for a fresh link";
-      clearPending();
-    }
+    applyPollOutcome(p, await pollSession(p.session_id, fetchImpl));
   } catch (e) {
     lastError = e instanceof Error ? e.message : String(e);
   } finally {
