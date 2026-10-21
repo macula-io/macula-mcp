@@ -76,7 +76,7 @@ Everything runs on **one pool under one identity** (`macula_ts_client.ts`):
 - **On the wire**: QUIC with TLS 1.3 and a hybrid post-quantum key exchange
   on SecP384r1MLKEM1024 alone (ML-KEM-1024 with P-384, CNSA 2.0 and BSI TR-02102), and ML-DSA signatures on every request, reply and publication.
 
-```
+```text
 ┌───────────────┐   MCP/stdio   ┌────────────┐    QUIC, hybrid PQ kx   ┌─────────────────────┐
 │ agent harness │ ────────────▶ │ macula-mcp │ ──────────────────────▶ │ macula 12 stations  │
 └───────────────┘               └────────────┘                         └─────────────────────┘
@@ -862,7 +862,7 @@ run `register` yourself, explicitly.
 In Claude Code, this repository is also a plugin marketplace offering one
 plugin, so two commands are the whole install, with no script:
 
-```
+```text
 /plugin marketplace add macula-io/macula-mcp
 /plugin install macula-mcp@macula
 ```
