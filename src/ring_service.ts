@@ -235,7 +235,7 @@ function addresseeProblem(ring: RingArgs, caller: string, nodeId: string): strin
 }
 
 /** An outgoing ring of ours, to this peer, in this room. */
-function isOurOutgoingRing(ring: RingRecord | undefined, ans: RingAnswerArgs, nodeId: string): ring is RingRecord {
+function isOurOutgoingRing(ring: RingRecord | undefined, ans: RingAnswerArgs): ring is RingRecord {
   return ring !== undefined && ring.direction === "out" && ring.peer === ans.from && ring.room_topic === ans.room_topic;
 }
 
@@ -303,7 +303,7 @@ function handleRingAnswer(payload: unknown, nodeId: string, caller: string): Han
   if (ans.from !== caller) return { answer: ANSWER.declined, reason: "unverified: from is not the verified caller" };
   if (ans.to !== nodeId) return { answer: ANSWER.declined, reason: "wrong callee: this answer names another node id" };
   const ring = getRing(ans.ring_id, nodeId);
-  if (!isOurOutgoingRing(ring, ans, nodeId)) {
+  if (!isOurOutgoingRing(ring, ans)) {
     return { answer: ANSWER.declined, reason: "unknown ring: no outgoing ring with that id to that agent in that room" };
   }
   if (alreadyAnswered(ring)) {

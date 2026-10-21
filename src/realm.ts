@@ -293,14 +293,6 @@ export async function pollSession(sessionId: string, fetchImpl: FetchLike = fetc
   return parseSessionStatus(res.status, await res.json().catch(() => ({})));
 }
 
-/**
- * The QR as plain text: half-block glyphs, no ANSI escapes, a two-module
- * quiet zone. qrcode's own terminal renderer colours with ANSI, which an
- * MCP client that is not a terminal shows as literal escape sequences.
- * Light modules are drawn as full blocks and dark ones as spaces, which
- * reads correctly on the dark backgrounds most terminals and chat clients
- * use; scanners accept the inverted case on a light one.
- */
 /** One half-block glyph: light modules are blocks, dark ones spaces (see qrTerminal's doc). */
 function halfBlockGlyph(top: boolean, bottom: boolean): string {
   if (!top && !bottom) return "\u2588";
@@ -309,6 +301,14 @@ function halfBlockGlyph(top: boolean, bottom: boolean): string {
   return " ";
 }
 
+/**
+ * The QR as plain text: half-block glyphs, no ANSI escapes, a two-module
+ * quiet zone. qrcode's own terminal renderer colours with ANSI, which an
+ * MCP client that is not a terminal shows as literal escape sequences.
+ * Light modules are drawn as full blocks and dark ones as spaces, which
+ * reads correctly on the dark backgrounds most terminals and chat clients
+ * use; scanners accept the inverted case on a light one.
+ */
 export function qrTerminal(url: string): Promise<string> {
   const qr = QRCode.create(url, { errorCorrectionLevel: "M" });
   const size = qr.modules.size;
