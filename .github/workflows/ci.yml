@@ -88,3 +88,15 @@ jobs:
             $allErrors | ForEach-Object { Write-Error $_ }
             exit 1
           }
+
+  # A dependency with a published advisory fails the build
+  # (macula-codebase-checks#11). npm audit reads the whole lock, dev included:
+  # a build tool runs inside this release job with the repository's
+  # credentials, so a vulnerable one is a way into the artifact.
+  advisories:
+    name: Dependency advisories
+    permissions:
+      contents: read
+    uses: macula-io/macula-ci-images/.github/workflows/dependency-advisories.yml@dbc9533eb409c2118f45110613160060cc582f5d
+    with:
+      ecosystem: node
