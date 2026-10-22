@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" role="img" aria-label="macula-mcp system context">
+<title>macula-mcp system context</title>
+<style>
+.t-name { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; }
+.t-desc { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 12.5px; }
+.t-rel { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 11.5px; paint-order: stroke; stroke-width: 4px; stroke-linejoin: round; }
+.t-code { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 13px; font-weight: 600; }
+.t-type { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; }
+.t-bound { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; }
+.t-leg { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 12px; }
+.edge { fill: none; stroke-width: 1.25; }
+.edge-later { fill: none; stroke-width: 1.25; stroke-dasharray: 5 4; }
+.bg { fill: #FFFFFF; }
+.b-sys { fill: #F5E9CC; stroke: #A56F0A; stroke-width: 2; }
+.b-per { fill: #E3EBF2; stroke: #3B5B7A; stroke-width: 1.25; }
+.b-mac { fill: #E6E4EE; stroke: #5E5A78; stroke-width: 1.25; }
+.b-ext { fill: #ECEFED; stroke: #8A9791; stroke-width: 1.25; }
+.b-cmp { fill: #FFFFFF; stroke: #8A9791; stroke-width: 1.25; }
+.b-later { fill: none; stroke: #8A9791; stroke-width: 1.25; stroke-dasharray: 5 4; }
+.bound { fill: none; stroke: #B3BDB8; stroke-width: 1; }
+.head { fill: #3B5B7A; }
+.t-name, .t-code { fill: #16201D; }
+.t-type, .t-bound, .t-leg { fill: #66736E; }
+.t-desc { fill: #34413C; }
+.t-rel { fill: #66736E; stroke: #FFFFFF; }
+.edge, .edge-later { stroke: #8A9791; }
+.arrowhead { fill: #8A9791; }
+@media (prefers-color-scheme: dark) {
+.bg { fill: #171F1C; }
+.b-sys { fill: #3A2E13; stroke: #E3AA3C; }
+.b-per { fill: #1D2A36; stroke: #8EB4D8; }
+.b-mac { fill: #26243A; stroke: #A9A4C8; }
+.b-ext { fill: #1C2421; stroke: #7D8B85; }
+.b-cmp { fill: #171F1C; stroke: #7D8B85; }
+.b-later { stroke: #7D8B85; }
+.bound { stroke: #4A5752; }
+.head { fill: #8EB4D8; }
+.t-name, .t-code { fill: #E6ECE9; }
+.t-type, .t-bound, .t-leg { fill: #93A09A; }
+.t-desc { fill: #C3CDC8; }
+.t-rel { fill: #93A09A; stroke: #171F1C; }
+.edge, .edge-later { stroke: #7D8B85; }
+.arrowhead { fill: #7D8B85; }
+}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" x="0" y="0" width="1000" height="640"/>
+<rect class="b-per" x="40" y="50" width="270" height="96" rx="10"/>
+<circle class="head" cx="66" cy="74" r="9"/>
+<text class="t-name" x="84" y="78">Operator</text>
+<text class="t-type" x="84" y="96">[Person]</text>
+<text class="t-desc" x="56" y="120">Installs and registers it, sets its</text>
+<text class="t-desc" x="56" y="136">environment, confirms realm joins</text>
+<rect class="b-ext" x="365" y="50" width="270" height="96" rx="10"/>
+<text class="t-name" x="381" y="78">Agent harness</text>
+<text class="t-type" x="381" y="96">[External: MCP client]</text>
+<text class="t-desc" x="381" y="120">Claude Code, Claude Desktop, Cursor,</text>
+<text class="t-desc" x="381" y="136">Windsurf, opencode, Goose, any other</text>
+<rect class="b-mac" x="690" y="50" width="270" height="96" rx="10"/>
+<text class="t-name" x="706" y="78">macula-realm</text>
+<text class="t-type" x="706" y="96">[Macula infrastructure]</text>
+<text class="t-desc" x="706" y="120">realm.macula.io: join sessions,</text>
+<text class="t-desc" x="706" y="136">membership UCANs, the realm key</text>
+<rect class="b-sys" x="365" y="210" width="270" height="120" rx="10"/>
+<text class="t-name" x="381" y="238">macula-mcp</text>
+<text class="t-type" x="381" y="256">[npm @macula-io/mcp, Node 24]</text>
+<text class="t-desc" x="381" y="280">MCP server over stdio: one identity</text>
+<text class="t-desc" x="381" y="296">key, one pool to the mesh, tools</text>
+<text class="t-desc" x="381" y="312">for calls, rooms, rings, memory</text>
+<rect class="b-ext" x="40" y="430" width="270" height="120" rx="10"/>
+<text class="t-name" x="56" y="458">Other agents</text>
+<text class="t-type" x="56" y="476">[External: mesh peers]</text>
+<text class="t-desc" x="56" y="500">Other macula-mcp or lazymesh agents:</text>
+<text class="t-desc" x="56" y="516">hellos, room envelopes, rings to</text>
+<text class="t-desc" x="56" y="532">~&lt;node_id&gt;/ring</text>
+<rect class="b-mac" x="365" y="430" width="270" height="120" rx="10"/>
+<text class="t-name" x="381" y="458">Macula stations, DHT</text>
+<text class="t-type" x="381" y="476">[Macula infrastructure]</text>
+<text class="t-desc" x="381" y="500">The pool's pinned stations (six fleet</text>
+<text class="t-desc" x="381" y="516">stations by default); the DHT holds</text>
+<text class="t-desc" x="381" y="532">signed advertisements and records</text>
+<rect class="b-mac" x="690" y="430" width="270" height="120" rx="10"/>
+<text class="t-name" x="706" y="458">Macula mesh services</text>
+<text class="t-type" x="706" y="476">[Macula services, io.macula realm]</text>
+<text class="t-desc" x="706" y="500">mcl-rag (memory, role prompts),</text>
+<text class="t-desc" x="706" y="516">mcl-citizens, mcl-stations, mcl-echo;</text>
+<text class="t-desc" x="706" y="532">any advertised procedure</text>
+<path class="edge" d="M310 98H365" marker-end="url(#a)"/>
+<text class="t-rel" x="337" y="90" text-anchor="middle">uses</text>
+<path class="edge" d="M175 50V24H825V50" marker-end="url(#a)"/>
+<text class="t-rel" x="500" y="18" text-anchor="middle">confirms a join in the browser (Hanko sign-in)</text>
+<path class="edge" d="M175 146V270H365" marker-end="url(#a)"/>
+<text class="t-rel" x="183" y="200">registers it in client</text>
+<text class="t-rel" x="183" y="216">configs; sets env</text>
+<path class="edge" d="M500 146V210" marker-end="url(#a)"/>
+<text class="t-rel" x="508" y="176">MCP over stdio:</text>
+<text class="t-rel" x="508" y="192">tools, resources, prompts</text>
+<path class="edge" d="M635 250H825V146" marker-end="url(#a)"/>
+<text class="t-rel" x="833" y="178">HTTPS join session</text>
+<text class="t-rel" x="833" y="194">(realm proof v2);</text>
+<text class="t-rel" x="833" y="210">membership UCAN</text>
+<text class="t-rel" x="833" y="226">over the mesh</text>
+<path class="edge" d="M500 330V430" marker-end="url(#a)"/>
+<text class="t-rel" x="508" y="366">QUIC, hybrid PQ key exchange;</text>
+<text class="t-rel" x="508" y="382">signed calls, publications,</text>
+<text class="t-rel" x="508" y="398">DHT reads, served procedures</text>
+<path class="edge" d="M635 300H825V430" marker-end="url(#a)"/>
+<text class="t-rel" x="833" y="374">calls by direct dial</text>
+<path class="edge" d="M310 490H365" marker-end="url(#a)"/>
+<text class="t-rel" x="337" y="482" text-anchor="middle">rooms,</text>
+<text class="t-rel" x="337" y="510" text-anchor="middle">rings</text>
+<path class="edge" d="M690 490H635" marker-end="url(#a)"/>
+<text class="t-rel" x="662" y="482" text-anchor="middle">serve</text>
+<text class="t-rel" x="662" y="510" text-anchor="middle">through</text>
+<rect class="b-sys" x="24" y="600" width="22" height="14" rx="3"/>
+<text class="t-leg" x="54" y="612">In scope</text>
+<rect class="b-per" x="110.8" y="600" width="22" height="14" rx="3"/>
+<text class="t-leg" x="140.8" y="612">Person</text>
+<rect class="b-mac" x="184.39999999999998" y="600" width="22" height="14" rx="3"/>
+<text class="t-leg" x="214.39999999999998" y="612">Macula infrastructure</text>
+<rect class="b-ext" x="357.0" y="600" width="22" height="14" rx="3"/>
+<text class="t-leg" x="387.0" y="612">External system</text>
+<rect class="b-cmp" x="490.0" y="600" width="22" height="14" rx="3"/>
+<text class="t-leg" x="520.0" y="612">Container or component</text>
+<rect class="b-later" x="669.2" y="600" width="22" height="14" rx="3"/>
+<text class="t-leg" x="699.2" y="612">Planned, not built</text>
+</svg>

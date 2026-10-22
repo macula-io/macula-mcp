@@ -958,6 +958,12 @@ writes: those happen for real on the mesh, they're just not recorded here.
 
 See [CHANGELOG](CHANGELOG.md) for the full version history.
 
+## Architecture
+
+What macula-mcp talks to and what it is made of, as a C4 model: [architecture/README.md](architecture/README.md).
+
+![macula-mcp system context](assets/c4-context.svg)
+
 ## Documentation
 
 | Guide                           | Description                                                                                                                                              |

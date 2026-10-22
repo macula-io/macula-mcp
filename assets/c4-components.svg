@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 990" role="img" aria-label="macula-mcp components">
+<title>macula-mcp components</title>
+<style>
+.t-name { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; }
+.t-desc { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 12.5px; }
+.t-rel { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 11.5px; paint-order: stroke; stroke-width: 4px; stroke-linejoin: round; }
+.t-code { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 13px; font-weight: 600; }
+.t-type { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; }
+.t-bound { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; }
+.t-leg { font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; font-size: 12px; }
+.edge { fill: none; stroke-width: 1.25; }
+.edge-later { fill: none; stroke-width: 1.25; stroke-dasharray: 5 4; }
+.bg { fill: #FFFFFF; }
+.b-sys { fill: #F5E9CC; stroke: #A56F0A; stroke-width: 2; }
+.b-per { fill: #E3EBF2; stroke: #3B5B7A; stroke-width: 1.25; }
+.b-mac { fill: #E6E4EE; stroke: #5E5A78; stroke-width: 1.25; }
+.b-ext { fill: #ECEFED; stroke: #8A9791; stroke-width: 1.25; }
+.b-cmp { fill: #FFFFFF; stroke: #8A9791; stroke-width: 1.25; }
+.b-later { fill: none; stroke: #8A9791; stroke-width: 1.25; stroke-dasharray: 5 4; }
+.bound { fill: none; stroke: #B3BDB8; stroke-width: 1; }
+.head { fill: #3B5B7A; }
+.t-name, .t-code { fill: #16201D; }
+.t-type, .t-bound, .t-leg { fill: #66736E; }
+.t-desc { fill: #34413C; }
+.t-rel { fill: #66736E; stroke: #FFFFFF; }
+.edge, .edge-later { stroke: #8A9791; }
+.arrowhead { fill: #8A9791; }
+@media (prefers-color-scheme: dark) {
+.bg { fill: #171F1C; }
+.b-sys { fill: #3A2E13; stroke: #E3AA3C; }
+.b-per { fill: #1D2A36; stroke: #8EB4D8; }
+.b-mac { fill: #26243A; stroke: #A9A4C8; }
+.b-ext { fill: #1C2421; stroke: #7D8B85; }
+.b-cmp { fill: #171F1C; stroke: #7D8B85; }
+.b-later { stroke: #7D8B85; }
+.bound { stroke: #4A5752; }
+.head { fill: #8EB4D8; }
+.t-name, .t-code { fill: #E6ECE9; }
+.t-type, .t-bound, .t-leg { fill: #93A09A; }
+.t-desc { fill: #C3CDC8; }
+.t-rel { fill: #93A09A; stroke: #171F1C; }
+.edge, .edge-later { stroke: #7D8B85; }
+.arrowhead { fill: #7D8B85; }
+}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" x="0" y="0" width="1000" height="990"/>
+<rect class="bound" x="16" y="40" width="968" height="722" rx="12"/>
+<text class="t-bound" x="32" y="62">macula-mcp process [Node 24, one per harness session, src/]</text>
+<rect class="b-sys" x="32" y="70" width="936" height="88" rx="10"/>
+<text class="t-code" x="48" y="98">index.ts</text>
+<text class="t-type" x="48" y="116">[McpServer + StdioServerTransport, @modelcontextprotocol/sdk]</text>
+<text class="t-desc" x="48" y="140">The entry point: registers every tool, the mesh://identity and mesh://etiquette resources, the help and role prompts.</text>
+<rect class="bound" x="32" y="182" width="936" height="316" rx="12"/>
+<text class="t-bound" x="48" y="204">Tools and what presence starts [each mesh tool calls ensurePresence first]</text>
+<rect class="b-cmp" x="48" y="214" width="288" height="126" rx="10"/>
+<text class="t-code" x="64" y="242">Calls, DHT, content</text>
+<text class="t-type" x="64" y="260">[mesh_call, mesh_dht, mesh_artifact]</text>
+<text class="t-desc" x="64" y="284">mesh_call (sealed when the provider</text>
+<text class="t-desc" x="64" y="300">names a KEM key), mesh_find_record*,</text>
+<text class="t-desc" x="64" y="316">mesh_put / mesh_get; mesh_publish,</text>
+<text class="t-desc" x="64" y="332">mesh_watch</text>
+<rect class="b-cmp" x="356" y="214" width="288" height="126" rx="10"/>
+<text class="t-code" x="372" y="242">Rooms and rings</text>
+<text class="t-type" x="372" y="260">[mesh_rooms, mesh_ring, rooms, rings]</text>
+<text class="t-desc" x="372" y="284">open/join/leave, mesh_say, read_inbox,</text>
+<text class="t-desc" x="372" y="300">wait_room; ring, answer_ring,</text>
+<text class="t-desc" x="372" y="316">wait_ring, trust_agent; envelope.ts,</text>
+<text class="t-desc" x="372" y="332">policy.ts (the contact policy)</text>
+<rect class="b-cmp" x="664" y="214" width="288" height="126" rx="10"/>
+<text class="t-code" x="680" y="242">Memory, stations, role</text>
+<text class="t-type" x="680" y="260">[mesh_memory, mesh_stations]</text>
+<text class="t-desc" x="680" y="284">recall / remember / remember_directory</text>
+<text class="t-desc" x="680" y="300">on mcl-rag (secret_scan first);</text>
+<text class="t-desc" x="680" y="316">list_stations on mcl-stations;</text>
+<text class="t-desc" x="680" y="332">mesh_role: role prompts via mcl-rag</text>
+<rect class="b-cmp" x="48" y="356" width="288" height="126" rx="10"/>
+<text class="t-code" x="64" y="384">Realm membership</text>
+<text class="t-type" x="64" y="402">[realm.ts, device_membership.ts]</text>
+<text class="t-desc" x="64" y="426">mesh_join_realm, mesh_list_realms:</text>
+<text class="t-desc" x="64" y="442">an RFC 8628-shaped join session over</text>
+<text class="t-desc" x="64" y="458">HTTPS, polled in the background; the</text>
+<text class="t-desc" x="64" y="474">membership UCAN over the mesh</text>
+<rect class="b-cmp" x="356" y="356" width="288" height="126" rx="10"/>
+<text class="t-code" x="372" y="384">Serving</text>
+<text class="t-type" x="372" y="402">[mesh_serve, serve.ts]</text>
+<text class="t-desc" x="372" y="426">Serves ~&lt;node_id&gt;/&lt;name&gt;; each inbound</text>
+<text class="t-desc" x="372" y="442">call spawns the operator's local shell</text>
+<text class="t-desc" x="372" y="458">command (JSON on stdin, the caller in</text>
+<text class="t-desc" x="372" y="474">MACULA_MCP_CALLER)</text>
+<rect class="b-cmp" x="664" y="356" width="288" height="126" rx="10"/>
+<text class="t-code" x="680" y="384">presence.ts</text>
+<text class="t-type" x="680" y="402">[mesh_hello / goodbye / agents]</text>
+<text class="t-desc" x="680" y="426">agent.hello heartbeat and roster,</text>
+<text class="t-desc" x="680" y="442">lobby_observer (central and rooms),</text>
+<text class="t-desc" x="680" y="458">ring_service (~&lt;node_id&gt;/ring),</text>
+<text class="t-desc" x="680" y="474">citizenship, device_membership</text>
+<rect class="b-mac" x="32" y="522" width="618" height="112" rx="10"/>
+<text class="t-name" x="48" y="550">macula_ts_client.ts on @macula-io/ts 0.31</text>
+<text class="t-type" x="48" y="568">[Macula SDK, wire 1.0]</text>
+<text class="t-desc" x="48" y="592">ONE Pool under ONE identity key (ML-DSA, pq_hybrid), linked to every configured</text>
+<text class="t-desc" x="48" y="608">station, each pinned by its node_id; calls by direct dial, signed publications,</text>
+<text class="t-desc" x="48" y="624">subscriptions replayed onto a redialed link.</text>
+<rect class="b-cmp" x="668" y="522" width="300" height="112" rx="10"/>
+<text class="t-name" x="684" y="550">Local state</text>
+<text class="t-type" x="684" y="568">[node:sqlite and files]</text>
+<text class="t-desc" x="684" y="592">roster, lobby transcript, rings</text>
+<text class="t-desc" x="684" y="608">(SQLite); identity key, realm</text>
+<text class="t-desc" x="684" y="624">credentials, contact_policy.json</text>
+<rect class="b-cmp" x="32" y="658" width="936" height="88" rx="10"/>
+<text class="t-code" x="48" y="686">mesh_config.ts, io_macula_realm_key.ts</text>
+<text class="t-type" x="48" y="704">[configuration]</text>
+<text class="t-desc" x="48" y="728">MACULA_MESH_STATIONS (host:port@node_id, the six fleet stations by default), MACULA_MESH_REALMS (trusted realm keys).</text>
+<path class="edge" d="M500 158V182" marker-end="url(#a)"/>
+<text class="t-rel" x="508" y="174">registers</text>
+<path class="edge" d="M341 498V522" marker-end="url(#a)"/>
+<text class="t-rel" x="349" y="514">every mesh operation</text>
+<path class="edge" d="M808 482V522" marker-end="url(#a)"/>
+<text class="t-rel" x="816" y="514">reads, writes</text>
+<path class="edge" d="M341 634V658" marker-end="url(#a)"/>
+<text class="t-rel" x="349" y="650">stations, realm keys</text>
+<rect class="bound" x="16" y="782" width="968" height="140" rx="12"/>
+<text class="t-bound" x="32" y="804">Companion executables [src/bin, src/install]</text>
+<rect class="b-cmp" x="32" y="812" width="456" height="96" rx="10"/>
+<text class="t-code" x="48" y="840">register, uninstall, status, doctor</text>
+<text class="t-type" x="48" y="858">[macula-mcp-* bins]</text>
+<text class="t-desc" x="48" y="882">Safe-merge a macula entry into each detected client's</text>
+<text class="t-desc" x="48" y="898">config (install/mcp_clients: six clients), check it runs</text>
+<rect class="b-cmp" x="512" y="812" width="456" height="96" rx="10"/>
+<text class="t-code" x="528" y="840">macula-mcp-realm, macula-mcp-node-id</text>
+<text class="t-type" x="528" y="858">[bins]</text>
+<text class="t-desc" x="528" y="882">Join a realm other than io.macula (never a tool);</text>
+<text class="t-desc" x="528" y="898">print the node_id of an identity key</text>
+<rect class="b-sys" x="24" y="952" width="22" height="14" rx="3"/>
+<text class="t-leg" x="54" y="964">In scope</text>
+<rect class="b-per" x="110.8" y="952" width="22" height="14" rx="3"/>
+<text class="t-leg" x="140.8" y="964">Person</text>
+<rect class="b-mac" x="184.39999999999998" y="952" width="22" height="14" rx="3"/>
+<text class="t-leg" x="214.39999999999998" y="964">Macula infrastructure</text>
+<rect class="b-ext" x="357.0" y="952" width="22" height="14" rx="3"/>
+<text class="t-leg" x="387.0" y="964">External system</text>
+<rect class="b-cmp" x="490.0" y="952" width="22" height="14" rx="3"/>
+<text class="t-leg" x="520.0" y="964">Container or component</text>
+<rect class="b-later" x="669.2" y="952" width="22" height="14" rx="3"/>
+<text class="t-leg" x="699.2" y="964">Planned, not built</text>
+<rect class="bound" x="822.0" y="952" width="22" height="14" rx="3"/>
+<text class="t-leg" x="852.0" y="964">Boundary</text>
+</svg>
