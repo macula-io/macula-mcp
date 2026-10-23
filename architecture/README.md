@@ -32,7 +32,7 @@ Legend, the same in both diagrams and as in [mcl-fovea](https://github.com/macul
 | Memory, stations, role | `mesh_memory.ts`, `mesh_stations.ts`, `mesh_role.ts` | `mesh_recall`/`mesh_remember` on mcl-rag (after `secret_scan.ts`), `mesh_list_stations` on mcl-stations, role prompts from the corpus |
 | Realm membership | `realm.ts`, `device_membership.ts`, `mesh_join_realm.ts`, `mesh_list_realms.ts` | The join session over HTTPS, polled in the background; the membership UCAN over the mesh; credentials per identity and realm |
 | Serving | `mesh_serve.ts`, `mesh_unserve.ts`, `serve.ts` | Serves `~<node_id>/<name>`, each inbound call answered by the operator's local shell command |
-| `presence.ts` | Started by every mesh tool | `agent.hello` heartbeat and roster (`roster.ts`), `lobby_observer.ts`, `ring_service.ts`, `citizenship.ts` (mcl-citizens), realm auto-join |
+| `presence.ts` | Started on demand | The tools that use it call `ensurePresence` at their own entry (the serve pair, `mesh_hello`/`mesh_goodbye`, `mesh_agents`, `mesh_list_realms`, `mesh_lobby_observer` and `mesh_trust_agent` do not): `agent.hello` heartbeat and roster (`roster.ts`), `lobby_observer.ts`, `ring_service.ts`, `citizenship.ts` (mcl-citizens), realm auto-join |
 | `macula_ts_client.ts` | Macula SDK, `@macula-io/ts` 0.31 | The one Pool under the one identity key: links to every configured station, direct dial, signed publications, subscriptions replayed on redial |
 | Local state | `node:sqlite` and files | `roster.sqlite3`, `lobby-transcript.sqlite3`, `rings.sqlite3`; the identity key, realm credentials, `contact_policy.json` |
 | `mesh_config.ts`, `io_macula_realm_key.ts` | Configuration | Pinned stations and trusted realm keys |

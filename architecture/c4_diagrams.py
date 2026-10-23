@@ -151,7 +151,7 @@ def components():
     d.bound(16, 40, 968, 722, "macula-mcp process [Node 24, one per harness session, src/]")
     d.box("b-sys", 32, 70, 936, 88, "index.ts", "[McpServer + StdioServerTransport, @modelcontextprotocol/sdk]",
           ["The entry point: registers every tool, the mesh://identity and mesh://etiquette resources, the help and role prompts."], code=True)
-    d.bound(32, 182, 936, 316, "Tools and what presence starts [each mesh tool calls ensurePresence first]")
+    d.bound(32, 182, 936, 316, "Tools and what presence starts [tools that need presence call ensurePresence at their entry]")
     d.box("b-cmp", 48, 214, 288, 126, "Calls, DHT, content", "[mesh_call, mesh_dht, mesh_artifact]",
           ["mesh_call (sealed when the provider", "names a KEM key), mesh_find_record*,", "mesh_put / mesh_get; mesh_publish,", "mesh_watch"], code=True)
     d.box("b-cmp", 356, 214, 288, 126, "Rooms and rings", "[mesh_rooms, mesh_ring, rooms, rings]",
