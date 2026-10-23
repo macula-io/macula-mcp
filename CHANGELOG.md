@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.48.1] - 2026-10-23
+
 ### Fixed
 
 - `mesh_join_realm` finalizes a citizen join that the portal confirms with a membership UCAN and no
