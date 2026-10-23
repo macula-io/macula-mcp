@@ -171,6 +171,30 @@ export function storeCredentialUnlessWeaker(cred: RealmCredential, realmName: st
   return storeCredential(cred, realmName);
 }
 
+/**
+ * Stores a RENEWAL of `held`, and returns its path, or undefined when a stronger credential landed while
+ * the realm was answering.
+ *
+ * A renewal cannot be guarded on its own new token (macula-mcp#43 review): the realm sets the tier from
+ * the member's record -- realm_ucan_issuer.ex's membership_capability(member.assurance) -- so when an
+ * operator lowers a member's assurance, the device-tier token IS the truth for that membership. Treated
+ * as a downgrade it was thrown away for good: the citizen UCAN then expired while every renewal fetched a
+ * device token and discarded it, and the node lost a membership the realm still grants.
+ *
+ * What must not be overwritten is a credential that landed during THIS renewal's await and is stronger
+ * than the one it read: a person confirming a citizen membership mid-renewal. Auto-join keeps the
+ * stricter rule (storeCredentialUnlessWeaker): it joins a realm the node does not hold yet, so anything
+ * already there outranks what it is about to mint.
+ */
+export function storeRenewal(held: RealmMembership, renewed: RealmCredential): string | undefined {
+  const landed = loadCredential(renewed.node_id, held.realm);
+  if (landed !== undefined && tierRank(landed.tier) > tierRank(held.tier)) {
+    console.error(`realm: a ${landed.tier} credential for ${renewed.node_id} in ${held.realm} landed while its ${held.tier} membership renewed; kept it`);
+    return undefined;
+  }
+  return storeCredential(renewed, held.realm);
+}
+
 export interface RealmMembership extends RealmCredential {
   realm: string;
 }

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   loadCredential: vi.fn(),
   storeCredential: vi.fn(),
   storeCredentialUnlessWeaker: vi.fn(),
+  storeRenewal: vi.fn(),
   listCredentials: vi.fn(),
 }));
 vi.mock("./macula_ts_client.js", () => ({
@@ -27,6 +28,7 @@ vi.mock("./realm.js", () => ({
   loadCredential: mocks.loadCredential,
   storeCredential: mocks.storeCredential,
   storeCredentialUnlessWeaker: mocks.storeCredentialUnlessWeaker,
+  storeRenewal: mocks.storeRenewal,
   listCredentials: mocks.listCredentials,
 }));
 
@@ -235,8 +237,11 @@ describe("renewMemberships", () => {
     await renewMemberships({ nodeId: NODE });
 
     expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ procedure: "io.macula/_realm/_realm/identity/issue_membership_ucan_v1" }));
-    expect(mocks.storeCredentialUnlessWeaker).toHaveBeenCalledWith(
-      expect.objectContaining({ ucan: fresh, tier: "citizen", joined_at: "2026-10-01T00:00:00Z", cert_pem: "PEM" }), "io.macula");
+    // A renewal goes through storeRenewal, not the auto-join rule (macula-mcp#43 review): the tier the
+    // realm answers IS the membership's tier, and a strengthening that landed mid-renewal is kept there.
+    expect(mocks.storeRenewal).toHaveBeenCalledWith(
+      expect.objectContaining({ realm: "io.macula" }),
+      expect.objectContaining({ ucan: fresh, tier: "citizen", joined_at: "2026-10-01T00:00:00Z", cert_pem: "PEM" }));
   });
 
   // macula-realm#46 step 3: the realm mints for 1 hour at most, so a token is
@@ -268,6 +273,6 @@ describe("renewMemberships", () => {
     mocks.call.mockResolvedValue({ procedure: "x", payload: { error: "not_admitted: this node's membership ended" }, duration_ms: 1 });
     const { renewMemberships } = await import("./device_membership.js");
     await expect(renewMemberships({ nodeId: NODE })).resolves.toBeUndefined();
-    expect(mocks.storeCredentialUnlessWeaker).not.toHaveBeenCalled();
+    expect(mocks.storeRenewal).not.toHaveBeenCalled();
   });
 });

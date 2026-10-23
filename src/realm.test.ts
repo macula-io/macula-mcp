@@ -1,8 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { vi } from "vitest";
 
 // Boundary mock: begin() takes this node's id, its key as carried, and a
 // realm proof v2 over the request from the client layer (@macula-io/ts
@@ -248,6 +247,36 @@ describe("credential store", () => {
     expect(path).toBe(join(dir, NODE, "net.beam-campus.json"));
     expect(realm.storeCredentialUnlessWeaker(membership("citizen", "newer"), "net.beam-campus")).toBe(path);
     expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("newer");
+  });
+
+  // macula-mcp#43 review: a renewal is not an auto-join. The realm sets the tier from the member's
+  // record, so the device tier it answers on a renewal IS the truth for that membership, and guarding on
+  // the new token threw a lowered assurance away for good: the citizen UCAN expired while every renewal
+  // fetched a device token and discarded it.
+  it("stores what a renewal is answered, even a lower tier than the membership held", () => {
+    realm.storeCredential(membership("citizen", "citizen-token"), "net.beam-campus");
+    const held = realm.loadCredential(NODE, "net.beam-campus") as realm.RealmMembership;
+    const path = realm.storeRenewal({ ...held, realm: "net.beam-campus" }, membership("device", "renewed-device-token"));
+    expect(path).toBe(join(dir, NODE, "net.beam-campus.json"));
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("renewed-device-token");
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.tier).toBe("device");
+  });
+
+  it("keeps a stronger credential that landed while the renewal was waiting on the realm, and says so", () => {
+    realm.storeCredential(membership("device", "device-token"), "net.beam-campus");
+    const held = realm.loadCredential(NODE, "net.beam-campus") as realm.RealmMembership;
+    // A person confirmed a citizen membership mid-renewal.
+    realm.storeCredential(membership("citizen", "citizen-during-renewal"), "net.beam-campus");
+    const logged: string[] = [];
+    const said = vi.spyOn(console, "error").mockImplementation((line: string) => { logged.push(String(line)); });
+    try {
+      expect(realm.storeRenewal({ ...held, realm: "net.beam-campus" }, membership("device", "renewal-device-token"))).toBeUndefined();
+    } finally {
+      said.mockRestore();
+    }
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("citizen-during-renewal");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("citizen");
   });
 
   it("writes through a temp file and a rename, so a reader never sees a half-written credential", async () => {
