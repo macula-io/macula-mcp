@@ -7,6 +7,28 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.48.2] - 2026-10-23
+
+### Fixed
+
+- **A realm membership is stored under the realm it was joined in, and a renewal keeps the tier the realm
+  answers** (#43). Two failures, one cause: the auto-join stored every credential under `io.macula`
+  whatever realm it had joined, and renewal then took the realm from the file name, so a node that
+  auto-joined `net.beam-campus` renewed a realm it never joined, while the already-joined guard looked in
+  `io.macula` and joined again on every presence start. `ensureAutoJoin` now looks in and stores under the
+  realm it is joining, and the credential is written through a temp file and a rename, so a reader never
+  sees half a credential and decides the node is not a member.
+- **A renewal no longer throws away a tier the realm lowers.** The write is decided on the realm the
+  membership actually holds, comparing the file with what the renewal read: a citizen credential that
+  landed while the renewal waited on the realm is kept, everything else is stored as answered. Guarding on
+  the new token instead discarded a device-tier answer for good — the realm sets the tier from the
+  member's record, so an operator lowering a member's assurance is a real change — and the node lost a
+  membership the realm still grants.
+- **A node that already holds a misfiled `io.macula.json`** from an earlier non-default auto-join keeps
+  renewing against `io.macula`. To clear it: `rm ~/.macula-mcp/realm/<node_id>/io.macula.json` and start
+  the server again with `MACULA_MCP_AUTOJOIN_REALM` naming the realm to join, or bind the node with
+  `macula-cli person bind`.
+
 ## [0.48.1] - 2026-10-23
 
 ### Fixed
