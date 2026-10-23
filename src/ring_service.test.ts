@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { closeRings, getRing, pendingIncoming, recordRing, ringProcedure } from "./rings.js";
+import { claimDeferredRing, answerClaimedRing, ringPlaced, ringReceived, ringReply } from "./ring_dossier.js";
+import { closeRings, getRing, pendingIncoming, ringProcedure } from "./rings.js";
 import { POLICY, type ContactPolicy, type Policy } from "./policy.js";
 
 const ME = "c".repeat(64);
 const CALLER = "a".repeat(64);
 const ROOM = `agents.room.${"2".repeat(32)}`;
+
+// The ring dossier is the only writer of ring rows (macula-mcp#42): a fixture says what happened, once.
+const placed = (ring_id: string, self: string, peer: string, purpose: string, sent_at: number, room_topic = ROOM) =>
+  ringPlaced({ ring_id, self, peer, purpose, room_topic, sent_at });
+const received = (ring_id: string, self: string, peer: string, purpose: string, sent_at: number, answer: 1 | 2 | null = null, reason?: string, room_topic = ROOM) =>
+  ringReceived({ ring_id, self, peer, purpose, room_topic, sent_at, answer, reason });
 const NOW = 1_756_857_600_000;
 
 function policyOf(contact_policy: Policy, allowlist: string[] = []): ContactPolicy {
@@ -128,7 +135,7 @@ describe("handleRing: a ring", () => {
   it("declines once a caller already has MAX_PENDING_PER_PEER rings pending", async () => {
     const { handleRing, MAX_PENDING_PER_PEER } = await import("./ring_service.js");
     for (let i = 0; i < MAX_PENDING_PER_PEER; i++) {
-      recordRing({ ring_id: `${i}`.repeat(32), self: ME, direction: "in", peer: CALLER, purpose: "p", room_topic: ROOM, sent_at: NOW });
+      received(`${i}`.repeat(32), ME, CALLER, "p", NOW);
     }
     const reply = await handleRing(ringFrom(CALLER, { ring_id: "9".repeat(32) }), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.ask), now: NOW });
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringContaining("pending") });
@@ -150,7 +157,7 @@ describe("handleRing: a ring_answer to a ring this agent placed", () => {
 
   it("records the callee's answer against the outgoing deferred ring and acknowledges", async () => {
     const { handleRing } = await import("./ring_service.js");
-    recordRing({ ring_id: "e".repeat(32), self: ME, direction: "out", peer: CALLEE, purpose: "p", room_topic: ROOM, sent_at: 1, answer: 3 });
+    { placed("e".repeat(32), ME, CALLEE, "p", 1); ringReply("e".repeat(32), 3); };
     const reply = await handleRing(answerFrom(CALLEE, { answer: 2, reason: "busy today" }), { caller: CALLEE, nodeId: ME, now: NOW });
     expect(reply).toEqual({ ring_id: "e".repeat(32), received: 1 });
     expect(getRing("e".repeat(32), ME)).toMatchObject({ answer: 2, reason: "busy today" });
@@ -158,7 +165,7 @@ describe("handleRing: a ring_answer to a ring this agent placed", () => {
 
   it("keeps the first answer and says so on a repeat", async () => {
     const { handleRing } = await import("./ring_service.js");
-    recordRing({ ring_id: "e".repeat(32), self: ME, direction: "out", peer: CALLEE, purpose: "p", room_topic: ROOM, sent_at: 1, answer: 1 });
+    { placed("e".repeat(32), ME, CALLEE, "p", 1); ringReply("e".repeat(32), 1); };
     const reply = await handleRing(answerFrom(CALLEE, { answer: 2 }), { caller: CALLEE, nodeId: ME, now: NOW });
     expect(reply).toEqual({ ring_id: "e".repeat(32), received: 1, already_answered: 1 });
     expect(getRing("e".repeat(32), ME)?.answer).toBe(1);
@@ -167,7 +174,7 @@ describe("handleRing: a ring_answer to a ring this agent placed", () => {
   it("refuses an answer from anyone but the verified callee, for a ring it never placed, or for another room", async () => {
     const { handleRing } = await import("./ring_service.js");
     expect(await handleRing(answerFrom(CALLEE), { caller: CALLEE, nodeId: ME, now: NOW })).toMatchObject({ answer: 2, reason: expect.stringContaining("unknown ring") });
-    recordRing({ ring_id: "e".repeat(32), self: ME, direction: "out", peer: CALLEE, purpose: "p", room_topic: ROOM, sent_at: 1, answer: 3 });
+    { placed("e".repeat(32), ME, CALLEE, "p", 1); ringReply("e".repeat(32), 3); };
     const impostor = "f".repeat(64);
     expect(await handleRing(answerFrom(CALLEE), { caller: impostor, nodeId: ME, now: NOW })).toMatchObject({ answer: 2, reason: expect.stringContaining("not the verified caller") });
     expect(await handleRing(answerFrom(impostor), { caller: impostor, nodeId: ME, now: NOW })).toMatchObject({ answer: 2, reason: expect.stringContaining("unknown ring") });
@@ -183,7 +190,7 @@ describe("handleRing: a ring_answer to a ring this agent placed", () => {
 describe("answerPendingRing", () => {
   const THEM = "b".repeat(64);
   function pending() {
-    recordRing({ ring_id: "f".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "pair", room_topic: ROOM, sent_at: 1 });
+    received("f".repeat(32), ME, THEM, "pair", 1);
   }
 
   it("accept: joins the room first, records, then carries the ring_answer to the caller's own ~<node_id>/ring", async () => {
@@ -227,10 +234,30 @@ describe("answerPendingRing", () => {
     expect(getRing("f".repeat(32), ME)?.answer).toBe(2);
   });
 
+  // macula-mcp#42: the row was read, the room join awaited, then the answer written -- so two attempts
+  // both read "pending", both joined, and the last write decided. One answer per ring, from here on.
+  it("two attempts at one deferred ring: one answers it, the other refuses (#42)", async () => {
+    const { answerPendingRing } = await import("./ring_service.js");
+    pending();
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { ring_id: "f".repeat(32), received: 1 }, duration_ms: 1 });
+    const joinRoom = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    };
+
+    const settled = await Promise.allSettled([
+      answerPendingRing({ ring_id: "f".repeat(32), answer: 1 }, { nodeId: ME, joinRoom }),
+      answerPendingRing({ ring_id: "f".repeat(32), answer: 2 }, { nodeId: ME, joinRoom }),
+    ]);
+
+    expect(settled.filter((one) => one.status === "fulfilled")).toHaveLength(1);
+    expect(settled.filter((one) => one.status === "rejected")).toHaveLength(1);
+    expect([1, 2]).toContain(getRing("f".repeat(32), ME)?.answer);
+  });
+
   it("refuses a ring that is unknown or already answered", async () => {
     const { answerPendingRing } = await import("./ring_service.js");
     await expect(answerPendingRing({ ring_id: "f".repeat(32), answer: 1 }, { nodeId: ME })).rejects.toThrow(/no incoming ring/);
-    recordRing({ ring_id: "f".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "pair", room_topic: ROOM, sent_at: 1, answer: 1 });
+    received("f".repeat(32), ME, THEM, "pair", 1, 1);
     await expect(answerPendingRing({ ring_id: "f".repeat(32), answer: 2 }, { nodeId: ME })).rejects.toThrow(/already answered/);
   });
 });

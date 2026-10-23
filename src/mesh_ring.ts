@@ -22,7 +22,8 @@ import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { factsAfter, lastFactId } from "./lobby_transcript.js";
 import { parseEnvelope } from "./envelope.js";
-import { ANSWER, answerLabel, answerRing, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, recordRing, ringProcedure, RingError } from "./rings.js";
+import { ANSWER, answerLabel, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, ringProcedure, RingError } from "./rings.js";
+import { ringPlaced, ringReply } from "./ring_dossier.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
@@ -178,13 +179,14 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
   const roomTopic = await ringRoomTopic(args, to);
   const ring = buildRingArgs({ from: me, to, purpose: args.purpose, room_topic: roomTopic });
   const procedure = ringProcedure(to);
-  recordRing({ ...ring, self: me, direction: "out", peer: to });
+  // The dossier owns every ring row (macula-mcp#42): the caller's own row goes down before the call does.
+  ringPlaced({ ring_id: ring.ring_id, self: me, peer: to, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at });
   const cursor = lastFactId(roomTopic);
   const lostBefore = lobbyObserver.dropped(roomTopic);
 
   const delivery = await deliverRing(procedure, ring);
   if (!delivery.ok) {
-    answerRing(ring.ring_id, "out", null, delivery.reason);
+    ringReply(ring.ring_id, null, delivery.reason);
     return {
       ring_id: ring.ring_id,
       to,
@@ -197,10 +199,10 @@ export async function placeRing(args: PlaceRingArgs): Promise<PlaceRingResult> {
 
   const reply = parseRingReply(delivery.payload);
   if (!isReplyTo(reply, ring)) {
-    answerRing(ring.ring_id, "out", null, "malformed reply");
+    ringReply(ring.ring_id, null, "malformed reply");
     throw new RingError(`${procedure} answered with something that is not a reply to this ring: ${JSON.stringify(delivery.payload)}`);
   }
-  answerRing(ring.ring_id, "out", reply.answer, reply.reason);
+  ringReply(ring.ring_id, reply.answer, reply.reason);
 
   const wait = reply.answer === ANSWER.accepted ? await waitForJoinOutcome(args, roomTopic, to, cursor, lostBefore) : {};
   return answeredResult(ring, to, roomTopic, reply, wait);

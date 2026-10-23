@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ANSWER,
-  answerRing,
   buildRingAnswerArgs,
   buildRingArgs,
   closeRings,
@@ -17,7 +16,6 @@ import {
   parseRingArgs,
   parseRingReply,
   pendingIncoming,
-  recordRing,
   RingError,
   ringAnswerProblems,
   ringProblems,
@@ -25,10 +23,17 @@ import {
   RING_POLL_MS,
   waitRing,
 } from "./rings.js";
+import { answerClaimedRing, claimDeferredRing, ringPlaced, ringReceived, ringReply } from "./ring_dossier.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
 const ROOM = `agents.room.${"1".repeat(32)}`;
+
+// The ring dossier is the only writer of ring rows (macula-mcp#42): a fixture says what happened, once.
+const placed = (ring_id: string, self: string, peer: string, purpose: string, sent_at: number, room_topic = ROOM) =>
+  ringPlaced({ ring_id, self, peer, purpose, room_topic, sent_at });
+const received = (ring_id: string, self: string, peer: string, purpose: string, sent_at: number, answer: 1 | 2 | null = null, reason?: string, room_topic = ROOM) =>
+  ringReceived({ ring_id, self, peer, purpose, room_topic, sent_at, answer, reason });
 
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";
@@ -102,26 +107,26 @@ describe("parseRingReply", () => {
 
 describe("ring records", () => {
   it("records an incoming ring as pending until answered", () => {
-    recordRing({ ring_id: "1".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "p", room_topic: ROOM, sent_at: 5 });
+    received("1".repeat(32), ME, THEM, "p", 5);
     expect(pendingIncoming(ME)).toEqual([expect.objectContaining({ ring_id: "1".repeat(32), self: ME, peer: THEM, answer: null })]);
-    answerRing("1".repeat(32), "in", 1);
+    { const claim = claimDeferredRing("1".repeat(32), ME); answerClaimedRing("1".repeat(32), claim.ok === 1 ? claim.token : "", 1); };
     expect(pendingIncoming(ME)).toEqual([]);
     expect(getRing("1".repeat(32), ME)).toMatchObject({ answer: 1, answered_at: expect.any(String) });
   });
 
   it("records an outgoing ring, then its answer, or the reason it got none", () => {
-    recordRing({ ring_id: "2".repeat(32), self: ME, direction: "out", peer: THEM, purpose: "p", room_topic: ROOM, sent_at: 5 });
-    recordRing({ ring_id: "3".repeat(32), self: ME, direction: "out", peer: THEM, purpose: "q", room_topic: ROOM, sent_at: 6 });
-    answerRing("2".repeat(32), "out", 2, "closed");
-    answerRing("3".repeat(32), "out", null, "unreachable: no route");
+    placed("2".repeat(32), ME, THEM, "p", 5);
+    placed("3".repeat(32), ME, THEM, "q", 6);
+    ringReply("2".repeat(32), 2, "closed");
+    ringReply("3".repeat(32), null, "unreachable: no route");
     expect(listRings({ self: ME, direction: "out", pendingOnly: true })).toEqual([]);
     expect(getRing("2".repeat(32), ME)).toMatchObject({ answer: 2, reason: "closed" });
     expect(getRing("3".repeat(32), ME)).toMatchObject({ answer: null, reason: "unreachable: no route" });
   });
 
   it("is idempotent per ring_id and lists most recent first", () => {
-    recordRing({ ring_id: "4".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "first", room_topic: ROOM, sent_at: 1, answer: 1 });
-    recordRing({ ring_id: "4".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "dup", room_topic: ROOM, sent_at: 1 });
+    received("4".repeat(32), ME, THEM, "first", 1, 1);
+    received("4".repeat(32), ME, THEM, "dup", 1);
     expect(listRings({ self: ME })).toHaveLength(1);
     expect(getRing("4".repeat(32), ME)?.purpose).toBe("first");
   });
@@ -131,8 +136,8 @@ describe("ring records", () => {
     // are one per session" finding from the release review: a row belongs to
     // exactly the `self` it was recorded under.
     const OTHER_SELF = "c".repeat(64);
-    recordRing({ ring_id: "5".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "mine", room_topic: ROOM, sent_at: 1 });
-    recordRing({ ring_id: "6".repeat(32), self: OTHER_SELF, direction: "in", peer: THEM, purpose: "theirs", room_topic: ROOM, sent_at: 1 });
+    received("5".repeat(32), ME, THEM, "mine", 1);
+    received("6".repeat(32), OTHER_SELF, THEM, "theirs", 1);
     expect(pendingIncoming(ME)).toEqual([expect.objectContaining({ ring_id: "5".repeat(32) })]);
     expect(pendingIncoming(OTHER_SELF)).toEqual([expect.objectContaining({ ring_id: "6".repeat(32) })]);
     expect(getRing("6".repeat(32), ME)).toBeUndefined();
@@ -151,10 +156,10 @@ describe("waitRing", () => {
   it("ignores a ring recorded BEFORE the wait started, then returns the next one recorded after", async () => {
     vi.useFakeTimers();
     try {
-      recordRing({ ring_id: "1".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "already here", room_topic: ROOM, sent_at: Date.now() });
+      received("1".repeat(32), ME, THEM, "already here", Date.now());
       const pending = waitRing({ self: ME, waitSeconds: 5 });
       await vi.advanceTimersByTimeAsync(0); // let the cursor (lastRingRowid) be taken before the ring below arrives
-      recordRing({ ring_id: "2".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "the new one", room_topic: ROOM, sent_at: Date.now() });
+      received("2".repeat(32), ME, THEM, "the new one", Date.now());
       await vi.advanceTimersByTimeAsync(RING_POLL_MS);
       const res = await pending;
       expect(res.timed_out).toBe(0);
@@ -180,7 +185,7 @@ describe("waitRing", () => {
     try {
       const pending = waitRing({ self: ME, waitSeconds: 5 });
       await vi.advanceTimersByTimeAsync(0);
-      recordRing({ ring_id: "3".repeat(32), self: ME, direction: "in", peer: THEM, purpose: "auto-accepted", room_topic: ROOM, sent_at: Date.now(), answer: ANSWER.accepted });
+      received("3".repeat(32), ME, THEM, "auto-accepted", Date.now(), ANSWER.accepted);
       await vi.advanceTimersByTimeAsync(RING_POLL_MS);
       const res = await pending;
       expect(res.timed_out).toBe(0);
@@ -195,7 +200,7 @@ describe("waitRing", () => {
     try {
       const pending = waitRing({ self: ME, waitSeconds: 1 });
       await vi.advanceTimersByTimeAsync(0);
-      recordRing({ ring_id: "4".repeat(32), self: ME, direction: "out", peer: THEM, purpose: "i rang them", room_topic: ROOM, sent_at: Date.now() });
+      placed("4".repeat(32), ME, THEM, "i rang them", Date.now());
       await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
       expect(await pending).toEqual({ ring: null, timed_out: 1 });
     } finally {
@@ -208,7 +213,7 @@ describe("waitRing", () => {
     try {
       const pending = waitRing({ self: ME, waitSeconds: 1 });
       await vi.advanceTimersByTimeAsync(0);
-      recordRing({ ring_id: "5".repeat(32), self: THEM, direction: "in", peer: ME, purpose: "someone else's ring", room_topic: ROOM, sent_at: Date.now() });
+      received("5".repeat(32), THEM, ME, "someone else's ring", Date.now());
       await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
       expect(await pending).toEqual({ ring: null, timed_out: 1 });
     } finally {
@@ -229,24 +234,24 @@ describe("waitRing", () => {
 describe("same-machine caller+callee: both rows for one ring_id must coexist", () => {
   it("records the caller's OUT row and the callee's IN row for the identical ring_id without either dropping the other", () => {
     const ringId = "6".repeat(32);
-    recordRing({ ring_id: ringId, self: ME, direction: "out", peer: THEM, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
+    placed(ringId, ME, THEM, "pair up", 1);
     // The callee's write always lands SECOND in real life (it's downstream
     // of an actual network round trip) -- recorded here in that same
     // order to match, not to matter: ON CONFLICT is keyed on
     // (ring_id, direction) now, so arrival order can never cause a drop
     // regardless of which side goes first.
-    recordRing({ ring_id: ringId, self: THEM, direction: "in", peer: ME, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
+    received(ringId, THEM, ME, "pair up", 1);
 
     expect(getRing(ringId, ME)).toMatchObject({ ring_id: ringId, self: ME, direction: "out", peer: THEM });
     expect(getRing(ringId, THEM)).toMatchObject({ ring_id: ringId, self: THEM, direction: "in", peer: ME });
   });
 
-  it("answerRing scoped by direction updates only the matching row, never the other party's row for the same ring_id", () => {
+  it("a reply is scoped by direction: it updates only the matching row, never the other party's row for the same ring_id", () => {
     const ringId = "7".repeat(32);
-    recordRing({ ring_id: ringId, self: ME, direction: "out", peer: THEM, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
-    recordRing({ ring_id: ringId, self: THEM, direction: "in", peer: ME, purpose: "pair up", room_topic: ROOM, sent_at: 1 });
+    placed(ringId, ME, THEM, "pair up", 1);
+    received(ringId, THEM, ME, "pair up", 1);
 
-    answerRing(ringId, "out", ANSWER.accepted, undefined);
+    ringReply(ringId, ANSWER.accepted, undefined);
 
     expect(getRing(ringId, ME)).toMatchObject({ direction: "out", answer: ANSWER.accepted });
     expect(getRing(ringId, THEM)).toMatchObject({ direction: "in", answer: null }); // untouched, not silently overwritten
@@ -293,8 +298,8 @@ describe("schema migration: existing on-disk rings.sqlite3 from before the compo
       // row (the shape a same-machine caller+callee pair produces) no
       // longer collides.
       const newRingId = "9".repeat(32);
-      recordRing({ ring_id: newRingId, self: ME, direction: "out", peer: THEM, purpose: "after migration", room_topic: ROOM, sent_at: 2 });
-      recordRing({ ring_id: newRingId, self: THEM, direction: "in", peer: ME, purpose: "after migration", room_topic: ROOM, sent_at: 2 });
+      placed(newRingId, ME, THEM, "after migration", 2);
+      received(newRingId, THEM, ME, "after migration", 2);
       expect(getRing(newRingId, ME)).toMatchObject({ direction: "out" });
       expect(getRing(newRingId, THEM)).toMatchObject({ direction: "in" });
     } finally {
