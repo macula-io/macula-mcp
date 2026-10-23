@@ -52,7 +52,7 @@
 <text class="t-type" x="48" y="116">[McpServer + StdioServerTransport, @modelcontextprotocol/sdk]</text>
 <text class="t-desc" x="48" y="140">The entry point: registers every tool, the mesh://identity and mesh://etiquette resources, the help and role prompts.</text>
 <rect class="bound" x="32" y="182" width="936" height="316" rx="12"/>
-<text class="t-bound" x="48" y="204">Tools and what presence starts [each mesh tool calls ensurePresence first]</text>
+<text class="t-bound" x="48" y="204">Tools and what presence starts [tools that need presence call ensurePresence at their entry]</text>
 <rect class="b-cmp" x="48" y="214" width="288" height="126" rx="10"/>
 <text class="t-code" x="64" y="242">Calls, DHT, content</text>
 <text class="t-type" x="64" y="260">[mesh_call, mesh_dht, mesh_artifact]</text>
