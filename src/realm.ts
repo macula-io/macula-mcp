@@ -42,6 +42,8 @@ import QRCode from "qrcode";
 import type { JsonValue } from "@macula-io/ts";
 import { carriedPublicKey, JOIN_SESSION_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
 import { realmIdOf } from "./mesh_config.js";
+import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
+import { ringsDb } from "./rings.js";
 import { serverVersion } from "./version.js";
 
 export const DEFAULT_REALM_URL = "https://realm.macula.io";
@@ -124,6 +126,33 @@ export function loadCredential(nodeId: string, realmName: string = DEFAULT_REALM
 }
 
 /**
+ * Whether writing this credential establishes a membership: none was stored, or a different person or a
+ * stronger tier replaces what was. A renewal rewrites the same membership with a fresh UCAN every ten
+ * minutes (device_membership.ts) and is not a join.
+ */
+function isNewMembership(before: RealmCredential | undefined, cred: RealmCredential): boolean {
+  return before === undefined || before.org_identity !== cred.org_identity || before.tier !== cred.tier;
+}
+
+/**
+ * Records a membership the realm confirmed in this node's event log (macula-mcp#42), so an agent learns
+ * about the join in order with everything else that happened to it, instead of finding a file on disk.
+ * Called from storeCredential, the one place a membership is written: the server's own join flow, the
+ * silent device join, and macula-mcp-realm in a second process all land here.
+ *
+ * Best effort, deliberately: the credential file is the membership and this entry is the notification, and
+ * a machine whose log file cannot be opened (full disk, read-only home) must still finish a join the realm
+ * already confirmed. The failure is reported, never swallowed.
+ */
+function recordJoinConfirmed(cred: RealmCredential, realmName: string): void {
+  try {
+    appendNodeEvent(ringsDb(), { self: cred.node_id, kind: NODE_EVENT.joinConfirmed, realm: realmName, org_identity: cred.org_identity, tier: cred.tier });
+  } catch (e) {
+    console.error(`node event log: join_confirmed for ${realmName} was not recorded: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
  * Writes the credential 0600 in a 0700 directory and returns its path.
  *
  * Through a temp file and a rename in the same directory (macula-mcp#43): a
@@ -132,8 +161,12 @@ export function loadCredential(nodeId: string, realmName: string = DEFAULT_REALM
  * unparsable file as "not joined", so a truncated one used to look like a
  * membership this node does not have -- and started an auto-join over one it
  * does.
+ *
+ * A credential that establishes a membership is also appended to this node's event log, after the file
+ * lands (recordJoinConfirmed) -- the membership is never announced before it exists.
  */
 export function storeCredential(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string {
+  const before = loadCredential(cred.node_id, realmName);
   mkdirSync(join(realmDir(), cred.node_id), { recursive: true, mode: 0o700 });
   const path = credentialPath(cred.node_id, realmName);
   const tmp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
@@ -149,6 +182,7 @@ export function storeCredential(cred: RealmCredential, realmName: string = DEFAU
     }
     throw e;
   }
+  if (isNewMembership(before, cred)) recordJoinConfirmed(cred, realmName);
   return path;
 }
 

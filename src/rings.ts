@@ -22,6 +22,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { isRoomTopic } from "./envelope.js";
+import { ensureNodeEventsTable, firstRingReceivedAfter, lastNodeEventSeq, type NodeEvent } from "./node_events.js";
 
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -301,6 +302,9 @@ function open(): DatabaseSync {
   if (!columns.has("claimed_at")) db.exec("ALTER TABLE rings ADD COLUMN claimed_at TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS rings_direction_idx ON rings (direction, recorded_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS rings_self_idx ON rings (self, direction)`);
+  // The node event log (macula-mcp#42, node_events.ts) shares this file on purpose: an entry is appended in
+  // the same transaction as the ring row it describes, which two files could not give.
+  ensureNodeEventsTable(db);
   return db;
 }
 
@@ -410,57 +414,47 @@ export function getRing(ringId: string, self: string): RingRecord | undefined {
   return open().prepare("SELECT * FROM rings WHERE ring_id = ? AND self = ?").get(ringId, self.toLowerCase()) as RingRecord | undefined;
 }
 
-/**
- * Highest SQLite rowid among `self`'s own rows right now -- waitRing's own
- * "afterId" cursor, the same shape lobby_transcript.ts's lastFactId()/
- * factsAfter() give rooms.ts's waitRoom/waitForReply. No schema change
- * needed for this: ring_id is TEXT PRIMARY KEY, not INTEGER, so SQLite
- * still maintains an implicit, monotonically-increasing rowid alongside
- * it (rows are never deleted here, so it never gets reused). 0 for a
- * self with no rows yet, so "wait for the next one" means exactly that,
- * not "the first one ever."
- */
-function lastRingRowid(self: string): number {
-  const row = open().prepare("SELECT MAX(rowid) AS id FROM rings WHERE self = ?").get(self.toLowerCase()) as { id: number | null };
-  return row.id ?? 0;
-}
-
-/** How often waitRing polls while blocked -- same cadence and reasoning as rooms.ts's own REPLY_POLL_MS (cheap local reads already fed by the background tap; here, by handleRing's own recordRing() call on every real inbound ring, active whenever ring serving is, independent of whether anything is waiting). Not imported from rooms.ts: same value, deliberately duplicated rather than coupling two otherwise-independent modules over one shared constant -- matches how ring_service.ts's own RENEW_RETRY_BASE_MS and presence.ts's reconnect backoff are documented as parallel, not shared via import. */
+/** How often waitRing polls while blocked -- same cadence and reasoning as rooms.ts's own REPLY_POLL_MS (cheap local reads already fed by the background tap; here, by handleRing's own append to the node event log on every real inbound ring, active whenever ring serving is, independent of whether anything is waiting). Not imported from rooms.ts: same value, deliberately duplicated rather than coupling two otherwise-independent modules over one shared constant -- matches how ring_service.ts's own RENEW_RETRY_BASE_MS and presence.ts's reconnect backoff are documented as parallel, not shared via import. */
 export const RING_POLL_MS = 250;
 
 export interface WaitRingResult {
   ring: RingRecord | null;
+  /** The log entry the ring was read from. Its seq is the cursor for whatever happens to that ring next. */
+  event?: NodeEvent;
+  /** The cursor to pass as after_seq next time: the entry's own seq, or after_seq again on a timeout. */
+  next_after_seq: number;
   timed_out: 0 | 1;
 }
 
 /**
- * Blocks up to waitSeconds for the next INCOMING ring recorded for
- * `self` -- mirrors rooms.ts's waitRoom/waitForReply (poll the local
- * store already being kept current in the background, not a fresh mesh
- * round trip per poll), but simpler: rooms.ts's waitForReply has to keep
- * advancing its cursor across several new facts hunting for one that
- * matches (attested, not from me) because a room mixes everyone's
- * messages together. Every row this query can see is already scoped to
- * `direction = 'in'` for `self` -- there is no "whose message is this"
- * filtering left to do, so the first new row past the cursor is
- * unconditionally the answer; no need to re-check or advance mid-loop.
+ * Blocks up to waitSeconds for the next INCOMING ring recorded for `self`,
+ * read off the node event log (node_events.ts) rather than polling the
+ * `rings` table -- mirrors rooms.ts's waitRoom/waitForReply (poll the local
+ * store already being kept current in the background, not a fresh mesh round
+ * trip per poll), but simpler: rooms.ts's waitForReply has to keep advancing
+ * its cursor across several new facts hunting for one that matches
+ * (attested, not from me) because a room mixes everyone's messages together.
+ * Every `ring_received` entry is already this node's own, so the first one
+ * past the cursor is unconditionally the answer; no need to re-check or
+ * advance mid-loop.
+ *
  * Covers every incoming ring, not only ones still pending an answer
  * (open/closed/allowlist policies record theirs already-answered) --
  * matching waitRoom's own "any new envelope from someone else," not a
- * narrower "only ones awaiting your model." Never throws; returns
+ * narrower "only ones awaiting your model." Without `afterSeq` the cursor
+ * starts at the log's newest entry, so "wait for the next one" means exactly
+ * that, never "replay the first one ever". Never throws; returns
  * `timed_out: 1` on a plain timeout, the same as waitRoom.
  */
-export async function waitRing(args: { self: string; waitSeconds: number }): Promise<WaitRingResult> {
-  const after = lastRingRowid(args.self);
+export async function waitRing(args: { self: string; waitSeconds: number; afterSeq?: number }): Promise<WaitRingResult> {
+  const after = args.afterSeq ?? lastNodeEventSeq(open(), args.self);
   const deadline = Date.now() + args.waitSeconds * 1000;
   while (Date.now() < deadline) {
-    const ring = open()
-      .prepare("SELECT * FROM rings WHERE self = ? AND direction = 'in' AND rowid > ? ORDER BY rowid ASC LIMIT 1")
-      .get(args.self.toLowerCase(), after) as RingRecord | undefined;
-    if (ring) return { ring, timed_out: 0 };
+    const event = firstRingReceivedAfter(open(), args.self, after);
+    if (event) return { ring: (event.ring_id === null ? undefined : getRing(event.ring_id, args.self)) ?? null, event, next_after_seq: event.seq, timed_out: 0 };
     await new Promise((resolve) => setTimeout(resolve, RING_POLL_MS));
   }
-  return { ring: null, timed_out: 1 };
+  return { ring: null, next_after_seq: after, timed_out: 1 };
 }
 
 /** Most recent first, always scoped to `self`. pendingOnly narrows to rings with no answer yet; answer narrows to one answer (e.g. 3 for outgoing rings still awaiting the callee's model). */

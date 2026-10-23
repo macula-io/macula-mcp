@@ -13,8 +13,12 @@
 // The one that has to happen before an await is `claimDeferredRing`: the row is marked with a token first,
 // and the answer only lands if that token is still the row's. A claim that is released (the join failed)
 // or lost (another answer landed) simply does not write.
+//
+// Each transition that changed a row also appends the node event log's entry for it (node_events.ts), in
+// this same transaction: that is what lets a client read what happened instead of diffing snapshots.
 import { randomBytes } from "node:crypto";
-import { ANSWER, ringsDb, type Answer, type RingRecord } from "./rings.js";
+import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
+import { ANSWER, ringsDb, type Answer, type Direction, type RingRecord } from "./rings.js";
 
 /** How long a claim may sit before another attempt may take it: a process killed mid-answer must not make a
  * ring unanswerable forever. */
@@ -32,6 +36,21 @@ export interface RingSeed {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+/**
+ * The node event log's `ring_answered` entry for a row that just changed, written inside the caller's own
+ * transaction and only from a transition that reported a change (macula-mcp#42: append, never derive).
+ * The row is read back for the fields the entry carries -- peer, purpose's neighbours -- from the same
+ * connection, inside that transaction, so it is the row as this transaction left it.
+ */
+function logAnswered(ringId: string, direction: Direction, answer: Answer, reason: string | null, at: string): void {
+  const row = ringsDb()
+    .prepare("SELECT self, peer, room_topic FROM rings WHERE ring_id = ? AND direction = ?")
+    .get(ringId, direction) as { self: string | null; peer: string; room_topic: string } | undefined;
+  // A row written before `self` existed cannot be attributed to a node, and the log is per node.
+  if (!row?.self) return;
+  appendNodeEvent(ringsDb(), { self: row.self, kind: NODE_EVENT.ringAnswered, at, ring_id: ringId, direction, peer: row.peer, room_topic: row.room_topic, answer, reason });
 }
 
 /** One statement in its own transaction: BEGIN IMMEDIATE so a second process waits (busy_timeout) rather
@@ -70,10 +89,14 @@ export function ringPlaced(seed: RingSeed): boolean {
  * The callee's row when a ring arrives: written with the answer the operator's policy gave on the spot
  * (accepted or declined), or with none when the ring is deferred to this agent's model. False when this
  * ring id was already received.
+ *
+ * The log entry lands in the same transaction: `ring_received`, then -- for a ring the policy settled on
+ * the spot -- `ring_answered`, which is what a client otherwise has to infer by comparing two reads.
  */
 export function ringReceived(seed: RingSeed & { answer: 1 | 2 | null; reason?: string }): boolean {
   return inTransaction(() => {
     const at = now();
+    const self = seed.self.toLowerCase();
     const res = ringsDb()
       .prepare(
         `INSERT INTO rings (ring_id, self, direction, peer, purpose, room_topic, sent_at, recorded_at, answer, reason, answered_at)
@@ -82,13 +105,27 @@ export function ringReceived(seed: RingSeed & { answer: 1 | 2 | null; reason?: s
       )
       .run({
         ...seed,
-        self: seed.self.toLowerCase(),
+        self,
         at,
         answer: seed.answer,
         reason: seed.reason ?? null,
         answered_at: seed.answer === null ? null : at,
       });
-    return Number(res.changes) > 0;
+    if (Number(res.changes) === 0) return false;
+    appendNodeEvent(ringsDb(), {
+      self,
+      kind: NODE_EVENT.ringReceived,
+      at,
+      ring_id: seed.ring_id,
+      direction: "in",
+      peer: seed.peer,
+      purpose: seed.purpose,
+      room_topic: seed.room_topic,
+      ...(seed.answer !== null ? { answer: seed.answer } : {}),
+      ...(seed.reason !== undefined ? { reason: seed.reason } : {}),
+    });
+    if (seed.answer !== null) logAnswered(seed.ring_id, "in", seed.answer, seed.reason ?? null, at);
+    return true;
   });
 }
 
@@ -113,13 +150,17 @@ export function ringReply(ringId: string, answer: Answer | null, reason?: string
   }
 
   return inTransaction(() => {
+    const at = now();
     const res = ringsDb()
       .prepare(
         `UPDATE rings SET answer = @answer, reason = @reason, answered_at = @at
          WHERE ring_id = @ring_id AND direction = 'out' AND (answer IS NULL OR answer = @deferred)`,
       )
-      .run({ ring_id: ringId, answer, reason: reason ?? null, at: now(), deferred: ANSWER.deferred });
-    return Number(res.changes) > 0;
+      .run({ ring_id: ringId, answer, reason: reason ?? null, at, deferred: ANSWER.deferred });
+    if (Number(res.changes) === 0) return false;
+    // An answer moving forward is its own entry, the deferral (3) included: null -> 3 -> 1 is two entries.
+    logAnswered(ringId, "out", answer, reason ?? null, at);
+    return true;
   });
 }
 
@@ -161,13 +202,17 @@ export function claimDeferredRing(ringId: string, self: string): Claim {
  */
 export function answerClaimedRing(ringId: string, token: string, answer: 1 | 2, reason?: string): boolean {
   return inTransaction(() => {
+    const at = now();
     const res = ringsDb()
       .prepare(
         `UPDATE rings SET answer = @answer, reason = @reason, answered_at = @at, claim = NULL, claimed_at = NULL
          WHERE ring_id = @ring_id AND direction = 'in' AND claim = @token AND answer IS NULL`,
       )
-      .run({ ring_id: ringId, token, answer, reason: reason ?? null, at: now() });
-    return Number(res.changes) > 0;
+      .run({ ring_id: ringId, token, answer, reason: reason ?? null, at });
+    if (Number(res.changes) === 0) return false;
+    // The deferred ring's answer, appended with the row it changes: a claim that lost writes neither.
+    logAnswered(ringId, "in", answer, reason ?? null, at);
+    return true;
   });
 }
 

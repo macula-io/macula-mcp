@@ -40,6 +40,7 @@ import { registerMeshAnswerRing } from "./mesh_answer_ring.js";
 import { registerMeshWaitRing } from "./mesh_wait_ring.js";
 import { registerMeshTrustAgent } from "./mesh_trust_agent.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
+import { registerMeshReadNodeEvents } from "./mesh_read_node_events.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
 import { registerMeshHello } from "./mesh_hello.js";
@@ -200,10 +201,14 @@ registerMeshRing(server);
 // ring endpoint. See ring_service.ts's answerPendingRing.
 registerMeshAnswerRing(server);
 // mesh_wait_ring: mesh_wait_room's counterpart for rings -- block on the
-// local rings table (already fed by ring_service.ts's own recordRing()
-// call on every real inbound ring) instead of polling mesh_read_inbox.
-// See rings.ts's waitRing() and mesh_wait_ring.ts's own module header.
+// node event log (node_events.ts, already appended for every real inbound
+// ring) instead of polling mesh_read_inbox. See rings.ts's waitRing() and
+// mesh_wait_ring.ts's own module header.
 registerMeshWaitRing(server);
+// mesh_read_node_events: the log itself, read with a cursor -- what
+// happened to this agent, in order, instead of diffing snapshots
+// (macula-mcp#42). See node_events.ts.
+registerMeshReadNodeEvents(server);
 // mesh_trust_agent/mesh_untrust_agent: manage this operator's own
 // contact-policy allowlist from inside a session (macula-mcp#1) -- a
 // pure local file edit, not a mesh call, so unlike everything else in

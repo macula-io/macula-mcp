@@ -158,7 +158,7 @@ describe("waitRing", () => {
     try {
       received("1".repeat(32), ME, THEM, "already here", Date.now());
       const pending = waitRing({ self: ME, waitSeconds: 5 });
-      await vi.advanceTimersByTimeAsync(0); // let the cursor (lastRingRowid) be taken before the ring below arrives
+      await vi.advanceTimersByTimeAsync(0); // let the cursor (the log's highest seq) be taken before the ring below arrives
       received("2".repeat(32), ME, THEM, "the new one", Date.now());
       await vi.advanceTimersByTimeAsync(RING_POLL_MS);
       const res = await pending;
@@ -174,7 +174,7 @@ describe("waitRing", () => {
     try {
       const pending = waitRing({ self: ME, waitSeconds: 1 });
       await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
-      expect(await pending).toEqual({ ring: null, timed_out: 1 });
+      expect(await pending).toEqual({ ring: null, next_after_seq: 0, timed_out: 1 });
     } finally {
       vi.useRealTimers();
     }
@@ -202,7 +202,7 @@ describe("waitRing", () => {
       await vi.advanceTimersByTimeAsync(0);
       placed("4".repeat(32), ME, THEM, "i rang them", Date.now());
       await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
-      expect(await pending).toEqual({ ring: null, timed_out: 1 });
+      expect(await pending).toEqual({ ring: null, next_after_seq: 0, timed_out: 1 });
     } finally {
       vi.useRealTimers();
     }
@@ -215,7 +215,7 @@ describe("waitRing", () => {
       await vi.advanceTimersByTimeAsync(0);
       received("5".repeat(32), THEM, ME, "someone else's ring", Date.now());
       await vi.advanceTimersByTimeAsync(RING_POLL_MS * 6);
-      expect(await pending).toEqual({ ring: null, timed_out: 1 });
+      expect(await pending).toEqual({ ring: null, next_after_seq: 0, timed_out: 1 });
     } finally {
       vi.useRealTimers();
     }

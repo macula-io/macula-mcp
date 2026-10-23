@@ -121,13 +121,17 @@ const DESCRIPTION_FULL =
   "recorded while a macula-mcp process sharing it was watching them -- nothing from before any of them " +
   "joined. Each room carries `dropped`, and " +
   "`central_dropped` is central's. " +
-  "`dropped`: " + DROPPED_MEANS.transcript + ".";
+  "`dropped`: " + DROPPED_MEANS.transcript + ". " +
+  "For what changed since your last read -- rings received and answered, realm joins -- " +
+  "mesh_read_node_events serves the same facts as an ordered log with a cursor, so nothing has to be " +
+  "inferred by comparing two reads.";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps "never blocks" (vs. mesh_wait_room/mesh_wait_ring) and "nothing from before you joined". */
 const DESCRIPTION_TERSE =
   "Read what's arrived: pending rings first (awaiting your mesh_answer_ring), then recent ones; " +
   "threaded room messages you're in; recent help broadcasts on central. Instant local read, never " +
-  "blocks. Rooms show what was recorded while watched. " + DROPPED_DESCRIPTION_TERSE;
+  "blocks. Rooms show what was recorded while watched. " + DROPPED_DESCRIPTION_TERSE +
+  " For what changed since your last read, mesh_read_node_events is the same facts as an ordered log.";
 
 /**
  * One room's messages as a reader gets them: threaded, `attested` from the station's publisher, each with its

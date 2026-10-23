@@ -2,16 +2,18 @@
 // polling mesh_read_inbox.
 //
 // The same shape as mesh_wait_room.ts, and reuses the identical
-// mechanism: ring_service.ts's handleRing() already calls rings.ts's
-// recordRing() on every real inbound ring -- open/closed/allowlist
-// policies record theirs already answered, "ask" records a still-pending
-// one -- the moment ring serving is active (presence.start(), the moment
-// any mesh tool call happens), independent of whether anything is
-// waiting on it. That existing write is this tool's whole "background
-// tap"; rings.ts's own waitRing() just polls the local rings table for
-// the next row past a cursor, the same shape rooms.ts's waitForReply/
-// waitRoom already use for room facts (see that module's own doc for
-// why: cheap local reads, no mesh round trip per poll).
+// mechanism: ring_dossier.ts's ringReceived() already appends a
+// ring_received entry to the node event log on every real inbound ring --
+// open/closed/allowlist policies record theirs already answered, "ask"
+// records a still-pending one -- the moment ring serving is active
+// (presence.start(), the moment any mesh tool call happens), independent of
+// whether anything is waiting on it. That existing write is this tool's
+// whole "background tap"; rings.ts's own waitRing() just polls the log
+// (node_events.ts) for the next ring_received entry past a cursor, the same
+// shape rooms.ts's waitForReply/waitRoom already use for room facts (see
+// that module's own doc for why: cheap local reads, no mesh round trip per
+// poll). The cursor is this node's log seq, the same one
+// mesh_read_node_events serves.
 //
 // What this does NOT change, same as mesh_wait_room.ts: MCP is
 // request/response, and this call still occupies this agent's own turn
@@ -28,7 +30,7 @@ import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
 import * as ringService from "./ring_service.js";
-import { waitRing } from "./rings.js";
+import { waitRing, type WaitRingResult } from "./rings.js";
 import { petname } from "./petname.js";
 import { toolDescription } from "./tool_description.js";
 
@@ -39,7 +41,10 @@ const DESCRIPTION_FULL =
   "polling mesh_read_inbox for a new one under rings.pending. Covers every incoming ring, not only " +
   "ones still awaiting your own answer: open/closed/allowlist policies resolve theirs immediately, " +
   "'ask' leaves one pending for mesh_answer_ring -- this call returns the instant any of them is " +
-  "recorded, so check the returned ring's own answer field. Reads the same background recording " +
+  "recorded, so check the returned ring's own answer field. Reads the node event log (the same one " +
+  "mesh_read_node_events serves): the returned event carries its seq, and next_after_seq is the cursor " +
+  "to continue from. Pass after_seq to continue from an earlier read; omit it to wait for the next ring " +
+  "from now. Reads the same background recording " +
   "ring serving already does on every real inbound ring (active from presence.start() onward, " +
   "independent of this call), so there is nothing new to start watching. An MCP host that backgrounds " +
   "a slow tool call and delivers the result as a notification (Claude Code does) turns this into real " +
@@ -54,8 +59,18 @@ const DESCRIPTION_FULL =
 const DESCRIPTION_TERSE =
   "Block up to wait_seconds (max 3600) for the next incoming ring -- passive counterpart to polling " +
   "mesh_read_inbox for rings.pending. Returns on ANY incoming ring, not just still-pending ones; check " +
-  "the returned ring's answer field. Still occupies your own turn for the wait (MCP has no server-push). " +
-  "Never sleep-then-poll -- one call does the same wait server-side.";
+  "the returned ring's answer field. Optional after_seq continues from a node-event-log cursor; " +
+  "next_after_seq is the one to continue from. Still occupies your own turn for the wait (MCP has no " +
+  "server-push). Never sleep-then-poll -- one call does the same wait server-side.";
+
+/** The wait's result as a reader gets it: the ring and the log entry, each with a companion petname beside the raw node id. */
+function waitView(res: WaitRingResult) {
+  return {
+    ...res,
+    ...(res.ring ? { ring: { ...res.ring, peer_petname: petname(res.ring.peer) } } : {}),
+    ...(res.event ? { event: { ...res.event, peer_petname: res.event.peer === null ? null : petname(res.event.peer) } } : {}),
+  };
+}
 
 export function registerMeshWaitRing(server: McpServer): void {
   server.registerTool(
@@ -64,9 +79,15 @@ export function registerMeshWaitRing(server: McpServer): void {
       description: toolDescription(DESCRIPTION_FULL, DESCRIPTION_TERSE),
       inputSchema: {
         wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
+        after_seq: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Continue from this node-event-log seq (a previous read's or wait's next_after_seq). Omit to wait for the next ring from now."),
       },
     },
-    async ({ wait_seconds }) => {
+    async ({ wait_seconds, after_seq }) => {
       ensurePresence(server);
       if (!ringService.isActive()) {
         const status = ringService.status();
@@ -75,8 +96,8 @@ export function registerMeshWaitRing(server: McpServer): void {
       }
       try {
         const me = presence.currentNodeId() ?? (await selfNodeId());
-        const res = await waitRing({ self: me, waitSeconds: wait_seconds });
-        return jsonContent(res.ring ? { ...res, ring: { ...res.ring, peer_petname: petname(res.ring.peer) } } : res);
+        const res = await waitRing({ self: me, waitSeconds: wait_seconds, ...(after_seq !== undefined ? { afterSeq: after_seq } : {}) });
+        return jsonContent(waitView(res));
       } catch (e) {
         return errorContent(describeMeshError("mesh_wait_ring failed", e));
       }

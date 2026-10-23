@@ -33,6 +33,8 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import * as realm from "./realm.js";
+import { readNodeEvents } from "./node_events.js";
+import { closeRings, ringsDb } from "./rings.js";
 
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
 let dir = "";
@@ -41,13 +43,18 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "macula-mcp-realm-test-"));
   process.env.MACULA_MCP_REALM_DIR = dir;
   process.env.MACULA_MCP_REALM_URL = "https://realm.test/";
+  // storeCredential also appends join_confirmed to this node's event log (macula-mcp#42): keep that
+  // SQLite file in the test's own directory, never in the operator's ~/.macula-mcp.
+  process.env.MACULA_MCP_RINGS_DB = join(dir, "rings.sqlite3");
   realm.abandon();
 });
 
 afterEach(async () => {
+  closeRings();
   realm.abandon();
   delete process.env.MACULA_MCP_REALM_DIR;
   delete process.env.MACULA_MCP_REALM_URL;
+  delete process.env.MACULA_MCP_RINGS_DB;
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -163,6 +170,48 @@ describe("pure shapes", () => {
     expect(ascii.replace(/[\u2588\u2580\u2584 \n]/g, "")).toBe("");
     const png = Buffer.from(await realm.qrPngBase64("https://realm.test/join/s1"), "base64");
     expect(png.subarray(0, 4).toString("hex")).toBe("89504e47");
+  });
+});
+
+// macula-mcp#42: a membership used to be visible only as a file on disk, so an agent could not tell a
+// join that had just confirmed from one it had already seen. The membership owner appends the fact to the
+// node event log, once per membership -- a renewal rewrites the same membership and is not a join.
+describe("join_confirmed in the node event log", () => {
+  const cred = (over: Partial<realm.RealmCredential> = {}): realm.RealmCredential => ({
+    node_id: NODE,
+    portal: "https://realm.test",
+    org_identity: "mri:org:io.macula/rgfaber",
+    refresh_token: "mrt_1",
+    joined_at: "2026-09-02T14:00:00Z",
+    tier: "citizen",
+    ...over,
+  });
+  const events = () => readNodeEvents(ringsDb(), { self: NODE, limit: 50 }).events;
+
+  it("a membership established is one entry, carrying the realm and who was bound", () => {
+    realm.storeCredential(cred());
+    expect(events()).toHaveLength(1);
+    expect(events()[0]).toMatchObject({ kind: "join_confirmed", realm: "io.macula", org_identity: "mri:org:io.macula/rgfaber", tier: "citizen" });
+  });
+
+  it("a renewal of the same membership adds nothing: the token changes, the membership does not", () => {
+    realm.storeCredential(cred());
+    realm.storeCredential(cred({ ucan: "eyJ.renewed.token" }));
+    expect(events()).toHaveLength(1);
+  });
+
+  it("a citizen confirmation on top of the device tier is a second entry: a person bound this node", () => {
+    realm.storeCredential(cred({ org_identity: "mri:org:io.macula", tier: "device" }));
+    realm.storeCredential(cred());
+    expect(events().map((e) => e.tier)).toEqual(["device", "citizen"]);
+  });
+
+  it("a join from another process (the CLI) lands in the same log the server reads", () => {
+    // Nothing of ours holds the file, the way nothing in the server process does while macula-mcp-realm
+    // joins from its own process.
+    closeRings();
+    realm.storeCredential(cred({ org_identity: "mri:org:net.beam-campus/person" }), "net.beam-campus");
+    expect(events().map((e) => e.realm)).toEqual(["net.beam-campus"]);
   });
 });
 

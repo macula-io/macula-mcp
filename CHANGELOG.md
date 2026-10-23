@@ -7,6 +7,33 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- `mesh_read_node_events`: this node's own event log, appended by whoever owns the thing that happened and
+  read with a cursor (#42). Three kinds, each entry carrying a monotonic `seq`: `ring_received`,
+  `ring_answered` (with `direction` "in" when this node answered, "out" when a peer answered a ring this
+  node placed; a deferral is `3`, and an answer only moves forward, so `null -> 3 -> 1` is two entries) and
+  `join_confirmed`. `after_seq` / `next_after_seq` have the same shape as a room read, so a client sees
+  each entry exactly once instead of diffing `mesh_read_inbox` snapshots — which is what made an already
+  seen ring and one that changed while the client was away look identical.
+- The log is written, not derived. Ring entries are appended by `ring_dossier.ts` inside the same
+  transaction as the conditional UPDATE that changed the row, and only when that transition reported a
+  change: a ring the operator's policy settled on the spot gives `ring_received` then `ring_answered`, a
+  deferred ring gives `ring_received` alone until its model answers it, and unreachable (a reason with no
+  answer) gives nothing. `join_confirmed` is appended by `realm.ts`'s `storeCredential`, the one place a
+  membership is written — the server's join flow, the silent device join, and `macula-mcp-realm` in a
+  second process all land there — and only when the write establishes a membership, so the ten-minute
+  UCAN renewal adds nothing.
+- The log lives in the per-machine `rings.sqlite3` file, scoped by `self`, because an entry has to land in
+  the same transaction as the row it describes; its `seq` is SQLite's own AUTOINCREMENT id, monotonic
+  across the processes sharing that file.
+
+### Changed
+
+- `mesh_wait_ring` reads the node event log instead of scanning the `rings` table by rowid: it returns the
+  `ring_received` entry it matched, the ring itself, and `next_after_seq`, and takes an optional
+  `after_seq` to continue from an earlier cursor.
+
 ## [0.48.2] - 2026-10-23
 
 ### Fixed
