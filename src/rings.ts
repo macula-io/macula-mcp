@@ -294,6 +294,11 @@ function open(): DatabaseSync {
   // this same process (see the module header).
   db.exec("PRAGMA busy_timeout = 5000");
   migrateToCompositeRingKey(db);
+  // The claim a deferred incoming ring is answered under (macula-mcp#42): a renewal of an old file gets the
+  // column, so the owner has one shape to write. ADD COLUMN is the whole migration.
+  const columns = new Set((db.prepare("PRAGMA table_info(rings)").all() as { name: string }[]).map((c) => c.name));
+  if (!columns.has("claim")) db.exec("ALTER TABLE rings ADD COLUMN claim TEXT");
+  if (!columns.has("claimed_at")) db.exec("ALTER TABLE rings ADD COLUMN claimed_at TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS rings_direction_idx ON rings (direction, recorded_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS rings_self_idx ON rings (self, direction)`);
   return db;
@@ -313,6 +318,8 @@ const RINGS_SCHEMA = `
     answer INTEGER,
     reason TEXT,
     answered_at TEXT,
+    claim TEXT,
+    claimed_at TEXT,
     PRIMARY KEY (ring_id, direction)
   )
 `;
@@ -394,56 +401,8 @@ export interface RingRecord {
   answer: Answer | null;
   reason: string | null;
   answered_at: string | null;
-}
-
-/** Records a ring once per (ring_id, direction) -- see migrateToCompositeRingKey's own doc for why ring_id alone isn't enough. Answer may be given now (accepted/declined on the spot) or later via answerRing. Idempotent. */
-export function recordRing(rec: {
-  ring_id: string;
-  self: string;
-  direction: Direction;
-  peer: string;
-  purpose: string;
-  room_topic: string;
-  sent_at: number;
-  answer?: Answer;
-  reason?: string;
-}): void {
-  const now = new Date().toISOString();
-  open()
-    .prepare(
-      `INSERT INTO rings (ring_id, self, direction, peer, purpose, room_topic, sent_at, recorded_at, answer, reason, answered_at)
-       VALUES (@ring_id, @self, @direction, @peer, @purpose, @room_topic, @sent_at, @now, @answer, @reason, @answered_at)
-       ON CONFLICT(ring_id, direction) DO NOTHING`,
-    )
-    .run({
-      ring_id: rec.ring_id,
-      self: rec.self.toLowerCase(),
-      direction: rec.direction,
-      peer: rec.peer,
-      purpose: rec.purpose,
-      room_topic: rec.room_topic,
-      sent_at: rec.sent_at,
-      now,
-      answer: rec.answer ?? null,
-      reason: rec.reason ?? null,
-      answered_at: rec.answer !== undefined ? now : null,
-    });
-}
-
-/**
- * Sets (or overwrites) the answer on a recorded ring. A reason with no
- * answer records why an outgoing ring never got one (unreachable).
- * `direction` is required, not optional: since a caller's "out" row and
- * a callee's "in" row can share the same ring_id (see
- * migrateToCompositeRingKey's own doc), a WHERE clause scoped by
- * ring_id alone would update BOTH rows whenever they land in the same
- * shared file -- silently overwriting the OTHER party's own record of
- * the same ring with this side's answer.
- */
-export function answerRing(ringId: string, direction: Direction, answer: Answer | null, reason?: string): void {
-  open()
-    .prepare(`UPDATE rings SET answer = @answer, reason = @reason, answered_at = @now WHERE ring_id = @ring_id AND direction = @direction`)
-    .run({ ring_id: ringId, direction, answer, reason: reason ?? null, now: new Date().toISOString() });
+  /** The token a deferred incoming ring is being answered under, while one holds it (macula-mcp#42). */
+  claim: string | null;
 }
 
 /** One ring by id, only if it belongs to `self` (rows from another session on this machine are invisible). */
@@ -539,6 +498,15 @@ export function pendingIncoming(self: string): RingRecord[] {
 export function pendingSummary(self: string, peer: string): { count: number; from_peer: number } {
   const rows = pendingIncoming(self);
   return { count: rows.length, from_peer: rows.filter((r) => r.peer.toLowerCase() === peer.toLowerCase()).length };
+}
+
+/**
+ * The connection the ring dossier writes through (macula-mcp#42): `ring_dossier.ts` is the one owner of
+ * the rings rows, so the table's connection is exposed to it and to nothing else. Every statement it runs
+ * there is a conditional UPDATE inside a transaction.
+ */
+export function ringsDb(): DatabaseSync {
+  return open();
 }
 
 /** Test/shutdown hook -- releases the file handle. Re-opens lazily on next use. */

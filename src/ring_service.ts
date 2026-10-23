@@ -39,26 +39,14 @@ import type { JsonValue, Request, Served } from "@macula-io/ts";
 import { call, serve } from "./macula_ts_client.js";
 import * as rooms from "./rooms.js";
 import { isAllowlisted, loadContactPolicy, POLICY, policyLabel, type ContactPolicy, type Policy } from "./policy.js";
-import {
-  ANSWER,
-  answerRing,
-  buildRingAnswerArgs,
-  getRing,
-  parseRingAnswerArgs,
-  parseRingAnswerReply,
-  parseRingArgs,
-  pendingSummary,
-  recordRing,
-  ringAnswerProblems,
-  ringProblems,
-  ringProcedure,
-  type Answer,
+import { ANSWER, buildRingAnswerArgs, getRing, parseRingAnswerArgs, parseRingAnswerReply, parseRingArgs, pendingSummary, ringAnswerProblems, ringProblems, ringProcedure, type Answer,
   type RingAnswerArgs,
   type RingAnswerReply,
   type RingArgs,
   type RingRecord,
   type RingReply,
 } from "./rings.js";
+import { answerClaimedRing, claimDeferredRing, releaseClaim, ringReceived, ringReply } from "./ring_dossier.js";
 
 export { POLICY, type Policy } from "./policy.js";
 
@@ -262,8 +250,11 @@ export async function handleRing(payload: unknown, deps: HandleDeps): Promise<Ha
   const now = deps.now ?? Date.now();
 
   const reply = (answered: Answer, extra: Partial<RingReply> = {}): RingReply => ({ ring_id: ring.ring_id, answer: answered, ...extra });
+  // Every row write goes through the ring dossier (macula-mcp#42), which is what makes a transition happen
+  // once: the seed is the same on both sides of the conversation.
+  const seed = { ring_id: ring.ring_id, self: nodeId, peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at };
   const decline = (reason: string, recordedReason: string): RingReply => {
-    recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at, answer: ANSWER.declined, reason: recordedReason });
+    ringReceived({ ...seed, answer: ANSWER.declined, reason: recordedReason });
     return reply(ANSWER.declined, { reason });
   };
 
@@ -284,12 +275,13 @@ export async function handleRing(payload: unknown, deps: HandleDeps): Promise<Ha
     }
     const joinRoom = deps.joinRoom ?? rooms.joinRoom;
     await joinRoom({ room_topic: ring.room_topic, openedBy: ring.from });
-    recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at, answer: ANSWER.accepted });
+    ringReceived({ ...seed, answer: ANSWER.accepted });
     return reply(ANSWER.accepted, { room_topic: ring.room_topic });
   };
   const defer = (reason: string): RingReply => {
-    // ask: this agent's model decides, later (mesh_answer_ring).
-    recordRing({ ring_id: ring.ring_id, self: nodeId, direction: "in", peer: ring.from, purpose: ring.purpose, room_topic: ring.room_topic, sent_at: ring.sent_at });
+    // ask: this agent's model decides, later (mesh_answer_ring). No answer is recorded: that is what
+    // "awaiting a decision" means for this row.
+    ringReceived({ ...seed, answer: null });
     return reply(ANSWER.deferred, { room_topic: ring.room_topic, reason });
   };
   return decideRing(policy, ring, accept, decline, defer);
@@ -309,7 +301,7 @@ function handleRingAnswer(payload: unknown, nodeId: string, caller: string): Han
   if (alreadyAnswered(ring)) {
     return { ring_id: ans.ring_id, received: 1, already_answered: 1 };
   }
-  answerRing(ans.ring_id, ring.direction, ans.answer, ans.reason);
+  ringReply(ans.ring_id, ans.answer, ans.reason);
   return { ring_id: ans.ring_id, received: 1 };
 }
 
@@ -373,11 +365,22 @@ export async function answerPendingRing(
 ): Promise<AnswerPendingResult> {
   const nodeId = deps.nodeId ?? state?.nodeId;
   if (!nodeId) throw new Error("ring service is not active -- presence has not started");
-  const ring = getRing(args.ring_id, nodeId);
-  if (!ring || ring.direction !== "in") throw new Error(`no incoming ring ${args.ring_id}`);
-  if (ring.answer !== null) throw new Error(`ring ${args.ring_id} was already answered (${ring.answer})`);
-  await joinRoomForAcceptedAnswer(args, ring, deps);
-  answerRing(args.ring_id, ring.direction, args.answer, args.reason);
+  // Claimed before the join is awaited (macula-mcp#42): two answers to one ring both passed the read and the
+  // last write won. A claim lost to another attempt, or released when the join fails, writes nothing.
+  const claim = claimDeferredRing(args.ring_id, nodeId);
+  if (claim.ok === 0) {
+    throw new Error(claim.reason === "missing" ? `no incoming ring ${args.ring_id}` : `ring ${args.ring_id} was already answered (${claim.answer})`);
+  }
+  const ring = claim.ring;
+  try {
+    await joinRoomForAcceptedAnswer(args, ring, deps);
+  } catch (e) {
+    releaseClaim(ring.ring_id, claim.token);
+    throw e;
+  }
+  if (!answerClaimedRing(ring.ring_id, claim.token, args.answer, args.reason)) {
+    throw new Error(`ring ${args.ring_id} was answered by another attempt while this one was joining the room`);
+  }
 
   const answerArgs = buildRingAnswerArgs({ from: nodeId, to: ring.peer, ring_id: ring.ring_id, answer: args.answer, room_topic: ring.room_topic, reason: args.reason });
   const result = { ring_id: ring.ring_id, answer: args.answer, peer: ring.peer, room_topic: ring.room_topic };
