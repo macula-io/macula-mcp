@@ -7,7 +7,7 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
-## [0.49.0] - 2026-10-23
+## [0.49.0] - 2026-10-24
 
 ### Added
 
