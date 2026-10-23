@@ -306,24 +306,40 @@ export function joinedRoomCount(): number {
  * envelope from someone other than `me`, from `afterId` forward, until
  * `deadline`. Returns null on timeout, never throws on one.
  */
-async function waitForReply(args: { topic: string; me: string; afterId: number; deadline: number }): Promise<ObservedEnvelope | null> {
+async function waitForReply(args: { topic: string; me: string; afterId: number; deadline: number }): Promise<WaitForReply> {
   let after = args.afterId;
   while (Date.now() < args.deadline) {
     const fresh = factsAfter({ topic: args.topic, afterId: after });
     if (fresh.length > 0) {
       after = fresh[fresh.length - 1]!.id;
-      const { messages } = threadEnvelopes(fresh.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher })));
+      // Each message carries its own transcript id, so a reply's cursor is the reply's row and not the
+      // batch's last: a message recorded behind it in the same poll is not skipped by the next read.
+      const { messages } = threadEnvelopes(fresh.map((f) => ({ payload: JSON.parse(f.raw_json) as unknown, observed_at: f.observed_at, publisher: f.publisher, seq: f.id })));
       const reply = messages.find((m) => m.from !== args.me && m.attested === 1);
-      if (reply) return reply;
+      if (reply) return { reply, reached: after };
     }
     await new Promise((resolve) => setTimeout(resolve, REPLY_POLL_MS));
   }
-  return null;
+  return { reply: null, reached: after };
+}
+
+/** What a wait saw: the reply (or none) and the highest transcript id it scanned. */
+interface WaitForReply {
+  reply: ObservedEnvelope | null;
+  reached: number;
 }
 
 export interface WaitRoomArgs {
   room_topic: string;
   waitSeconds: number;
+  /**
+   * Where to start reading: a previous read's or wait's next_after_seq (the
+   * transcript row id). Omitted, the wait starts from now -- the topic's last
+   * recorded fact -- which is the behaviour every caller had before this
+   * argument existed. Given, a reply that landed between the agent's last read
+   * and this call is returned at once instead of being waited past.
+   */
+  afterSeq?: number;
 }
 
 export interface WaitRoomResult {
@@ -331,6 +347,13 @@ export interface WaitRoomResult {
   timed_out: 0 | 1;
   /** Events the topic's feed lost during this wait: a timeout with dropped above 0 may have lost the reply. */
   dropped: number;
+  /**
+   * The cursor to continue from. The reply's own transcript id when one
+   * arrived, so a message recorded in the same batch behind it is not skipped;
+   * otherwise the highest id this wait scanned. The same seq space
+   * mesh_read_inbox's after_seq uses.
+   */
+  next_after_seq: number;
 }
 
 /**
@@ -358,9 +381,13 @@ export async function waitRoom(args: WaitRoomArgs): Promise<WaitRoomResult> {
   }
   const me = await selfNodeId();
   const lostBefore = lobbyObserver.dropped(topic);
-  const reply = await waitForReply({ topic, me, afterId: lastFactId(topic), deadline: Date.now() + args.waitSeconds * 1000 });
+  // The cursor is the caller's when it names one: the server never substitutes "now" for a cursor it was
+  // given, and only falls back to it when none was.
+  const from = args.afterSeq ?? lastFactId(topic);
+  const { reply, reached } = await waitForReply({ topic, me, afterId: from, deadline: Date.now() + args.waitSeconds * 1000 });
   const dropped = lobbyObserver.dropped(topic) - lostBefore;
-  return reply ? { reply, timed_out: 0, dropped } : { reply: null, timed_out: 1, dropped };
+  const next_after_seq = reply?.seq ?? reached;
+  return reply ? { reply, timed_out: 0, dropped, next_after_seq } : { reply: null, timed_out: 1, dropped, next_after_seq };
 }
 
 export interface SayArgs {
@@ -418,7 +445,7 @@ export async function say(args: SayArgs): Promise<SayResult> {
   await publish({ topic, fact: { ...sent } });
   if (!args.waitReplySeconds) return { sent, reply: null };
 
-  const reply = await waitForReply({ topic, me, afterId: cursor, deadline: Date.now() + args.waitReplySeconds * 1000 });
+  const { reply } = await waitForReply({ topic, me, afterId: cursor, deadline: Date.now() + args.waitReplySeconds * 1000 });
   const dropped = lobbyObserver.dropped(topic) - lostBefore;
   return reply ? { sent, reply, timed_out: 0, dropped } : { sent, reply: null, timed_out: 1, dropped };
 }

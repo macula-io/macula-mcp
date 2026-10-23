@@ -195,6 +195,49 @@ describe("say", () => {
 });
 
 describe("waitRoom", () => {
+  // macula-mcp#44 step 4: the wait's cursor is the caller's, not the server's "now".
+  it("with after_seq, a reply recorded before the call is returned at once instead of being waited past", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
+    const { openRoom, waitRoom } = await import("./rooms.js");
+    const { room_topic } = await openRoom({});
+    const cursor = (await import("./lobby_transcript.js")).lastFactId(room_topic);
+    // The reply landed after the agent's last read, but before this wait: the exact gap a server-side "now" cursor skips.
+    recordFact({ topic: room_topic, payload: { message_id: "f".repeat(32), room_topic, sent_at: Date.now(), from: THEM, kind: "remark_made", text: "already answered" }, at: new Date().toISOString(), publisher: THEM });
+    const res = await waitRoom({ room_topic, waitSeconds: 5, afterSeq: cursor });
+    expect(res.timed_out).toBe(0);
+    expect(res.reply).toMatchObject({ from: THEM, text: "already answered" });
+  });
+
+  it("next_after_seq is the reply's own id, so a message recorded behind it in the same batch is not skipped", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
+    const { openRoom, waitRoom } = await import("./rooms.js");
+    const transcript = await import("./lobby_transcript.js");
+    const { room_topic } = await openRoom({});
+    const cursor = transcript.lastFactId(room_topic);
+    recordFact({ topic: room_topic, payload: { message_id: "1".repeat(32), room_topic, sent_at: Date.now(), from: THEM, kind: "remark_made", text: "first" }, at: new Date().toISOString(), publisher: THEM });
+    recordFact({ topic: room_topic, payload: { message_id: "2".repeat(32), room_topic, sent_at: Date.now(), from: "c".repeat(64), kind: "remark_made", text: "second" }, at: new Date().toISOString(), publisher: "c".repeat(64) });
+    const res = await waitRoom({ room_topic, waitSeconds: 5, afterSeq: cursor });
+    expect(res.reply).toMatchObject({ text: "first" });
+    // Reading on from the wait's own cursor still shows what was behind the reply it returned.
+    const rest = transcript.factsAfter({ topic: room_topic, afterId: res.next_after_seq })
+    expect(rest.map((f) => f.text)).toEqual(["second"]);
+  });
+
+  it("without after_seq it still waits from now: history is not returned as a reply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
+    const { openRoom, waitRoom } = await import("./rooms.js");
+    const { room_topic } = await openRoom({});
+    recordFact({ topic: room_topic, payload: { message_id: "3".repeat(32), room_topic, sent_at: Date.now(), from: THEM, kind: "remark_made", text: "old news" }, at: new Date().toISOString(), publisher: THEM });
+    const pending = waitRoom({ room_topic, waitSeconds: 1 });
+    await vi.advanceTimersByTimeAsync((await import("./rooms.js")).REPLY_POLL_MS * 6);
+    const res = await pending;
+    expect(res.reply).toBeNull();
+    expect(res.timed_out).toBe(1);
+  });
+
   it("waits passively (no publish at all) and returns the first attested envelope from someone else", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
@@ -215,7 +258,7 @@ describe("waitRoom", () => {
     const { waitRoom, listRooms } = await import("./rooms.js");
     const topic = `agents.room.${"6".repeat(32)}`;
     const res = await waitRoom({ room_topic: topic, waitSeconds: 0 });
-    expect(res).toEqual({ reply: null, timed_out: 1, dropped: 0 });
+    expect(res).toMatchObject({ reply: null, timed_out: 1, dropped: 0 });
     expect(listRooms().joined).toEqual([expect.objectContaining({ room_topic: topic })]);
   });
 
@@ -226,7 +269,7 @@ describe("waitRoom", () => {
     const { room_topic } = await openRoom({});
     const pending = waitRoom({ room_topic, waitSeconds: 1 });
     await vi.advanceTimersByTimeAsync(REPLY_POLL_MS * 6);
-    expect(await pending).toEqual({ reply: null, timed_out: 1, dropped: 0 });
+    expect(await pending).toMatchObject({ reply: null, timed_out: 1, dropped: 0 });
   });
 
   it("says what the room's feed lost during a wait, not before it, so an old loss does not read as a lost reply", async () => {
@@ -234,13 +277,13 @@ describe("waitRoom", () => {
     const { room_topic } = await openRoom({});
     let lostSoFar = 40;
     mocks.dropped.mockImplementation(() => lostSoFar);
-    expect(await waitRoom({ room_topic, waitSeconds: 0 })).toEqual({ reply: null, timed_out: 1, dropped: 0 });
+    expect(await waitRoom({ room_topic, waitSeconds: 0 })).toMatchObject({ reply: null, timed_out: 1, dropped: 0 });
     mocks.dropped.mockImplementation(() => {
       const now = lostSoFar;
       lostSoFar += 3; // lost while waiting: the next look sees 3 more
       return now;
     });
-    expect(await waitRoom({ room_topic, waitSeconds: 0 })).toEqual({ reply: null, timed_out: 1, dropped: 3 });
+    expect(await waitRoom({ room_topic, waitSeconds: 0 })).toMatchObject({ reply: null, timed_out: 1, dropped: 3 });
     expect(await say({ room_topic, text: "anyone?", waitReplySeconds: 0.001 })).toMatchObject({ reply: null, timed_out: 1, dropped: 3 });
     expect((await say({ room_topic, text: "no wait" })).dropped).toBeUndefined();
   });

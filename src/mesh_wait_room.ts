@@ -42,7 +42,10 @@ const DESCRIPTION_FULL =
   "scheduler (see mesh://etiquette) instead of a manual sleep and re-calling this or mesh_read_inbox. " +
   "Never call this in a sleep-then-check loop -- one call with the full wait_seconds you actually want " +
   "does the same waiting server-side, for free. The reply carries `dropped` for that topic, so a timeout " +
-  "after a loss is not read as silence. " +
+  "after a loss is not read as silence, and next_after_seq, the cursor to continue from. Pass after_seq " +
+  "(a previous mesh_read_inbox read's or wait's next_after_seq) to continue from an earlier read instead " +
+  "of waiting from now -- the same cursor mesh_read_inbox uses, so a reply recorded between your last read " +
+  "and this call is returned at once rather than waited past. " +
   "`dropped`: " + DROPPED_MEANS.wait + ".";
 
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. Keeps the "still occupies your turn, no server push" honesty and the never-sleep-and-poll rule -- both change how a caller should actually use this. */
@@ -50,7 +53,9 @@ const DESCRIPTION_TERSE =
   "Block up to wait_seconds (max 3600) for the next envelope from someone else in a room (or central), " +
   "saying nothing yourself. Reads the room's existing background tap -- nothing new to watch. Still " +
   "occupies your own turn for the wait (MCP has no server-push); use your harness's scheduler instead " +
-  "if you'd rather free the turn. Never sleep-then-poll -- one call does the same wait server-side. " +
+  "if you'd rather free the turn. Optional after_seq continues from a read's next_after_seq instead of " +
+  "waiting from now; the reply carries next_after_seq to continue from. Never sleep-then-poll -- one call " +
+  "does the same wait server-side. " +
   DROPPED_DESCRIPTION_TERSE;
 
 export function registerMeshWaitRoom(server: McpServer): void {
@@ -61,12 +66,18 @@ export function registerMeshWaitRoom(server: McpServer): void {
       inputSchema: {
         room_topic: z.string().describe(`A room you opened or joined, or "${CENTRAL_TOPIC}" for central. Joins it first if you are not in it yet.`),
         wait_seconds: z.number().positive().max(MAX_WAIT_SECONDS).describe(`How long to wait (max ${MAX_WAIT_SECONDS}).`),
+        after_seq: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Continue from this seq (a previous mesh_read_inbox read's or mesh_wait_room's next_after_seq). Omit to wait from now."),
       },
     },
-    async ({ room_topic, wait_seconds }) => {
+    async ({ room_topic, wait_seconds, after_seq }) => {
       ensurePresence(server);
       try {
-        const res = await rooms.waitRoom({ room_topic, waitSeconds: wait_seconds });
+        const res = await rooms.waitRoom({ room_topic, waitSeconds: wait_seconds, afterSeq: after_seq });
         return jsonContent({ ...res, dropped_means: DROPPED_MEANS.wait });
       } catch (e) {
         if (e instanceof rooms.RoomError) return errorContent(`mesh_wait_room failed: ${e.message}`);
