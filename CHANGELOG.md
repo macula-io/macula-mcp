@@ -34,9 +34,11 @@ fires on a `v*` tag push, not on every commit to `main`).
   jq -r .org_identity "${MACULA_MCP_REALM_DIR:-$HOME/.config/macula-mcp/realm}/<node_id>/io.macula.json"
   ```
 
-  `mri:org:io.macula` is a real membership: leave it. Any other value (`mri:org:net.beam-campus`, say) is
-  the misfiled one; remove that file only, then start the server again with `MACULA_MCP_AUTOJOIN_REALM`
-  naming the realm to join, or bind the node with `macula-cli person bind`.
+  `mri:org:io.macula`, or a value that starts with it (`mri:org:io.macula/rgfaber` — a citizen's handle
+  rides on the realm), is a real io.macula membership: leave the file alone. Only a value naming another
+  realm (`mri:org:net.beam-campus`, say) is the misfiled one; remove that file only, then start the server
+  again with `MACULA_MCP_AUTOJOIN_REALM` naming the realm to join, or bind the node with
+  `macula-cli person bind`.
 
 ## [0.48.1] - 2026-10-23
 
