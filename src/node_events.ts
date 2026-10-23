@@ -17,6 +17,10 @@
 // process, never reused. The cursor belongs to the CLIENT (`after_seq`): the server never substitutes
 // "now" for a cursor the caller did not pass.
 //
+// Nothing prunes it, deliberately: a cursor is only meaningful while the entries it points past are still
+// there, and a client may hold one across a long sleep. It grows with this node's own activity, the same
+// way the rings table beside it does.
+//
 // Shapes worth naming (macula-mcp#42's design comment):
 //   - a ring answered on the spot by the operator's policy is ring_received then ring_answered;
 //   - a deferred ring is ring_received alone, then one ring_answered when its model answers it;
