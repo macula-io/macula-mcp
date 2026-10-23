@@ -25,9 +25,18 @@ fires on a `v*` tag push, not on every commit to `main`).
   member's record, so an operator lowering a member's assurance is a real change — and the node lost a
   membership the realm still grants.
 - **A node that already holds a misfiled `io.macula.json`** from an earlier non-default auto-join keeps
-  renewing against `io.macula`. To clear it: `rm ~/.macula-mcp/realm/<node_id>/io.macula.json` and start
-  the server again with `MACULA_MCP_AUTOJOIN_REALM` naming the realm to join, or bind the node with
-  `macula-cli person bind`.
+  renewing against `io.macula`, because the file name is what renewal reads. The credentials live in
+  `${MACULA_MCP_REALM_DIR:-~/.config/macula-mcp/realm}/<node_id>/`, one JSON file per realm. Check which
+  realm a file actually names before touching it — a node that genuinely is a member of `io.macula` holds
+  a real one:
+
+  ```
+  jq -r .org_identity "${MACULA_MCP_REALM_DIR:-$HOME/.config/macula-mcp/realm}/<node_id>/io.macula.json"
+  ```
+
+  `mri:org:io.macula` is a real membership: leave it. Any other value (`mri:org:net.beam-campus`, say) is
+  the misfiled one; remove that file only, then start the server again with `MACULA_MCP_AUTOJOIN_REALM`
+  naming the realm to join, or bind the node with `macula-cli person bind`.
 
 ## [0.48.1] - 2026-10-23
 
