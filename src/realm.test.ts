@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
@@ -15,6 +15,23 @@ vi.mock("./macula_ts_client.js", () => ({
   proveDeviceRequest: mocks.proveDeviceRequest,
   JOIN_SESSION_PROCEDURE: "macula_realm.join_session",
 }));
+
+// The two writes a credential makes, kept as they are made (macula-mcp#43): a half-written file reads as
+// "not joined" and starts an auto-join over a membership this node holds, so the write must land through a
+// temp file and a rename. Everything still goes to the real filesystem underneath.
+const writes = vi.hoisted(() => ({ made: [] as string[], renamed: [] as Array<[string, string]> }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const writeFileSync = ((path: string, data: string, options: unknown) => {
+    writes.made.push(String(path));
+    return (actual.writeFileSync as (...args: unknown[]) => unknown)(path, data, options);
+  }) as typeof actual.writeFileSync;
+  const renameSync = ((from: string, to: string) => {
+    writes.renamed.push([String(from), String(to)]);
+    return actual.renameSync(from, to);
+  }) as typeof actual.renameSync;
+  return { ...actual, writeFileSync, renameSync };
+});
 
 import * as realm from "./realm.js";
 
@@ -202,6 +219,48 @@ describe("credential store", () => {
     expect(realm.loadCredential(NODE)).toBeUndefined();
     expect(realm.status(NODE)).toEqual({ portal: "https://realm.test", joined: false });
     expect(realm.status(undefined).joined).toBe(false);
+  });
+
+  // macula-mcp#43: the join is decided here, at the write, not by a check taken before an await. A
+  // citizen credential written while an auto-join was waiting on the realm used to be replaced by the
+  // device credential that call had already started, which breaks the never-downgrade rule these
+  // credentials rest on.
+  const membership = (tier: "device" | "citizen", ucan: string) => ({
+    node_id: NODE,
+    portal: "net.beam-campus",
+    org_identity: "mri:org:net.beam-campus",
+    refresh_token: "",
+    joined_at: "2026-10-23T00:00:00Z",
+    citizen_did: NODE,
+    ucan,
+    tier,
+  });
+
+  it("keeps a citizen credential when a device one arrives for the same node and realm", () => {
+    realm.storeCredential(membership("citizen", "citizen-token"), "net.beam-campus");
+    expect(realm.storeCredentialUnlessWeaker(membership("device", "device-token"), "net.beam-campus")).toBeUndefined();
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("citizen-token");
+  });
+
+  it("writes a citizen credential over a device one, and one of the same tier over itself, so a renewal still lands", () => {
+    realm.storeCredential(membership("device", "old"), "net.beam-campus");
+    const path = realm.storeCredentialUnlessWeaker(membership("citizen", "new"), "net.beam-campus");
+    expect(path).toBe(join(dir, NODE, "net.beam-campus.json"));
+    expect(realm.storeCredentialUnlessWeaker(membership("citizen", "newer"), "net.beam-campus")).toBe(path);
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("newer");
+  });
+
+  it("writes through a temp file and a rename, so a reader never sees a half-written credential", async () => {
+    writes.made.length = 0;
+    writes.renamed.length = 0;
+    const path = realm.storeCredential(membership("citizen", "x"), "net.beam-campus");
+
+    const written = writes.made.at(-1) ?? "";
+    expect(written).not.toBe(path);
+    expect(written.startsWith(path)).toBe(true);
+    expect(writes.renamed.at(-1)).toEqual([written, path]);
+    // Nothing of the temp file survives: the directory holds the credential alone.
+    expect(await readdir(join(dir, NODE))).toEqual(["net.beam-campus.json"]);
   });
 
   it("a device-tier credential (device_membership.ts's auto-join) round-trips its tier through status()", () => {

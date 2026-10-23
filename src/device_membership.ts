@@ -37,7 +37,7 @@
 import { realmIdOf } from "./mesh_config.js";
 import type { JsonValue } from "@macula-io/ts";
 import { call, carriedPublicKey, MEMBERSHIP_UCAN_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
-import { listCredentials, loadCredential, storeCredential, type RealmCredential, type RealmTier } from "./realm.js";
+import { listCredentials, loadCredential, storeCredentialUnlessWeaker, type RealmCredential, type RealmTier } from "./realm.js";
 
 /**
  * The procedure string is NOT a constant -- macula_topic:build/6 embeds
@@ -157,10 +157,17 @@ export async function joinDevice(input: { realmName: string }): Promise<RealmCre
 export async function ensureAutoJoin(input: { nodeId: string }): Promise<void> {
   const realmName = autoJoinRealmName();
   if (!realmName) return;
-  if (loadCredential(input.nodeId)) return;
+  // The realm being joined is the realm looked in and the realm stored under
+  // (macula-mcp#43). Reading the default realm here meant a node already
+  // holding a membership in any other realm joined it again on every presence
+  // start, and stored the answer under io.macula -- where renewal then renewed
+  // a realm this node never joined.
+  if (loadCredential(input.nodeId, realmName)) return;
   try {
     const cred = await joinDevice({ realmName });
-    storeCredential(cred);
+    // The guard is at the write, not here (macula-mcp#43): a citizen credential
+    // can land while joinDevice is waiting on the realm, and it must survive.
+    storeCredentialUnlessWeaker(cred, realmName);
   } catch (e) {
     console.error(`device_membership: silent auto-join of ${input.nodeId} against ${realmName} failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -227,7 +234,10 @@ export async function renewMemberships(input: { nodeId: string }): Promise<void>
     try {
       const renewed = await joinDevice({ realmName: held.realm });
       const { realm, ...cred } = held;
-      storeCredential({ ...cred, citizen_did: renewed.citizen_did, ucan: renewed.ucan, tier: renewed.tier }, realm);
+      // A citizen credential that landed during the call is not written over by
+      // this renewal (macula-mcp#43): the decision is made at the write, on the
+      // realm the membership actually holds.
+      storeCredentialUnlessWeaker({ ...cred, citizen_did: renewed.citizen_did, ucan: renewed.ucan, tier: renewed.tier }, realm);
     } catch (e) {
       console.error(`device_membership: renewing ${input.nodeId}'s membership in ${held.realm} failed: ${e instanceof Error ? e.message : String(e)}`);
     }

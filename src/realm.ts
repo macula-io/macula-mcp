@@ -34,7 +34,8 @@
 // keeps its membership for as long as that identity exists; name the
 // agent (MACULA_MCP_AGENT) or pin MACULA_MCP_IDENTITY to keep both across
 // harness sessions.
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { hostname, arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import QRCode from "qrcode";
@@ -122,13 +123,52 @@ export function loadCredential(nodeId: string, realmName: string = DEFAULT_REALM
   return existsSync(path) ? readCredentialFile(path) : undefined;
 }
 
-/** Writes the credential 0600 in a 0700 directory and returns its path. */
+/**
+ * Writes the credential 0600 in a 0700 directory and returns its path.
+ *
+ * Through a temp file and a rename in the same directory (macula-mcp#43): a
+ * reader that catches the write sees the membership before it or the one
+ * after it, never a half-written file. readCredentialFile() reads an
+ * unparsable file as "not joined", so a truncated one used to look like a
+ * membership this node does not have -- and started an auto-join over one it
+ * does.
+ */
 export function storeCredential(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string {
   mkdirSync(join(realmDir(), cred.node_id), { recursive: true, mode: 0o700 });
   const path = credentialPath(cred.node_id, realmName);
-  writeFileSync(path, JSON.stringify(cred, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
-  chmodSync(path, 0o600);
+  const tmp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(cred, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, path);
+  } catch (e) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // it never landed, or the rename took it
+    }
+    throw e;
+  }
   return path;
+}
+
+/** How strong a credential's tier is, so a weaker one can never replace a stronger (macula-mcp#43). */
+const tierRank = (tier: RealmTier): number => (tier === "citizen" ? 2 : 1);
+
+/**
+ * Stores a credential unless this realm already holds a stronger one for this
+ * node, and returns its path, or undefined when it kept what was there.
+ *
+ * The read and the decision happen HERE, at the write (macula-mcp#43). Both
+ * callers used to decide before an await -- auto-join before it joined,
+ * renewal before the realm answered -- so a citizen credential that landed in
+ * that window was replaced by the device-tier one the call had already
+ * started, which is the one rule this store must never break.
+ */
+export function storeCredentialUnlessWeaker(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string | undefined {
+  const held = loadCredential(cred.node_id, realmName);
+  if (held !== undefined && tierRank(held.tier) > tierRank(cred.tier)) return undefined;
+  return storeCredential(cred, realmName);
 }
 
 export interface RealmMembership extends RealmCredential {

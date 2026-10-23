@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   selfNodeId: vi.fn(),
   loadCredential: vi.fn(),
   storeCredential: vi.fn(),
+  storeCredentialUnlessWeaker: vi.fn(),
   listCredentials: vi.fn(),
 }));
 vi.mock("./macula_ts_client.js", () => ({
@@ -25,6 +26,7 @@ vi.mock("./macula_ts_client.js", () => ({
 vi.mock("./realm.js", () => ({
   loadCredential: mocks.loadCredential,
   storeCredential: mocks.storeCredential,
+  storeCredentialUnlessWeaker: mocks.storeCredentialUnlessWeaker,
   listCredentials: mocks.listCredentials,
 }));
 
@@ -156,7 +158,7 @@ describe("ensureAutoJoin", () => {
     const { ensureAutoJoin } = await import("./device_membership.js");
     await ensureAutoJoin({ nodeId: NODE });
     expect(mocks.call).not.toHaveBeenCalled();
-    expect(mocks.storeCredential).not.toHaveBeenCalled();
+    expect(mocks.storeCredentialUnlessWeaker).not.toHaveBeenCalled();
   });
 
   it("joins and stores a device-tier credential when the feature is on and nothing exists yet", async () => {
@@ -165,7 +167,32 @@ describe("ensureAutoJoin", () => {
     mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 1 });
     const { ensureAutoJoin } = await import("./device_membership.js");
     await ensureAutoJoin({ nodeId: NODE });
-    expect(mocks.storeCredential).toHaveBeenCalledWith(expect.objectContaining({ node_id: NODE, tier: "device", ucan: "eyJ.fake.token" }));
+    expect(mocks.storeCredentialUnlessWeaker).toHaveBeenCalledWith(expect.objectContaining({ node_id: NODE, tier: "device", ucan: "eyJ.fake.token" }), "io.macula");
+  });
+
+  // macula-mcp#43: the realm joined is the realm looked in and the realm stored under. Reading the
+  // default realm here meant a node already holding net.beam-campus joined it again on every presence
+  // start, and stored the answer as io.macula -- where renewal then renewed a realm it never joined.
+  it("looks in, joins and stores the realm it is auto-joining, not the default one", async () => {
+    process.env.MACULA_MCP_AUTOJOIN_REALM = "net.beam-campus";
+    mocks.loadCredential.mockReturnValue(undefined);
+    mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 1 });
+    const { ensureAutoJoin } = await import("./device_membership.js");
+    await ensureAutoJoin({ nodeId: NODE });
+
+    expect(mocks.loadCredential).toHaveBeenCalledWith(NODE, "net.beam-campus");
+    expect(mocks.storeCredentialUnlessWeaker).toHaveBeenCalledWith(
+      expect.objectContaining({ node_id: NODE, portal: "net.beam-campus", org_identity: "mri:org:net.beam-campus" }),
+      "net.beam-campus");
+  });
+
+  it("stores the membership it finds, not a default-realm one, when the realm already holds it", async () => {
+    process.env.MACULA_MCP_AUTOJOIN_REALM = "net.beam-campus";
+    mocks.loadCredential.mockReturnValue({ node_id: NODE, tier: "device" });
+    const { ensureAutoJoin } = await import("./device_membership.js");
+    await ensureAutoJoin({ nodeId: NODE });
+    expect(mocks.call).not.toHaveBeenCalled();
+    expect(mocks.storeCredentialUnlessWeaker).not.toHaveBeenCalled();
   });
 
   it("never throws -- a directory/realm being unreachable must never take presence down with it", async () => {
@@ -174,7 +201,7 @@ describe("ensureAutoJoin", () => {
     mocks.call.mockRejectedValue(new Error("unknown_next_peer"));
     const { ensureAutoJoin } = await import("./device_membership.js");
     await expect(ensureAutoJoin({ nodeId: NODE })).resolves.toBeUndefined();
-    expect(mocks.storeCredential).not.toHaveBeenCalled();
+    expect(mocks.storeCredentialUnlessWeaker).not.toHaveBeenCalled();
   });
 });
 
@@ -208,7 +235,7 @@ describe("renewMemberships", () => {
     await renewMemberships({ nodeId: NODE });
 
     expect(mocks.call).toHaveBeenCalledWith(expect.objectContaining({ procedure: "io.macula/_realm/_realm/identity/issue_membership_ucan_v1" }));
-    expect(mocks.storeCredential).toHaveBeenCalledWith(
+    expect(mocks.storeCredentialUnlessWeaker).toHaveBeenCalledWith(
       expect.objectContaining({ ucan: fresh, tier: "citizen", joined_at: "2026-10-01T00:00:00Z", cert_pem: "PEM" }), "io.macula");
   });
 
@@ -241,6 +268,6 @@ describe("renewMemberships", () => {
     mocks.call.mockResolvedValue({ procedure: "x", payload: { error: "not_admitted: this node's membership ended" }, duration_ms: 1 });
     const { renewMemberships } = await import("./device_membership.js");
     await expect(renewMemberships({ nodeId: NODE })).resolves.toBeUndefined();
-    expect(mocks.storeCredential).not.toHaveBeenCalled();
+    expect(mocks.storeCredentialUnlessWeaker).not.toHaveBeenCalled();
   });
 });
