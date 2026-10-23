@@ -245,15 +245,27 @@ function isExpiredReply(httpStatus: number, b: Record<string, unknown>): boolean
   return httpStatus === 410 || b.error === "session_expired";
 }
 
-/** A 200 carrying everything a confirmed membership needs. */
+/**
+ * A 200 carrying everything a confirmed membership needs: the org identity, plus a credential in
+ * either shape -- a refresh token (what the realm issued until 2026-09-04) or a membership UCAN (what
+ * a citizen confirmation carries since; JoinSessionController's moduledoc). Demanding the refresh
+ * token alone made every ucan-only confirmation read as a generic error, so the join never finalized
+ * (macula-mcp#40).
+ */
 function isConfirmedBody(b: Record<string, unknown>): boolean {
-  return b.status === "confirmed" && typeof b.org_identity === "string" && typeof b.refresh_token === "string";
+  return (
+    b.status === "confirmed" &&
+    typeof b.org_identity === "string" &&
+    (typeof b.refresh_token === "string" || typeof b.ucan === "string")
+  );
 }
 
 function confirmedStatus(b: Record<string, unknown>): SessionStatus {
   return {
     status: "confirmed",
-    refresh_token: b.refresh_token as string,
+    // Empty rather than missing for a ucan-only confirmation: the stored credential keeps the field
+    // readCredentialFile requires, as the device tier already does (macula-mcp#40).
+    refresh_token: typeof b.refresh_token === "string" ? b.refresh_token : "",
     org_identity: b.org_identity as string,
     cert_pem: stringOrUndefined(b.cert_pem),
     oauth_account: stringOrUndefined(b.oauth_account),

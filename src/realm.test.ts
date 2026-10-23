@@ -108,6 +108,31 @@ describe("pure shapes", () => {
     expect(confirmed).toMatchObject({ citizen_did: NODE, ucan: "eyJ.fake.token" });
   });
 
+  // macula-mcp#40: the realm stopped issuing refresh_token on 2026-09-04 (JoinSessionController's
+  // moduledoc) and confirms a citizen join with a membership UCAN instead. The guard demanded the
+  // field the realm no longer sends, so a confirmed join read as a generic error and never stored.
+  it("parseSessionStatus accepts a confirmation carrying a ucan and no refresh_token (#40)", () => {
+    const confirmed = realm.parseSessionStatus(200, {
+      status: "confirmed",
+      ucan: "eyJ.fake.token",
+      org_identity: "mri:org:io.macula/rgfaber",
+      cert_pem: null,
+      citizen_did: NODE,
+    });
+    expect(confirmed).toEqual({
+      status: "confirmed",
+      refresh_token: "",
+      org_identity: "mri:org:io.macula/rgfaber",
+      cert_pem: undefined,
+      oauth_account: undefined,
+      oauth_provider: undefined,
+      citizen_did: NODE,
+      ucan: "eyJ.fake.token",
+    });
+    // A confirmation carrying neither credential shape is still an error, not a silent join.
+    expect(realm.parseSessionStatus(200, { status: "confirmed", org_identity: "mri:org:io.macula/raf" }).status).toBe("error");
+  });
+
   it("handleOf takes the last segment of an org identity", () => {
     expect(realm.handleOf("mri:org:io.macula/rgfaber")).toBe("rgfaber");
     expect(realm.handleOf(undefined)).toBeUndefined();
@@ -336,6 +361,35 @@ describe("join flow against a fake realm", () => {
     expect(after.joined).toBe(true);
     expect(after.has_ucan).toBe(false);
     expect(realm.loadCredential(NODE)?.ucan).toBeUndefined();
+  });
+
+  // macula-mcp#40, the end-to-end half: a person confirms at the portal, the realm answers with a
+  // membership UCAN and no refresh_token, and the next poll has to finalize rather than stay pending.
+  it("waitForOutcome finalizes a ucan-only confirmation, with no refresh_token (#40)", async () => {
+    const server = fakeRealm([
+      { status: 201, body: { session_id: "s4", join_url: "https://realm.test/join/s4", expires_at: "2999-01-01T00:00:00Z" } },
+      { status: 200, body: { status: "pending", expires_at: "2999-01-01T00:00:00Z" } },
+      {
+        status: 200,
+        body: {
+          status: "confirmed",
+          ucan: "eyJ.fake.token",
+          org_identity: "mri:org:io.macula/rgfaber",
+          cert_pem: null,
+          citizen_did: NODE,
+        },
+      },
+    ]);
+    await realm.begin({ fetchImpl: server.fetchImpl });
+    const after = await realm.waitForOutcome(NODE, 30, server.fetchImpl);
+    expect(after.joined).toBe(true);
+    expect(after.org_identity).toBe("mri:org:io.macula/rgfaber");
+    expect(after.has_ucan).toBe(true);
+    expect(after.tier).toBe("citizen");
+    expect(after.pending).toBeUndefined();
+    // The stored credential keeps the field readCredentialFile requires, empty rather than missing.
+    expect(realm.loadCredential(NODE)?.refresh_token).toBe("");
+    expect(realm.loadCredential(NODE)?.ucan).toBe("eyJ.fake.token");
   });
 
   it("an expired session is reported, not silently retried forever", async () => {

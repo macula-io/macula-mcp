@@ -7,6 +7,20 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Fixed
+
+- `mesh_join_realm` finalizes a citizen join that the portal confirms with a membership UCAN and no
+  `refresh_token` (#40). The realm stopped issuing a refresh token on 2026-09-04, so a confirmed body
+  carries `status: "confirmed"`, `ucan`, `org_identity`, `citizen_did` and `cert_pem: null`; the guard
+  that decides a 200 is a confirmation still demanded `refresh_token`, so every such reply fell through
+  to the generic error branch (`realm answered HTTP 200: {…}`), the credential was never stored, and the
+  join stayed pending forever — a second `mesh_join_realm` reused the same session. A confirmation is now
+  accepted with the org identity plus a credential in either shape (a refresh token, or a UCAN), and the
+  stored credential keeps `refresh_token: ""` for the UCAN tier, as the device tier already does, so
+  `readCredentialFile` still loads it. A confirmed body with neither shape is still an error. Red-first:
+  a poll answered with the reporter's own ucan-only body now finalizes (credential stored, `joined: true`,
+  `has_ucan: true`), and that case timed out against the old guard.
+
 ## [0.48.0] - 2026-10-19
 
 Wire 1.0, under the npm dist-tag `latest`, published on the wire 1.0 flag day once the stations have
