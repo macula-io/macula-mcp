@@ -7,6 +7,8 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-10-23
+
 ### Added
 
 - `mesh_read_node_events`: this node's own event log, appended by whoever owns the thing that happened and
