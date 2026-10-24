@@ -85,7 +85,9 @@ async function ringRoomTopic(args: PlaceRingArgs, to: string): Promise<string> {
   if (args.room_topic === undefined) {
     return (await rooms.openRoom({ purpose: args.purpose, participants: [to] })).room_topic;
   }
-  if (!rooms.isJoined(args.room_topic)) {
+  // Membership is per identity (room_membership.ts): the same node-id rule every other tool here uses.
+  const me = presence.currentNodeId() ?? (await selfNodeId());
+  if (!rooms.isJoined(me, args.room_topic)) {
     throw new rooms.RoomError(`not in room ${args.room_topic} -- open or join it first, or omit room_topic`);
   }
   return args.room_topic;

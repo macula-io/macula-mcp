@@ -59,7 +59,7 @@ describe("dropped()", () => {
     const room = newRoomTopic();
     expect(lobbyObserver.dropped(room)).toBe(0);
     await lobbyObserver.start({});
-    await lobbyObserver.tapRoom(room, { joined: 1 });
+    await lobbyObserver.tapRoom(room);
     subscribedTo(room).lost = 6;
     subscribedTo("agents.lobby").lost = 2;
     expect(lobbyObserver.dropped(room)).toBe(6);
@@ -67,7 +67,7 @@ describe("dropped()", () => {
     // A re-tap is a fresh subscription counting from 0: the transcript's holes stay counted.
     lobbyObserver.untapRoom(room);
     expect(lobbyObserver.dropped(room)).toBe(6);
-    await lobbyObserver.tapRoom(room, { joined: 1 });
+    await lobbyObserver.tapRoom(room);
     const fresh = subs.filter((s) => s.topic === room).at(-1)!;
     expect(lobbyObserver.dropped(room)).toBe(6);
     fresh.lost = 1;
@@ -81,7 +81,7 @@ describe("dropped()", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const room = newRoomTopic();
     await lobbyObserver.start({});
-    await lobbyObserver.tapRoom(room, { joined: 1 });
+    await lobbyObserver.tapRoom(room);
     subscribedTo(room).lost = 5;
     subscribedTo("agents.lobby").lost = 2;
     lobbyObserver.untapRoom(room);
@@ -160,16 +160,17 @@ describe("public room discovery", () => {
     await lobbyObserver.start({ maxRooms: 1 });
     const [publicRoom, joinedRoom] = [newRoomTopic(), newRoomTopic()];
     subscribedTo("agents.lobby").onEvent(event(buildEnvelope({ room_topic: publicRoom, from: ME, kind: "room_opened", text: "" })));
-    await lobbyObserver.tapRoom(joinedRoom, { joined: 1 });
+    // tapRoom is what rooms.ts asks for when this agent opens or joins a room; the cap counts only the taps
+    // this observer opened for a public room it overheard (macula-mcp#44 step 6).
+    await lobbyObserver.tapRoom(joinedRoom);
     expect(lobbyObserver.isTapped(publicRoom)).toBe(true);
     expect(lobbyObserver.isTapped(joinedRoom)).toBe(true);
-    expect(lobbyObserver.joinedRooms()).toEqual([joinedRoom]);
   });
 });
 
 describe("tapRoom() / untapRoom()", () => {
   it("refuses to tap while the observer is not active", async () => {
-    await expect(lobbyObserver.tapRoom(newRoomTopic(), { joined: 1 })).rejects.toThrow(/not active/);
+    await expect(lobbyObserver.tapRoom(newRoomTopic())).rejects.toThrow(/not active/);
   });
 
   it("resolves only once the room is subscribed, so a publish right after cannot outrun the tap", async () => {
@@ -183,7 +184,7 @@ describe("tapRoom() / untapRoom()", () => {
       return { stop, closed: new Promise(() => {}), dropped: () => 0 } as never;
     });
     let tapped = false;
-    const p = lobbyObserver.tapRoom(room, { joined: 1 }).then(() => (tapped = true));
+    const p = lobbyObserver.tapRoom(room).then(() => (tapped = true));
     await Promise.resolve();
     expect(tapped).toBe(false);
     release();
@@ -191,19 +192,19 @@ describe("tapRoom() / untapRoom()", () => {
     expect(subscribedTo(room)).toBeDefined();
   });
 
-  it("tapping a tapped room upgrades joined 0 -> 1 without subscribing again", async () => {
+  it("tapping a room already tapped does not subscribe to it again", async () => {
     await lobbyObserver.start({});
     const room = newRoomTopic();
-    await lobbyObserver.tapRoom(room, { joined: 0 });
-    await lobbyObserver.tapRoom(room, { joined: 1 });
+    await lobbyObserver.tapRoom(room);
+    await lobbyObserver.tapRoom(room);
     expect(subs.filter((s) => s.topic === room)).toHaveLength(1);
-    expect(lobbyObserver.joinedRooms()).toEqual([room]);
+    expect(lobbyObserver.isTapped(room)).toBe(true);
   });
 
   it("untapRoom ends the subscription and isTapped says so at once", async () => {
     await lobbyObserver.start({});
     const room = newRoomTopic();
-    await lobbyObserver.tapRoom(room, { joined: 1 });
+    await lobbyObserver.tapRoom(room);
     lobbyObserver.untapRoom(room);
     expect(lobbyObserver.isTapped(room)).toBe(false);
     await vi.waitFor(() => expect(subscribedTo(room).stop).toHaveBeenCalledTimes(1));
@@ -219,7 +220,7 @@ describe("tapRoom() / untapRoom()", () => {
       subs.push({ topic: args.topic, onEvent: args.onEvent, stop, lost: 0 });
       return { stop, closed: new Promise(() => {}), dropped: () => 0 } as never;
     });
-    const p = lobbyObserver.tapRoom(room, { joined: 1 });
+    const p = lobbyObserver.tapRoom(room);
     lobbyObserver.untapRoom(room);
     release();
     await p;
@@ -236,7 +237,7 @@ describe("tapRoom() / untapRoom()", () => {
 describe("stop()", () => {
   it("ends central and every room subscription", async () => {
     await lobbyObserver.start({});
-    await lobbyObserver.tapRoom(newRoomTopic(), { joined: 1 });
+    await lobbyObserver.tapRoom(newRoomTopic());
     await lobbyObserver.tapRoom(newRoomTopic(), { joined: 0 });
     expect(await lobbyObserver.stop()).toEqual({ was_active: true, rooms_stopped: 2 });
     for (const s of subs) expect(s.stop).toHaveBeenCalledTimes(1);

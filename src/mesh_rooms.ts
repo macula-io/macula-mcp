@@ -315,7 +315,7 @@ export function registerMeshRooms(server: McpServer): void {
               rang_at: r.recorded_at,
             }))
           : [];
-        const { joined, seen_on_central, central_dropped } = rooms.listRooms();
+        const { joined, seen_on_central, central_dropped } = rooms.listRooms(me);
         return jsonContent({
           joined: joined.map((r) => ({
             ...r,

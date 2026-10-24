@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { isRoomTopic } from "./envelope.js";
 import { ensureNodeEventsTable, firstRingReceivedAfter, lastNodeEventSeq, type NodeEvent } from "./node_events.js";
+import { ensureRoomMembershipTable } from "./room_membership.js";
 
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -305,6 +306,9 @@ function open(): DatabaseSync {
   // The node event log (macula-mcp#42, node_events.ts) shares this file on purpose: an entry is appended in
   // the same transaction as the ring row it describes, which two files could not give.
   ensureNodeEventsTable(db);
+  // Room membership (macula-mcp#44 step 6, room_membership.ts) is the other tenant: it belongs beside the
+  // transcript it describes, and outlives the process that recorded it.
+  ensureRoomMembershipTable(db);
   return db;
 }
 

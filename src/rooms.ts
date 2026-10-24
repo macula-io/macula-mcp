@@ -21,17 +21,19 @@
 //
 // (2026-09-03, release review) TWO correctness fixes:
 //   1. openRoom/joinRoom tapped the room BEFORE publishing. If the
-//      publish then failed (station unreachable), the exception propagated before rooms.set(), leaving a
-//      live tap the observer would watch forever and nothing would ever
+//      publish then failed (station unreachable), the exception propagated before the membership was
+//      recorded, leaving a live tap the observer would watch forever and nothing would ever
 //      untap -- a resource leak on every transient failure. Both now
 //      untap on a failed publish, so a retry starts clean.
-//   2. `rooms.has(topic)` (this module's own membership) and
-//      `lobbyObserver.isTapped(topic)` (whether anything is actually
-//      listening) could disagree: the observer being stopped and
-//      restarted rebuilds an EMPTY tap map, so a room this module
-//      still believed it was in was no longer watched. say() now checks
-//      both and re-taps (publishing a fresh participant_joined, which is
-//      harmless -- a re-affirmation, not a lie) before it says anything.
+//   2. membership and "is anything actually listening" could disagree:
+//      the observer being stopped and restarted rebuilds an EMPTY tap map, so a room this agent was
+//      still in was no longer watched. say() re-taps before it says anything (publishing a fresh
+//      participant_joined, which is harmless -- a re-affirmation, not a lie).
+//
+// (macula-mcp#44 step 6) The membership those two fixes reconciled is no longer this module's own Map:
+// room_membership.ts owns it, persists it, and serializes every transition, so the two copies are one and
+// a restart no longer loses the rooms. This module keeps the effects -- tapping, publishing, reading the
+// transcript.
 //
 // Every envelope is published on the shared pool under this server's one
 // identity and arrives at every participant with that verified publisher,
@@ -42,6 +44,8 @@
 import { publish, selfNodeId as ownNodeId } from "./macula_ts_client.js";
 import * as presence from "./presence.js";
 import * as lobbyObserver from "./lobby_observer.js";
+import * as roomMembership from "./room_membership.js";
+import type { RoomMembership } from "./room_membership.js";
 import { factsAfter, lastFactId, recentFacts, type ObservedFact } from "./lobby_transcript.js";
 import {
   buildEnvelope,
@@ -61,18 +65,8 @@ const CENTRAL_SCAN_LIMIT = 200;
 
 export class RoomError extends Error {}
 
-export interface RoomState {
-  room_topic: string;
-  opened_by: string;
-  /** 1 if this process opened it, 0 if it joined a room someone else opened. */
-  opened_here: 0 | 1;
-  /** 1 if the room_opened was also announced on central. */
-  public: 0 | 1;
-  purpose?: string;
-  joined_at: string;
-}
-
-const rooms = new Map<string, RoomState>();
+/** Joining under a cap (ring_service.ts's room limit) refused: the cap was reached inside the join's own turn, not before it. */
+export class RoomCapacityError extends RoomError {}
 
 /** The node id every envelope from this agent carries: this server's one identity, the publisher its facts are verified as. */
 async function selfNodeId(): Promise<string> {
@@ -85,7 +79,7 @@ async function ensureTapped(args: { room_topic: string }): Promise<void> {
   await lobbyObserver.start({});
   if (lobbyObserver.isTapped(args.room_topic)) return;
   const me = await selfNodeId();
-  await lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
+  await lobbyObserver.tapRoom(args.room_topic);
   const rejoined = buildEnvelope({ room_topic: args.room_topic, from: me, kind: "participant_joined", text: "" });
   await publish({ topic: args.room_topic, fact: { ...rejoined } });
 }
@@ -104,6 +98,10 @@ export interface OpenRoomResult {
 }
 
 export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
+  return roomMembership.exclusive(() => openRoomNow(args));
+}
+
+async function openRoomNow(args: OpenRoomArgs): Promise<OpenRoomResult> {
   await lobbyObserver.start({});
   const me = await selfNodeId();
   const roomTopic = newRoomTopic();
@@ -118,7 +116,7 @@ export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
   });
   // Tap BEFORE publishing so the opener's own first fact is in its transcript too;
   // on a failed publish, untap (see the module header) so nothing leaks.
-  await lobbyObserver.tapRoom(roomTopic, { joined: 1 });
+  await lobbyObserver.tapRoom(roomTopic);
   try {
     await publish({ topic: roomTopic, fact: { ...opened } });
   } catch (e) {
@@ -134,7 +132,7 @@ export async function openRoom(args: OpenRoomArgs): Promise<OpenRoomResult> {
       throw e;
     }
   }
-  rooms.set(roomTopic, {
+  roomMembership.record(me, {
     room_topic: roomTopic,
     opened_by: me,
     opened_here: 1,
@@ -151,16 +149,39 @@ export interface JoinRoomResult {
   already_joined: 0 | 1;
 }
 
-/** Joins a room learned from central, from a ring, or out of band: taps it and says participant_joined. Idempotent. openedBy is known from a ring; otherwise it is read from a room_opened this process has seen. On a failed publish, untaps so a retry starts clean. */
-export async function joinRoom(args: { room_topic: string; openedBy?: string }): Promise<JoinRoomResult> {
+export interface JoinRoomArgs {
+  room_topic: string;
+  openedBy?: string;
+  /**
+   * Refuse the join when this identity would go past `maxJoinedRooms` rooms it is not already in (the
+   * ring service's limit). Checked INSIDE the join's own turn, not before it: a caller that counts first
+   * and joins second races every other joiner.
+   */
+  maxJoinedRooms?: number;
+}
+
+/**
+ * Joins a room learned from central, from a ring, or out of band: taps it and says participant_joined.
+ * Idempotent, and serialized with every other membership transition (room_membership.ts's mailbox), so two
+ * joins that arrive together announce participant_joined once. openedBy is known from a ring; otherwise it
+ * is read from a room_opened this process has seen. On a failed publish, untaps so a retry starts clean.
+ */
+export async function joinRoom(args: JoinRoomArgs): Promise<JoinRoomResult> {
   if (!isRoomTopic(args.room_topic)) throw new RoomError(`not a room topic: ${args.room_topic}`);
-  if (rooms.has(args.room_topic)) {
+  return roomMembership.exclusive(() => joinRoomNow(args));
+}
+
+async function joinRoomNow(args: JoinRoomArgs): Promise<JoinRoomResult> {
+  await lobbyObserver.start({});
+  const me = await selfNodeId();
+  if (roomMembership.isJoined(me, args.room_topic)) {
     await ensureTapped({ room_topic: args.room_topic });
     return { room_topic: args.room_topic, joined: null, already_joined: 1 };
   }
-  await lobbyObserver.start({});
-  const me = await selfNodeId();
-  await lobbyObserver.tapRoom(args.room_topic, { joined: 1 });
+  if (args.maxJoinedRooms !== undefined && roomMembership.count(me) >= args.maxJoinedRooms) {
+    throw new RoomCapacityError(`this agent has reached its room limit (${args.maxJoinedRooms})`);
+  }
+  await lobbyObserver.tapRoom(args.room_topic);
   const joined = buildEnvelope({ room_topic: args.room_topic, from: me, kind: "participant_joined", text: "" });
   try {
     await publish({ topic: args.room_topic, fact: { ...joined } });
@@ -169,7 +190,7 @@ export async function joinRoom(args: { room_topic: string; openedBy?: string }):
     throw e;
   }
   const openedBy = args.openedBy ?? openerOf(args.room_topic) ?? "";
-  rooms.set(args.room_topic, {
+  roomMembership.record(me, {
     room_topic: args.room_topic,
     opened_by: openedBy,
     opened_here: 0,
@@ -187,30 +208,36 @@ export interface LeaveRoomResult {
 
 /** Says participant_left (or room_closed, with close: 1 -- meaningful from the opener, not enforced) and stops watching. */
 export async function leaveRoom(args: { room_topic: string; close?: 0 | 1 }): Promise<LeaveRoomResult> {
-  const room = rooms.get(args.room_topic);
-  if (!room) throw new RoomError(`not in room ${args.room_topic}`);
-  const me = await selfNodeId();
+  return roomMembership.exclusive(async () => leaveRoomNow(await selfNodeId(), args));
+}
+
+/** The transition itself, already inside the mailbox: leaveAll() must not queue behind its own leaveRoom(). */
+async function leaveRoomNow(me: string, args: { room_topic: string; close?: 0 | 1 }): Promise<LeaveRoomResult> {
+  if (!roomMembership.isJoined(me, args.room_topic)) throw new RoomError(`not in room ${args.room_topic}`);
   const closed: 0 | 1 = args.close === 1 ? 1 : 0;
   const left = buildEnvelope({ room_topic: args.room_topic, from: me, kind: closed === 1 ? "room_closed" : "participant_left", text: "" });
   await publish({ topic: args.room_topic, fact: { ...left } });
   lobbyObserver.untapRoom(args.room_topic);
-  rooms.delete(args.room_topic);
+  roomMembership.forget(me, args.room_topic);
   return { room_topic: args.room_topic, left, closed };
 }
 
 /** Best effort, for mesh_goodbye: leaves every room this agent is in, closing the ones it opened. Returns how many were left. Never throws -- a goodbye must not fail on an unreachable room. */
 export async function leaveAll(): Promise<number> {
-  let left = 0;
-  for (const room of [...rooms.values()]) {
-    try {
-      await leaveRoom({ room_topic: room.room_topic, close: room.opened_here });
-      left += 1;
-    } catch {
-      lobbyObserver.untapRoom(room.room_topic);
-      rooms.delete(room.room_topic);
+  return roomMembership.exclusive(async () => {
+    const me = await selfNodeId();
+    let left = 0;
+    for (const membership of roomMembership.memberships(me)) {
+      try {
+        await leaveRoomNow(me, { room_topic: membership.room_topic, close: membership.opened_here });
+        left += 1;
+      } catch {
+        lobbyObserver.untapRoom(membership.room_topic);
+        roomMembership.forget(me, membership.room_topic);
+      }
     }
-  }
-  return left;
+    return left;
+  });
 }
 
 /** Who opened a room, from the room_opened envelope if this process has seen it (on the room itself or announced on central). */
@@ -232,7 +259,7 @@ export interface SeenRoom {
   observed_at: string;
 }
 
-export interface RoomListing extends RoomState {
+export interface RoomListing extends RoomMembership {
   /** Distinct senders seen on the room in this process's transcript, minus those whose last lifecycle fact was participant_left. Only ATTESTED facts (station-confirmed publisher, see envelope.ts) count. */
   participants_seen: string[];
   messages_received: number;
@@ -243,7 +270,7 @@ export interface RoomListing extends RoomState {
 }
 
 /** One joined room's listing: its own state plus who was seen in its transcript. */
-function roomListing(room: RoomState): RoomListing {
+function roomListing(room: RoomMembership): RoomListing {
   const { total, facts } = recentFacts({ topic: room.room_topic, limit: CENTRAL_SCAN_LIMIT });
   const present = new Map<string, 0 | 1>();
   for (const f of facts) {
@@ -261,9 +288,9 @@ function roomListing(room: RoomState): RoomListing {
 }
 
 /** A room announced on central that this agent has not joined, once per topic. */
-function seenRoom(f: ObservedFact, seenTopics: Set<string>): SeenRoom | undefined {
+function seenRoom(f: ObservedFact, me: string, seenTopics: Set<string>): SeenRoom | undefined {
   const env = parseEnvelope(JSON.parse(f.raw_json));
-  if (!env || env.kind !== "room_opened" || rooms.has(env.room_topic) || seenTopics.has(env.room_topic)) return undefined;
+  if (!env || env.kind !== "room_opened" || roomMembership.isJoined(me, env.room_topic) || seenTopics.has(env.room_topic)) return undefined;
   seenTopics.add(env.room_topic);
   return {
     room_topic: env.room_topic,
@@ -275,12 +302,12 @@ function seenRoom(f: ObservedFact, seenTopics: Set<string>): SeenRoom | undefine
 }
 
 /** Rooms this agent is in, plus public rooms announced on central it hasn't joined, with what central's feed lost (DROPPED_MEANS). */
-export function listRooms(): { joined: RoomListing[]; seen_on_central: SeenRoom[]; central_dropped: number } {
-  const joined = [...rooms.values()].map(roomListing);
+export function listRooms(me: string): { joined: RoomListing[]; seen_on_central: SeenRoom[]; central_dropped: number } {
+  const joined = roomMembership.memberships(me).map(roomListing);
   const seen: SeenRoom[] = [];
   const seenTopics = new Set<string>();
   for (const f of recentFacts({ topic: CENTRAL_TOPIC, limit: CENTRAL_SCAN_LIMIT }).facts) {
-    const room = seenRoom(f, seenTopics);
+    const room = seenRoom(f, me, seenTopics);
     if (room !== undefined) seen.push(room);
   }
   return { joined, seen_on_central: seen, central_dropped: lobbyObserver.dropped(CENTRAL_TOPIC) };
@@ -290,13 +317,14 @@ function isAttestedFact(env: Envelope, publisher: string | null): boolean {
   return typeof publisher === "string" && publisher.toLowerCase() === env.from.toLowerCase();
 }
 
-export function isJoined(roomTopic: string): boolean {
-  return rooms.has(roomTopic);
+/** Whether this identity is in a room. Read from the membership table (room_membership.ts), never from the observer's taps. */
+export function isJoined(me: string, roomTopic: string): boolean {
+  return roomMembership.isJoined(me, roomTopic);
 }
 
-/** How many rooms this agent is currently in -- the cheap check ring_service.ts's room cap uses, without listRooms()'s SQLite scans. */
-export function joinedRoomCount(): number {
-  return rooms.size;
+/** How many rooms this identity is in -- one indexed COUNT, without listRooms()'s scans. */
+export function joinedRoomCount(me: string): number {
+  return roomMembership.count(me);
 }
 
 /**
@@ -374,10 +402,8 @@ export async function waitRoom(args: WaitRoomArgs): Promise<WaitRoomResult> {
     await lobbyObserver.start({});
   } else if (!isRoomTopic(topic)) {
     throw new RoomError(`not a room topic or central: ${topic}`);
-  } else if (!rooms.has(topic)) {
-    await joinRoom({ room_topic: topic });
   } else {
-    await ensureTapped({ room_topic: topic });
+    await joinRoom({ room_topic: topic });
   }
   const me = await selfNodeId();
   const lostBefore = lobbyObserver.dropped(topic);
@@ -425,10 +451,8 @@ export async function say(args: SayArgs): Promise<SayResult> {
     await lobbyObserver.start({});
   } else if (!isRoomTopic(topic)) {
     throw new RoomError(`not a room topic or central: ${topic}`);
-  } else if (!rooms.has(topic)) {
-    await joinRoom({ room_topic: topic });
   } else {
-    await ensureTapped({ room_topic: topic });
+    await joinRoom({ room_topic: topic });
   }
   const me = await selfNodeId();
   const sent = buildEnvelope({
@@ -452,5 +476,5 @@ export async function say(args: SayArgs): Promise<SayResult> {
 
 /** Test hook: forget every room without publishing anything. */
 export function resetRoomsForTests(): void {
-  rooms.clear();
+  roomMembership.resetForTests();
 }

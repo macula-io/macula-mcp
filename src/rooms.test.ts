@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
+import { closeRings } from "./rings.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
@@ -28,6 +32,8 @@ vi.mock("./lobby_observer.js", () => ({
 
 beforeEach(async () => {
   process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB = ":memory:";
+  // Membership is a table in the per-machine rings.sqlite3 now (room_membership.ts): keep it in memory here too.
+  process.env.MACULA_MCP_RINGS_DB = ":memory:";
   mocks.currentNodeId.mockReturnValue(ME);
   mocks.selfNodeId.mockResolvedValue(ME);
   mocks.observerStart.mockResolvedValue({ already_active: true });
@@ -46,6 +52,8 @@ beforeEach(async () => {
 afterEach(() => {
   closeTranscript();
   delete process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB;
+  delete process.env.MACULA_MCP_RINGS_DB;
+  closeRings();
   vi.resetAllMocks();
   vi.useRealTimers();
 });
@@ -55,12 +63,12 @@ describe("openRoom", () => {
     const { openRoom, listRooms } = await import("./rooms.js");
     const res = await openRoom({ purpose: "review", participants: [THEM, ME] });
     expect(res.room_topic).toMatch(/^agents\.room\.[0-9a-f]{32}$/);
-    expect(mocks.tapRoom).toHaveBeenCalledWith(res.room_topic, { joined: 1 });
+    expect(mocks.tapRoom).toHaveBeenCalledWith(res.room_topic);
     expect(mocks.tapRoom.mock.invocationCallOrder[0]).toBeLessThan(mocks.publish.mock.invocationCallOrder[0]!);
     expect(mocks.publish).toHaveBeenCalledTimes(1);
     expect(res.opened).toMatchObject({ kind: "room_opened", from: ME, purpose: "review", participants: [ME, THEM], room_topic: res.room_topic });
     expect(res.announced_on_central).toBe(0);
-    expect(listRooms().joined).toEqual([expect.objectContaining({ room_topic: res.room_topic, opened_here: 1, public: 0, participants_seen: [ME], messages_received: 1 })]);
+    expect(listRooms(ME).joined).toEqual([expect.objectContaining({ room_topic: res.room_topic, opened_here: 1, public: 0, participants_seen: [ME], messages_received: 1 })]);
   });
 
   it("announces the same room_opened on central when public", async () => {
@@ -93,10 +101,10 @@ describe("joinRoom / leaveRoom", () => {
     const { joinRoom, listRooms } = await import("./rooms.js");
     const topic = `agents.room.${"2".repeat(32)}`;
     recordFact({ topic: "agents.lobby", payload: { message_id: "f".repeat(32), room_topic: topic, sent_at: 1, from: THEM, kind: "room_opened", text: "", purpose: "pairing" }, at: "2026-09-03T00:00:00.000Z", publisher: THEM });
-    expect(listRooms().seen_on_central).toEqual([expect.objectContaining({ room_topic: topic, opened_by: THEM, purpose: "pairing" })]);
+    expect(listRooms(ME).seen_on_central).toEqual([expect.objectContaining({ room_topic: topic, opened_by: THEM, purpose: "pairing" })]);
     await joinRoom({ room_topic: topic });
-    expect(listRooms().joined[0]).toMatchObject({ opened_by: THEM, opened_here: 0 });
-    expect(listRooms().seen_on_central).toEqual([]);
+    expect(listRooms(ME).joined[0]).toMatchObject({ opened_by: THEM, opened_here: 0 });
+    expect(listRooms(ME).seen_on_central).toEqual([]);
   });
 
   it("leaves with participant_left, or room_closed when closing, and untaps", async () => {
@@ -105,7 +113,7 @@ describe("joinRoom / leaveRoom", () => {
     const res = await leaveRoom({ room_topic, close: 1 });
     expect(res.left).toMatchObject({ kind: "room_closed" });
     expect(mocks.untapRoom).toHaveBeenCalledWith(room_topic);
-    expect(listRooms().joined).toEqual([]);
+    expect(listRooms(ME).joined).toEqual([]);
     await expect(leaveRoom({ room_topic })).rejects.toThrow(RoomError);
   });
 
@@ -115,7 +123,7 @@ describe("joinRoom / leaveRoom", () => {
     await joinRoom({ room_topic: `agents.room.${"3".repeat(32)}` });
     mocks.publish.mockRejectedValueOnce(new Error("station gone"));
     expect(await leaveAll({})).toBe(1);
-    expect(listRooms().joined).toEqual([]);
+    expect(listRooms(ME).joined).toEqual([]);
   });
 
   it("reports watched: 0, but keeps the room, when the observer no longer taps it", async () => {
@@ -127,7 +135,7 @@ describe("joinRoom / leaveRoom", () => {
     const { openRoom, listRooms } = await import("./rooms.js");
     const { room_topic } = await openRoom({});
     mocks.isTapped.mockReturnValue(false);
-    expect(listRooms().joined).toEqual([expect.objectContaining({ room_topic, watched: 0 })]);
+    expect(listRooms(ME).joined).toEqual([expect.objectContaining({ room_topic, watched: 0 })]);
   });
 });
 
@@ -155,7 +163,7 @@ describe("say", () => {
     const res = await say({ room_topic: "agents.lobby", kind: "help_requested", text: "anyone know erlang?" });
     expect(mocks.publish).toHaveBeenCalledTimes(1);
     expect(res.sent.room_topic).toBe("agents.lobby");
-    expect(listRooms().joined).toEqual([]);
+    expect(listRooms(ME).joined).toEqual([]);
   });
 
   it("refuses a reply kind without in_reply_to, before publishing anything", async () => {
@@ -259,7 +267,7 @@ describe("waitRoom", () => {
     const topic = `agents.room.${"6".repeat(32)}`;
     const res = await waitRoom({ room_topic: topic, waitSeconds: 0 });
     expect(res).toMatchObject({ reply: null, timed_out: 1, dropped: 0 });
-    expect(listRooms().joined).toEqual([expect.objectContaining({ room_topic: topic })]);
+    expect(listRooms(ME).joined).toEqual([expect.objectContaining({ room_topic: topic })]);
   });
 
   it("reports timed_out: 1 when nothing arrives before the deadline, without touching the transcript itself", async () => {
@@ -292,7 +300,7 @@ describe("waitRoom", () => {
     const { openRoom, listRooms } = await import("./rooms.js");
     const { room_topic } = await openRoom({});
     mocks.dropped.mockImplementation((topic: string) => (topic === room_topic ? 3 : 1));
-    const listing = listRooms();
+    const listing = listRooms(ME);
     expect(listing.joined[0]).toMatchObject({ room_topic, dropped: 3 });
     expect(listing.central_dropped).toBe(1);
   });
@@ -312,6 +320,63 @@ describe("waitRoom", () => {
     await vi.advanceTimersByTimeAsync(REPLY_POLL_MS);
     const res = await pending;
     expect(res).toMatchObject({ timed_out: 0, reply: { from: THEM } });
-    expect(listRooms().joined).toEqual([]);
+    expect(listRooms(ME).joined).toEqual([]);
+  });
+});
+
+// macula-mcp#44 step 6. Membership used to be rooms.ts's Map plus the observer's per-tap `joined` flag,
+// reconciled by hand at each entry point, and in memory only. These pin the three things that followed from
+// that: two joins arriving together announce themselves twice, the membership dies with the process, and the
+// room cap was checked before the join rather than inside it.
+describe("one owner for room membership (macula-mcp#44)", () => {
+  const roomTopic = async (): Promise<string> => {
+    const { openRoom } = await import("./rooms.js");
+    return (await openRoom({ purpose: "one owner" })).room_topic;
+  };
+  const joinedAnnouncements = (): number => mocks.publish.mock.calls.filter(([arg]) => (arg.fact as { kind: string }).kind === "participant_joined").length;
+
+  it("two joins of the same room that arrive together announce participant_joined once", async () => {
+    const { joinRoom, listRooms, openRoom } = await import("./rooms.js");
+    const topic = (await openRoom({ purpose: "race" })).room_topic;
+    const anon = "agents.room." + "0".repeat(32);
+    // Two paths reach the same room at once: a ring accept and the model's own mesh_join_room.
+    const [a, b] = await Promise.all([joinRoom({ room_topic: anon }), joinRoom({ room_topic: anon })]);
+    expect(joinedAnnouncements()).toBe(1);
+    expect([a.already_joined, b.already_joined].sort()).toEqual([0, 1]);
+    expect(listRooms(ME).joined.map((r) => r.room_topic).sort()).toEqual([anon, topic].sort());
+  });
+
+  it("keeps the rooms this identity is in when the process restarts -- watched: 0 until something re-taps them", async () => {
+    const roomDir = await mkdtemp(join(tmpdir(), "macula-mcp-restart-"));
+    const { openRoom, listRooms } = await import("./rooms.js");
+    closeRings();
+    process.env.MACULA_MCP_RINGS_DB = join(roomDir, "rings.sqlite3");
+    const { room_topic } = await openRoom({ purpose: "outlives the process" });
+    expect(listRooms(ME).joined).toHaveLength(1);
+
+    // A new process: nothing survives but the file, so the table has to be the membership.
+    closeRings();
+    vi.resetModules();
+    mocks.isTapped.mockReturnValue(false);
+    const restarted = await import("./rooms.js");
+    expect(restarted.listRooms(ME).joined).toEqual([expect.objectContaining({ room_topic, purpose: "outlives the process", watched: 0 })]);
+    await rm(roomDir, { recursive: true, force: true });
+  });
+
+  it("lets exactly one of two simultaneous joins through when the cap allows one more", async () => {
+    const { joinRoom } = await import("./rooms.js");
+    await joinRoom({ room_topic: await roomTopic() });
+    const results = await Promise.allSettled([
+      joinRoom({ room_topic: "agents.room." + "1".repeat(32), maxJoinedRooms: 2 }),
+      joinRoom({ room_topic: "agents.room." + "2".repeat(32), maxJoinedRooms: 2 }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+  });
+
+  it("applies no cap to a room this identity is already in", async () => {
+    const { joinRoom } = await import("./rooms.js");
+    const topic = await roomTopic();
+    const again = await joinRoom({ room_topic: topic, maxJoinedRooms: 1 });
+    expect(again.already_joined).toBe(1);
   });
 });

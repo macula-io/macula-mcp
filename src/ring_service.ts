@@ -270,11 +270,15 @@ export async function handleRing(payload: unknown, deps: HandleDeps): Promise<Ha
 
   const policy = policyFor(deps);
   const accept = async (): Promise<RingReply> => {
-    if (!rooms.isJoined(ring.room_topic) && rooms.joinedRoomCount() >= MAX_JOINED_ROOMS) {
-      return decline("declined: this agent has reached its room limit", "too many joined rooms");
-    }
     const joinRoom = deps.joinRoom ?? rooms.joinRoom;
-    await joinRoom({ room_topic: ring.room_topic, openedBy: ring.from });
+    try {
+      // The cap is passed INTO the join (macula-mcp#44 step 6): checking it here, then joining, let two
+      // accepted rings both see 19 of 20 and both go through.
+      await joinRoom({ room_topic: ring.room_topic, openedBy: ring.from, maxJoinedRooms: MAX_JOINED_ROOMS });
+    } catch (e) {
+      if (e instanceof rooms.RoomCapacityError) return decline("declined: this agent has reached its room limit", "too many joined rooms");
+      throw e;
+    }
     ringReceived({ ...seed, answer: ANSWER.accepted });
     return reply(ANSWER.accepted, { room_topic: ring.room_topic });
   };
@@ -328,11 +332,13 @@ async function joinRoomForAcceptedAnswer(
   deps: { joinRoom?: (args: { room_topic: string; openedBy?: string }) => Promise<unknown> },
 ): Promise<void> {
   if (args.answer !== ANSWER.accepted) return;
-  if (!rooms.isJoined(ring.room_topic) && rooms.joinedRoomCount() >= MAX_JOINED_ROOMS) {
-    throw new Error(`this agent has reached its room limit (${MAX_JOINED_ROOMS}) -- decline instead, or leave a room first`);
-  }
   const joinRoom = deps.joinRoom ?? rooms.joinRoom;
-  await joinRoom({ room_topic: ring.room_topic, openedBy: ring.peer });
+  try {
+    await joinRoom({ room_topic: ring.room_topic, openedBy: ring.peer, maxJoinedRooms: MAX_JOINED_ROOMS });
+  } catch (e) {
+    if (e instanceof rooms.RoomCapacityError) throw new Error(`this agent has reached its room limit (${MAX_JOINED_ROOMS}) -- decline instead, or leave a room first`);
+    throw e;
+  }
 }
 
 /** Carries the answer back to the original caller; an unreachable caller is recorded, not thrown. */

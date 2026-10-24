@@ -20,7 +20,12 @@ function policyOf(contact_policy: Policy, allowlist: string[] = []): ContactPoli
 
 const mocks = vi.hoisted(() => ({ serve: vi.fn(), call: vi.fn() }));
 vi.mock("./macula_ts_client.js", () => ({ serve: mocks.serve, call: mocks.call }));
-vi.mock("./rooms.js", () => ({ joinRoom: vi.fn(), isJoined: vi.fn().mockReturnValue(false), joinedRoomCount: vi.fn().mockReturnValue(0) }));
+vi.mock("./rooms.js", () => ({
+  joinRoom: vi.fn(),
+  isJoined: vi.fn().mockReturnValue(false),
+  joinedRoomCount: vi.fn().mockReturnValue(0),
+  RoomCapacityError: class RoomCapacityError extends Error {},
+}));
 
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";
@@ -62,10 +67,10 @@ describe("contactPolicy", () => {
 
 describe("handleRing: a ring", () => {
   it("accepts under an open policy: joins the room first, then answers 1", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing, MAX_JOINED_ROOMS } = await import("./ring_service.js");
     const joinRoom = vi.fn().mockResolvedValue({});
     const reply = await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom });
-    expect(joinRoom).toHaveBeenCalledWith({ room_topic: ROOM, openedBy: CALLER });
+    expect(joinRoom).toHaveBeenCalledWith({ room_topic: ROOM, openedBy: CALLER, maxJoinedRooms: MAX_JOINED_ROOMS });
     expect(reply).toEqual({ ring_id: "d".repeat(32), answer: 1, room_topic: ROOM });
     expect(getRing("d".repeat(32), ME)).toMatchObject({ direction: "in", self: ME, peer: CALLER, answer: 1 });
   });
@@ -141,14 +146,13 @@ describe("handleRing: a ring", () => {
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringContaining("pending") });
   });
 
-  it("declines an accept that would take this agent past its room limit", async () => {
+  it("declines an accept whose join is refused at the room limit -- the cap is decided inside the join (macula-mcp#44 step 6)", async () => {
     const { handleRing, MAX_JOINED_ROOMS } = await import("./ring_service.js");
     const rooms = await import("./rooms.js");
-    vi.mocked(rooms.joinedRoomCount).mockReturnValue(MAX_JOINED_ROOMS);
-    const joinRoom = vi.fn();
+    const joinRoom = vi.fn().mockRejectedValue(new rooms.RoomCapacityError(`this agent has reached its room limit (${MAX_JOINED_ROOMS})`));
     const reply = await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom });
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringContaining("room limit") });
-    expect(joinRoom).not.toHaveBeenCalled();
+    expect(joinRoom).toHaveBeenCalledWith(expect.objectContaining({ maxJoinedRooms: MAX_JOINED_ROOMS }));
   });
 });
 
@@ -194,7 +198,7 @@ describe("answerPendingRing", () => {
   }
 
   it("accept: joins the room first, records, then carries the ring_answer to the caller's own ~<node_id>/ring", async () => {
-    const { answerPendingRing } = await import("./ring_service.js");
+    const { answerPendingRing, MAX_JOINED_ROOMS } = await import("./ring_service.js");
     pending();
     const order: string[] = [];
     const joinRoom = vi.fn(async () => {
@@ -208,7 +212,7 @@ describe("answerPendingRing", () => {
     });
     const res = await answerPendingRing({ ring_id: "f".repeat(32), answer: 1 }, { nodeId: ME, joinRoom });
     expect(order).toEqual(["join", "notify"]);
-    expect(joinRoom).toHaveBeenCalledWith({ room_topic: ROOM, openedBy: THEM });
+    expect(joinRoom).toHaveBeenCalledWith({ room_topic: ROOM, openedBy: THEM, maxJoinedRooms: MAX_JOINED_ROOMS });
     expect(res).toMatchObject({ answer: 1, peer: THEM, room_topic: ROOM, caller_notified: 1 });
     expect(pendingIncoming(ME)).toEqual([]);
   });

@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   isTapped: vi.fn(),
   dropped: vi.fn(),
   isJoined: vi.fn(),
-  actualIsJoined: undefined as ((topic: string) => boolean) | undefined,
+  actualIsJoined: undefined as ((me: string, topic: string) => boolean) | undefined,
 }));
 vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
 vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
@@ -41,7 +41,7 @@ vi.mock("./lobby_observer.js", () => ({
 vi.mock("./rooms.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./rooms.js")>();
   mocks.actualIsJoined = actual.isJoined;
-  return { ...actual, isJoined: (topic: string) => mocks.isJoined(topic) };
+  return { ...actual, isJoined: (me: string, topic: string) => mocks.isJoined(me, topic) };
 });
 
 beforeEach(() => {
@@ -53,7 +53,7 @@ beforeEach(() => {
   mocks.observerStart.mockResolvedValue({ already_active: true });
   mocks.isTapped.mockReturnValue(true);
   mocks.dropped.mockReturnValue(0);
-  mocks.isJoined.mockImplementation((topic: string) => mocks.actualIsJoined!(topic));
+  mocks.isJoined.mockImplementation((me: string, topic: string) => mocks.actualIsJoined!(me, topic));
   // Same as rooms.test.ts's own: records the opener's own facts (room_opened,
   // participant_joined on re-tap) into the real local transcript, the way
   // the background watch genuinely would -- so isJoined/listRooms and

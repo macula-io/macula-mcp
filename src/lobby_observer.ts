@@ -28,9 +28,16 @@ export const LOBBY_TOPIC = CENTRAL_TOPIC;
 
 const DEFAULT_MAX_ROOMS = 20;
 
-/** A room tap: its subscription (in flight until subscribed), and whether this agent opened or joined the room on purpose rather than tapping it because it was announced. */
+/**
+ * A room tap: its subscription (in flight until subscribed).
+ *
+ * No `joined` flag (macula-mcp#44 step 6): whether this agent is IN a room is room_membership.ts's fact,
+ * not this module's. A tap here means "this process is listening", and nothing more -- the two questions
+ * used to be one field in two places, reconciled by hand at every entry point.
+ */
 interface RoomTap {
-  joined: 0 | 1;
+  /** 1 when this tap was opened because a public room was announced on central, 0 when this agent opened or joined the room itself. Only the former counts against the public-room cap. */
+  public: 0 | 1;
   subscribed: Promise<Subscription | undefined>;
   /** The subscription once it is in place. */
   sub?: Subscription;
@@ -104,37 +111,46 @@ function tapPublicRoomIfNew(centralPayload: unknown): void {
   const env = parseEnvelope(centralPayload);
   if (!env || env.kind !== "room_opened" || !isRoomTopic(env.room_topic)) return;
   if (s.roomTaps.has(env.room_topic)) return;
-  const publicTaps = [...s.roomTaps.values()].filter((t) => t.joined === 0).length;
+  const publicTaps = [...s.roomTaps.values()].filter((t) => t.public === 1).length;
   if (publicTaps >= s.maxRooms) {
     s.droppedForCap += 1;
     return;
   }
   // Not awaited: a passive reaction to someone else's announcement, with no
   // publish of our own right behind it that needs the tap live first.
-  void tapRoom(env.room_topic, { joined: 0 }).catch((e) => {
+  void tapPublicRoom(env.room_topic).catch((e) => {
     console.error(`lobby observer: tapping ${env.room_topic} failed: ${e instanceof Error ? e.message : String(e)}`);
   });
 }
 
 /**
- * Watches `roomTopic`, recording every fact, or marks an existing tap as
- * joined. A joined tap is exempt from the public-room cap: opening or
- * joining a room is this agent's own decision. Registered at once, so
+ * Watches `roomTopic`, recording every fact. Registered at once, so
  * isTapped() sees it; resolves once the subscription is in place, so the
  * caller's own publish right after cannot outrun it. Throws when the
  * observer is not active, or the subscription fails (the tap is dropped).
+ *
+ * This is the tap rooms.ts asks for when this agent opens or joins a room, and it is exempt from the
+ * public-room cap: joining a room is this agent's own decision, not an announcement it overheard.
  */
-export async function tapRoom(roomTopic: string, opts: { joined: 0 | 1 }): Promise<void> {
+export async function tapRoom(roomTopic: string): Promise<void> {
+  await tap(roomTopic, 0);
+}
+
+/** A public room announced on central: tapped up to the observer's own cap, and counted against it. */
+async function tapPublicRoom(roomTopic: string): Promise<void> {
+  await tap(roomTopic, 1);
+}
+
+async function tap(roomTopic: string, isPublic: 0 | 1): Promise<void> {
   const s = state;
   if (!s) throw new Error("lobby observer is not active -- start() it before tapping a room");
   const existing = s.roomTaps.get(roomTopic);
   if (existing) {
-    if (opts.joined === 1) existing.joined = 1;
     await existing.subscribed;
     return;
   }
   const subscribing = subscribe({ topic: roomTopic, onEvent: (evt) => record(roomTopic, evt) });
-  const tap: RoomTap = { joined: opts.joined, subscribed: subscribing.catch(() => undefined) };
+  const tap: RoomTap = { public: isPublic, subscribed: subscribing.catch(() => undefined) };
   s.roomTaps.set(roomTopic, tap);
   try {
     tap.sub = recordLossesOf(roomTopic, await subscribing);
@@ -184,30 +200,22 @@ export function isTapped(roomTopic: string): boolean {
   return state?.roomTaps.has(roomTopic) ?? false;
 }
 
-/** Room topics this agent opened or joined on purpose. */
-export function joinedRooms(): string[] {
-  if (!state) return [];
-  return [...state.roomTaps.entries()].filter(([, t]) => t.joined === 1).map(([topic]) => topic);
-}
-
 export interface ObserverStatus {
   active: boolean;
   lobby_topic: string;
   room_topics: string[];
-  joined_room_topics: string[];
   max_rooms: number;
   dropped_for_cap: number;
 }
 
 export function status(): ObserverStatus {
   if (!state) {
-    return { active: false, lobby_topic: LOBBY_TOPIC, room_topics: [], joined_room_topics: [], max_rooms: 0, dropped_for_cap: 0 };
+    return { active: false, lobby_topic: LOBBY_TOPIC, room_topics: [], max_rooms: 0, dropped_for_cap: 0 };
   }
   return {
     active: true,
     lobby_topic: LOBBY_TOPIC,
     room_topics: [...state.roomTaps.keys()],
-    joined_room_topics: joinedRooms(),
     max_rooms: state.maxRooms,
     dropped_for_cap: state.droppedForCap,
   };
