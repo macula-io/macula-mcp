@@ -34,7 +34,7 @@
 // keeps its membership for as long as that identity exists; name the
 // agent (MACULA_MCP_AGENT) or pin MACULA_MCP_IDENTITY to keep both across
 // harness sessions.
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { hostname, arch, homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
@@ -43,6 +43,7 @@ import type { JsonValue } from "@macula-io/ts";
 import { carriedPublicKey, JOIN_SESSION_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
 import { realmIdOf } from "./mesh_config.js";
 import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
+import { acquireLock, releaseLock } from "./realm_lock.js";
 import { ringsDb } from "./rings.js";
 import { serverVersion } from "./version.js";
 
@@ -163,108 +164,12 @@ function recordJoinConfirmed(cred: RealmCredential, realmName: string): void {
 // happened to re-read at the right moment.
 //
 // So every write goes through storeMembership, which takes a lock file next to the credential (the CLI is
-// another OS process, so an in-process mutex is not enough), re-reads the file under that lock, applies
-// the caller's POLICY to what is on disk now, and writes through a temp file and a rename. Nothing else
-// writes a credential: the three exported functions below are the three policies, not three writers.
-const LOCK_TIMEOUT_MS = 5_000;
-const LOCK_STALE_MS = 30_000;
-const LOCK_RETRY_MS = 10;
-
-/** How long a store waits for the credential lock. MACULA_MCP_REALM_LOCK_TIMEOUT_MS exists for the tests. */
-function lockTimeoutMs(): number {
-  const configured = Number(process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured >= 0 ? configured : LOCK_TIMEOUT_MS;
-}
-
+// another OS process, so an in-process mutex is not enough -- realm_lock.ts owns that lock and the one-winner
+// reclaim of one a crashed holder left), re-reads the file under that lock, applies the caller's POLICY to
+// what is on disk now, and writes through a temp file and a rename. Nothing else writes a credential: the
+// three exported functions below are the three policies, not three writers.
 function lockPath(nodeId: string, realmName: string): string {
   return join(realmDir(), nodeId, `${realmName}.lock`);
-}
-
-/** Sleeps this thread only: the lock is taken synchronously, and a store is never on an await. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function lockHolder(path: string): { pid?: number } | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown };
-    return { pid: typeof parsed.pid === "number" ? parsed.pid : undefined };
-  } catch {
-    return undefined;
-  }
-}
-
-function processAlive(pid: number | undefined): boolean {
-  if (pid === undefined || !Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-/**
- * A lock its holder is done with: that process is gone (a CLI killed mid-join, the common case), or the
- * file is older than any store has any business being (a holder that died without a readable pid). Without
- * this, one crashed process would wedge every later join behind a five-second timeout forever.
- */
-function abandonedLock(path: string): boolean {
-  const holder = lockHolder(path);
-  if (holder?.pid !== undefined && !processAlive(holder.pid)) return true;
-  try {
-    return Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS;
-  } catch {
-    return true;
-  }
-}
-
-function tryLock(path: string): number | undefined {
-  try {
-    const fd = openSync(path, "wx", 0o600);
-    writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }));
-    return fd;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "EEXIST") return undefined;
-    throw e;
-  }
-}
-
-/** Takes the credential lock, or throws: a store that cannot be sure what is on disk must not write. */
-function acquireLock(path: string): number {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const deadline = Date.now() + lockTimeoutMs();
-  for (;;) {
-    const held = tryLock(path);
-    if (held !== undefined) return held;
-    if (abandonedLock(path)) {
-      try {
-        unlinkSync(path);
-      } catch {
-        // another waiter got there first, which is fine: it holds, or it does not
-      }
-      continue;
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(`realm: the credential lock ${path} is held by another process (pid ${lockHolder(path)?.pid ?? "unknown"}); gave up after ${lockTimeoutMs()} ms without writing`);
-    }
-    sleepSync(LOCK_RETRY_MS);
-  }
-}
-
-function releaseLock(path: string, fd: number): void {
-  try {
-    closeSync(fd);
-  } catch {
-    // nothing to release
-  }
-  // Reclaimed while we held it (we overran the stale window): the file is someone else's now.
-  if (lockHolder(path)?.pid !== process.pid) return;
-  try {
-    unlinkSync(path);
-  } catch {
-    // already gone
-  }
 }
 
 /** Writes the credential 0600 through a temp file and a rename, so no reader ever sees half a file. */
