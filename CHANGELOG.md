@@ -7,6 +7,60 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-10-24
+
+Steps 4-7 of the state-ownership review (macula-mcp#44): the stateful half of this server — room
+membership, realm credentials, the presence lifecycle — gets one owner per piece of state, changed in
+one place and in order. No tool loses a parameter or a field; the additions are optional.
+
+### Added
+
+- `mesh_wait_room` takes `after_seq` and returns `next_after_seq` (#44 step 4). The wait started from the
+  topic's last fact, so a reply that landed between your last read and this call was waited PAST and
+  never returned. It now continues from the cursor you pass — a previous `mesh_read_inbox` or
+  `mesh_wait_room` `next_after_seq` — and hands back the cursor to continue from, so a message recorded
+  behind the reply in the same poll is not skipped either. Omitted, it waits from now, which is what
+  every existing caller already got. `mesh_wait_ring` already took a cursor from the node event log
+  (#42); `mesh_say`'s `wait_reply_seconds` is unchanged.
+
+### Changed
+
+- **Room membership is persisted, and one module owns it** (#44 step 6). Which rooms this agent is in
+  used to live in two places — a Map in memory and the observer's per-tap flag — so a restart lost the
+  membership while the room transcript, in the same file, survived, and `mesh_unobserve_lobby` dropped
+  every tap while the rooms were still listed. The membership is now a table in the per-machine
+  `rings.sqlite3`, scoped by node id. A restore no longer reads as silence: `mesh_read_inbox`,
+  `mesh_rooms` and presence's own start re-tap every room nothing is watching, and say
+  `participant_joined` again, so the room's other side sees this agent back rather than gone quiet. A
+  room that refuses its re-tap stays unwatched and the rest carry on. Joining, leaving, opening and
+  leaving-all run one at a time, so two joins of the same room announce `participant_joined` once.
+- **The presence lifecycle is one mailbox** (#44 step 7). Starting, stopping and re-asserting presence
+  are handled in order instead of interleaving across their awaits: a `mesh_goodbye` that arrives during
+  a start now tears down what that start built instead of leaving the ring endpoint served after goodbye
+  and leaking the membership-renewal timer, and a `mesh_hello` that arrives during a goodbye is no
+  longer torn down by the goodbye that had already finished.
+- **The realm credential file has one writer, across processes** (#44 step 5). `macula-mcp-realm` joins
+  from a second process on the same box, so a writer takes a lock file beside the credential, re-reads
+  the credential under it, decides, writes and lets go — two processes can no longer both decide on what
+  they saw before they started. A lock left by a process that is gone is reclaimed at once; one whose
+  holder cannot be read, or that has outlived the store by far, is reclaimed by age and by exactly one
+  reclaimant, so a lock left behind after a reboot can no longer wedge every later membership write.
+  Beginning and polling a join session are serialized in the same way, and an `abandon` is no longer
+  lost if it lands while a session is being opened.
+
+### Fixed
+
+- A join confirmed at the realm while another process held the credential lock no longer loses the
+  membership: the pending session is kept and the next poll stores it. Before, the session was cleared
+  before the write, and the failed write was an unhandled rejection, which exits the server.
+- Waiting for the credential lock no longer blocks the process: the wait used to sleep synchronously, so
+  one contended membership write froze every other tool call for up to five seconds.
+- A room whose re-tap fails no longer fails presence's start or errors the whole `mesh_read_inbox` read.
+
+### Security
+
+- `fast-uri` is pinned to `^4.2.3` under `ajv`: the advisory names every 3.x release there is.
+
 ## [0.49.0] - 2026-10-24
 
 ### Added
