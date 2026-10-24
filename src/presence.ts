@@ -62,13 +62,43 @@ interface PresenceState {
   renewTimer?: NodeJS.Timeout;
 }
 
+/** This process's presence while it is up. Written only from inside a mailbox turn (see exclusive). */
 let state: PresenceState | undefined;
 
 /** True once mesh_goodbye has run, until start() runs again; ensurePresence() never undoes it. */
 let explicitlyLeft = false;
 
-/** A fresh start() in flight, which every concurrent caller awaits instead of starting a second one. */
-let starting: Promise<StartResult> | undefined;
+/** A start is queued or in flight. Only ensurePresence's dedupe marker -- the mailbox owns the lifecycle. */
+let startQueued = false;
+
+/**
+ * The lifecycle mailbox (macula-mcp#44 step 7): starting, stopping and re-asserting are transitions of ONE
+ * piece of state -- this process's presence -- so they are handled one at a time, in the order they
+ * arrived, the way room membership and the realm's pending session already are. Everything here writes
+ * that state; nothing else in this module does, once a turn has begun.
+ *
+ * Before this they interleaved across their awaits. A mesh_goodbye during the fire-and-forget start
+ * ensurePresence makes (the only way a stop can arrive mid-start in practice) ran its teardown inside the
+ * start: the ring endpoint came up after goodbye had already been said, and `state.renewTimer` was written
+ * on a state that was gone by then -- a leaked timer renewing a membership nobody would hear about. A
+ * restart during a stop was worse: the stop had already set `state = undefined`, so the start saw a free
+ * slot, built a whole new presence, and was then torn down by the stop that had given up on being present
+ * -- an agent that listed its rooms, answered tools, and heard nothing.
+ *
+ * A stop that arrives during a start now runs after it, and stops what the start began. The sub-services
+ * (ring endpoint, lobby observer, citizenship) are still started and stopped by presence alone, but always
+ * from inside one of these turns.
+ */
+let mailbox: Promise<unknown> = Promise.resolve();
+
+function exclusive<T>(op: () => T | Promise<T>): Promise<T> {
+  const run = mailbox.then(op, op);
+  mailbox = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 export function isActive(): boolean {
   return state !== undefined;
@@ -88,16 +118,21 @@ export function connectedViaLabel(server: McpServer): string | undefined {
  * explicit goodbye.
  */
 export function ensurePresence(server: McpServer): void {
-  if (state || explicitlyLeft || starting) return;
+  if (state || explicitlyLeft || startQueued) return;
+  startQueued = true;
   void start({
     operatorName: process.env.MACULA_MCP_OPERATOR_NAME,
     sessionName: process.env.MACULA_MCP_SESSION_NAME,
     message: process.env.MACULA_MCP_HELLO_MESSAGE,
     model: process.env.MACULA_MCP_MODEL,
     connectedVia: connectedViaLabel(server),
-  }).catch((e) => {
-    console.error("ensurePresence: background presence start failed:", e instanceof Error ? e.message : String(e));
-  });
+  })
+    .catch((e) => {
+      console.error("ensurePresence: background presence start failed:", e instanceof Error ? e.message : String(e));
+    })
+    .finally(() => {
+      startQueued = false;
+    });
 }
 
 export interface StartArgs {
@@ -143,16 +178,11 @@ export function currentNodeId(): string | undefined {
 /**
  * Idempotent: a second call just updates operatorName/sessionName/message/
  * model/connectedVia for future heartbeats. Clears explicitlyLeft.
- * Concurrent first calls await the same in-flight start.
+ * Concurrent first calls are queued, so the second finds the first's presence
+ * and re-asserts it.
  */
 export function start(args: StartArgs): Promise<StartResult> {
-  if (starting) return starting.then(() => start(args));
-  if (state) return doStart(args);
-  const p = doStart(args).finally(() => {
-    starting = undefined;
-  });
-  starting = p;
-  return p;
+  return exclusive(() => startNow(args));
 }
 
 function result(s: PresenceState, alreadyActive: boolean, citizen: citizenship.CitizenshipStatus): StartResult {
@@ -193,7 +223,8 @@ async function reassertPresence(args: StartArgs, s: PresenceState): Promise<Star
   return result(s, true, citizen);
 }
 
-async function doStart(args: StartArgs): Promise<StartResult> {
+/** The start transition itself, already inside the mailbox (a stop queued behind it runs only once it is done). */
+async function startNow(args: StartArgs): Promise<StartResult> {
   explicitlyLeft = false;
 
   if (state) return reassertPresence(args, state);
@@ -305,8 +336,19 @@ export interface StopResult {
   said_goodbye: boolean;
 }
 
-/** Publishes agent.goodbye, then tears everything down (lobby observing too: goodbye means leaving entirely), and marks explicitlyLeft. No-op if not active. */
-export async function stop(): Promise<StopResult> {
+/**
+ * Publishes agent.goodbye, then tears everything down (lobby observing too: goodbye means
+ * leaving entirely), and marks explicitlyLeft. No-op if not active.
+ *
+ * Queued behind any start in flight, so a goodbye said during one tears down the presence that
+ * start actually built rather than finding nothing to do.
+ */
+export function stop(): Promise<StopResult> {
+  return exclusive(() => stopNow());
+}
+
+/** The stop transition itself, already inside the mailbox: nothing in here can be interleaved with a start. */
+async function stopNow(): Promise<StopResult> {
   const s = state;
   if (!s) return { said_goodbye: false };
   state = undefined;

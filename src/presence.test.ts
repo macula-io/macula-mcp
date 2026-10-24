@@ -242,3 +242,68 @@ describe("stop()", () => {
     expect(presence.isActive()).toBe(false);
   });
 });
+
+// #44 step 7: start, stop and reassert are transitions of ONE piece of state, so they are handled one at a
+// time, in the order they arrived. Before the mailbox they interleaved across their awaits.
+describe("the lifecycle mailbox (macula-mcp#44 step 7)", () => {
+  it("a stop that arrives during a start runs after it and stops what the start began", async () => {
+    // The hello subscribe is slow enough for a mesh_goodbye -- the one ensurePresence's fire-and-forget
+    // start makes possible -- to arrive while the start is still in flight.
+    let releaseHello!: () => void;
+    const helloGate = new Promise<void>((r) => {
+      releaseHello = r;
+    });
+    vi.mocked(subscribe).mockImplementationOnce(async (args) => {
+      await helloGate;
+      const stop = vi.fn().mockResolvedValue(undefined);
+      const sub = { topic: args.topic, onEvent: args.onEvent, stop, lost: 0 };
+      subs.push(sub);
+      return { stop, closed: new Promise(() => {}), dropped: () => 0 } as never;
+    });
+
+    const starting = presence.start({ intervalSeconds: 10 });
+    const stopping = presence.stop();
+    releaseHello();
+
+    await expect(starting).resolves.toMatchObject({ node_id: NODE_ID });
+    // Queued behind the start, so it found a presence to tear down rather than nothing at all.
+    expect(await stopping).toEqual({ said_goodbye: true });
+    expect(presence.isActive()).toBe(false);
+    for (const sub of subs) expect(sub.stop).toHaveBeenCalledTimes(1);
+    const ringService = await import("./ring_service.js");
+    expect(ringService.stop).toHaveBeenCalled();
+    const lobbyObserver = await import("./lobby_observer.js");
+    expect(lobbyObserver.stop).toHaveBeenCalled();
+    // ... and the teardown is complete, not a half-state a second stop has to finish.
+    expect(await presence.stop()).toEqual({ said_goodbye: false });
+  });
+
+  it("a start that arrives during a stop runs after it, so the new presence is not torn down by the old one", async () => {
+    await presence.start({});
+    // Hold the goodbye publish open so the start lands mid-stop.
+    let releaseGoodbye!: () => void;
+    const goodbyeGate = new Promise<void>((r) => {
+      releaseGoodbye = r;
+    });
+    vi.mocked(publish).mockImplementationOnce(async () => {
+      await goodbyeGate;
+      return { topic: "x", duration_ms: 1 };
+    });
+
+    const stopping = presence.stop();
+    const restarting = presence.start({});
+    releaseGoodbye();
+    await expect(stopping).resolves.toEqual({ said_goodbye: true });
+    await expect(restarting).resolves.toMatchObject({ node_id: NODE_ID });
+
+    expect(presence.isActive()).toBe(true);
+    // The restart's observer start is the LAST word on the observer: the stop that finished first cannot
+    // leave the new presence unwatched.
+    const lobbyObserver = await import("./lobby_observer.js");
+    const lastStart = vi.mocked(lobbyObserver.start).mock.invocationCallOrder.at(-1)!;
+    const lastStop = vi.mocked(lobbyObserver.stop).mock.invocationCallOrder.at(-1)!;
+    expect(lastStart).toBeGreaterThan(lastStop);
+    expect(subs).toHaveLength(4); // two from the first start, two from the restart
+    await presence.stop();
+  });
+});
