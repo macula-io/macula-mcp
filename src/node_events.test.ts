@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { answerClaimedRing, claimDeferredRing, releaseClaim, ringPlaced, ringReceived, ringReply } from "./ring_agents/ring_dossier.js";
 import { lastNodeEventSeq, readNodeEvents } from "./node_events.js";
-import { closeRings, ringsDb } from "./ring_agents/rings.js";
+import { closeMachineDb, machineDb } from "./machine_transcript.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
@@ -14,7 +14,7 @@ const ROOM = `agents.room.${"1".repeat(32)}`;
 
 const seed = (ring_id: string) => ({ ring_id, self: ME, peer: THEM, purpose: "pair on the plan", room_topic: ROOM, sent_at: 5 });
 
-const read = (afterSeq?: number, limit = 50) => readNodeEvents(ringsDb(), { self: ME, afterSeq, limit });
+const read = (afterSeq?: number, limit = 50) => readNodeEvents(machineDb(), { self: ME, afterSeq, limit });
 const kinds = (afterSeq?: number, limit?: number) => read(afterSeq, limit).events.map((e) => `${e.kind}:${e.direction}:${e.answer}`);
 
 let dir = "";
@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  closeRings();
+  closeMachineDb();
   rmSync(dir, { recursive: true, force: true });
   delete process.env.MACULA_MCP_RINGS_DB;
 });
@@ -91,7 +91,7 @@ describe("an answer only moves forward", () => {
     expect(ringReply("7".repeat(32), 1, "in")).toBe(true);
     expect(ringReply("7".repeat(32), 2, "late")).toBe(false);
 
-    const out = readNodeEvents(ringsDb(), { self: THEM, limit: 50 });
+    const out = readNodeEvents(machineDb(), { self: THEM, limit: 50 });
     expect(out.events.map((e) => `${e.kind}:${e.direction}:${e.answer}`)).toEqual(["ring_answered:out:3", "ring_answered:out:1"]);
     // The peer's answer belongs to the caller's log, not the callee's.
     expect(read().events).toEqual([]);
@@ -100,7 +100,7 @@ describe("an answer only moves forward", () => {
   it("unreachable is not an answer: the reason lands on the row and the log says nothing", () => {
     ringPlaced({ ring_id: "8".repeat(32), self: THEM, peer: ME, purpose: "pair on the plan", room_topic: ROOM, sent_at: 5 });
     expect(ringReply("8".repeat(32), null, "unreachable: not serving")).toBe(true);
-    expect(readNodeEvents(ringsDb(), { self: THEM, limit: 50 }).events).toEqual([]);
+    expect(readNodeEvents(machineDb(), { self: THEM, limit: 50 }).events).toEqual([]);
   });
 });
 
@@ -133,7 +133,7 @@ describe("reading with a cursor", () => {
     ringReceived({ ...seed("d".repeat(32)), answer: 1 });
     ringReceived({ ring_id: "e".repeat(32), self: THEM, peer: ME, purpose: "for the other one", room_topic: ROOM, sent_at: 5, answer: 1 });
     expect(read().events).toHaveLength(2);
-    expect(readNodeEvents(ringsDb(), { self: THEM, limit: 50 }).events).toHaveLength(2);
+    expect(readNodeEvents(machineDb(), { self: THEM, limit: 50 }).events).toHaveLength(2);
   });
 });
 
@@ -141,7 +141,7 @@ describe("the log is on disk, for the next process", () => {
   it("entries survive a closed connection, and the seq keeps counting from where it was", () => {
     ringReceived({ ...seed("f".repeat(32)), answer: 1 });
     const before = read();
-    closeRings();
+    closeMachineDb();
 
     // A second process on this box (bin/realm.ts joining a realm, say) is another connection to this file.
     const other = new DatabaseSync(process.env.MACULA_MCP_RINGS_DB as string);
@@ -151,6 +151,6 @@ describe("the log is on disk, for the next process", () => {
 
     expect(read().events.map((e) => e.seq)).toEqual(before.events.map((e) => e.seq));
     ringReceived({ ...seed("2".repeat(32)), answer: null });
-    expect(lastNodeEventSeq(ringsDb(), ME)).toBe(3);
+    expect(lastNodeEventSeq(machineDb(), ME)).toBe(3);
   });
 });

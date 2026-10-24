@@ -17,8 +17,9 @@
 // Each transition that changed a row also appends the node event log's entry for it (node_events.ts), in
 // this same transaction: that is what lets a client read what happened instead of diffing snapshots.
 import { randomBytes } from "node:crypto";
-import { appendNodeEvent, NODE_EVENT } from "./../node_events.js";
-import { ANSWER, ringsDb, type Answer, type Direction, type RingRecord } from "./rings.js";
+import { appendNodeEvent, NODE_EVENT } from "../node_events.js";
+import { ANSWER, type Answer, type Direction, type RingRecord } from "./rings.js";
+import { machineDb } from "../machine_transcript.js";
 
 /** How long a claim may sit before another attempt may take it: a process killed mid-answer must not make a
  * ring unanswerable forever. */
@@ -45,18 +46,18 @@ function now(): string {
  * connection, inside that transaction, so it is the row as this transaction left it.
  */
 function logAnswered(ringId: string, direction: Direction, answer: Answer, reason: string | null, at: string): void {
-  const row = ringsDb()
+  const row = machineDb()
     .prepare("SELECT self, peer, room_topic FROM rings WHERE ring_id = ? AND direction = ?")
     .get(ringId, direction) as { self: string | null; peer: string; room_topic: string } | undefined;
   // A row written before `self` existed cannot be attributed to a node, and the log is per node.
   if (!row?.self) return;
-  appendNodeEvent(ringsDb(), { self: row.self, kind: NODE_EVENT.ringAnswered, at, ring_id: ringId, direction, peer: row.peer, room_topic: row.room_topic, answer, reason });
+  appendNodeEvent(machineDb(), { self: row.self, kind: NODE_EVENT.ringAnswered, at, ring_id: ringId, direction, peer: row.peer, room_topic: row.room_topic, answer, reason });
 }
 
 /** One statement in its own transaction: BEGIN IMMEDIATE so a second process waits (busy_timeout) rather
  * than reading a row this one is about to change. */
 function inTransaction<T>(run: () => T): T {
-  const db = ringsDb();
+  const db = machineDb();
   db.exec("BEGIN IMMEDIATE");
   try {
     const out = run();
@@ -74,7 +75,7 @@ function inTransaction<T>(run: () => T): T {
  */
 export function ringPlaced(seed: RingSeed): boolean {
   return inTransaction(() => {
-    const res = ringsDb()
+    const res = machineDb()
       .prepare(
         `INSERT INTO rings (ring_id, self, direction, peer, purpose, room_topic, sent_at, recorded_at)
          VALUES (@ring_id, @self, 'out', @peer, @purpose, @room_topic, @sent_at, @now)
@@ -97,7 +98,7 @@ export function ringReceived(seed: RingSeed & { answer: 1 | 2 | null; reason?: s
   return inTransaction(() => {
     const at = now();
     const self = seed.self.toLowerCase();
-    const res = ringsDb()
+    const res = machineDb()
       .prepare(
         `INSERT INTO rings (ring_id, self, direction, peer, purpose, room_topic, sent_at, recorded_at, answer, reason, answered_at)
          VALUES (@ring_id, @self, 'in', @peer, @purpose, @room_topic, @sent_at, @at, @answer, @reason, @answered_at)
@@ -112,7 +113,7 @@ export function ringReceived(seed: RingSeed & { answer: 1 | 2 | null; reason?: s
         answered_at: seed.answer === null ? null : at,
       });
     if (Number(res.changes) === 0) return false;
-    appendNodeEvent(ringsDb(), {
+    appendNodeEvent(machineDb(), {
       self,
       kind: NODE_EVENT.ringReceived,
       at,
@@ -139,7 +140,7 @@ export function ringReceived(seed: RingSeed & { answer: 1 | 2 | null; reason?: s
 export function ringReply(ringId: string, answer: Answer | null, reason?: string): boolean {
   if (answer === null) {
     return inTransaction(() => {
-      const res = ringsDb()
+      const res = machineDb()
         .prepare(
           `UPDATE rings SET reason = @reason, answered_at = NULL
            WHERE ring_id = @ring_id AND direction = 'out' AND answer IS NULL`,
@@ -151,7 +152,7 @@ export function ringReply(ringId: string, answer: Answer | null, reason?: string
 
   return inTransaction(() => {
     const at = now();
-    const res = ringsDb()
+    const res = machineDb()
       .prepare(
         `UPDATE rings SET answer = @answer, reason = @reason, answered_at = @at
          WHERE ring_id = @ring_id AND direction = 'out' AND (answer IS NULL OR answer = @deferred)`,
@@ -178,7 +179,7 @@ export function claimDeferredRing(ringId: string, self: string): Claim {
   const token = randomBytes(8).toString("hex");
 
   return inTransaction(() => {
-    const db = ringsDb();
+    const db = machineDb();
     const row = db.prepare("SELECT * FROM rings WHERE ring_id = ? AND self = ? AND direction = 'in'").get(ringId, self.toLowerCase()) as
       | RingRecord
       | undefined;
@@ -203,7 +204,7 @@ export function claimDeferredRing(ringId: string, self: string): Claim {
 export function answerClaimedRing(ringId: string, token: string, answer: 1 | 2, reason?: string): boolean {
   return inTransaction(() => {
     const at = now();
-    const res = ringsDb()
+    const res = machineDb()
       .prepare(
         `UPDATE rings SET answer = @answer, reason = @reason, answered_at = @at, claim = NULL, claimed_at = NULL
          WHERE ring_id = @ring_id AND direction = 'in' AND claim = @token AND answer IS NULL`,
@@ -219,7 +220,7 @@ export function answerClaimedRing(ringId: string, token: string, answer: 1 | 2, 
 /** Gives the claim back (the join failed, so nothing was answered): only this token's own claim is cleared. */
 export function releaseClaim(ringId: string, token: string): void {
   inTransaction(() => {
-    ringsDb()
+    machineDb()
       .prepare("UPDATE rings SET claim = NULL, claimed_at = NULL WHERE ring_id = ? AND direction = 'in' AND claim = ? AND answer IS NULL")
       .run(ringId, token);
   });

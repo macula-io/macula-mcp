@@ -39,7 +39,7 @@ vi.mock("./device_membership.js", () => ({
 
 import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
 import * as ringService from "./ring_agents/serve_rings.js";
-import { closeRings } from "./ring_agents/rings.js";
+import { closeMachineDb } from "./machine_transcript.js";
 import * as presence from "./presence.js";
 
 const NODE_ID = "a".repeat(64);
@@ -82,7 +82,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.resetAllMocks();
   closeRoster();
-  closeRings();
+  closeMachineDb();
   delete process.env.MACULA_MCP_ROSTER_DB;
   delete process.env.MACULA_MCP_NO_CITIZENSHIP;
   delete process.env.MACULA_MCP_RINGS_DB;

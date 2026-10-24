@@ -25,14 +25,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { selfNodeId } from "./../macula_ts_client.js";
-import { describeMeshError, errorContent, jsonContent } from "./../reply.js";
-import { ensurePresence } from "./../presence.js";
-import * as presence from "./../presence.js";
+import { selfNodeId } from "../macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "../reply.js";
+import { ensurePresence } from "../presence.js";
+import * as presence from "../presence.js";
 import * as ringService from "./serve_rings.js";
 import { waitRing, type WaitRingResult } from "./rings.js";
-import { petname } from "./../petname.js";
-import { toolDescription } from "./../tool_description.js";
+import { petname } from "../petname.js";
+import { toolDescription } from "../tool_description.js";
 
 const MAX_WAIT_SECONDS = 3600;
 

@@ -7,13 +7,13 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeMeshError, errorContent, jsonContent } from "./../reply.js";
-import { ensurePresence } from "./../presence.js";
+import { describeMeshError, errorContent, jsonContent } from "../reply.js";
+import { ensurePresence } from "../presence.js";
 import * as ringService from "./serve_rings.js";
-import * as rooms from "./../rooms.js";
-import { assertNoLikelySecret } from "./../secret_scan.js";
-import { petname } from "./../petname.js";
-import { toolDescription } from "./../tool_description.js";
+import * as rooms from "../rooms.js";
+import { assertNoLikelySecret } from "../secret_scan.js";
+import { petname } from "../petname.js";
+import { toolDescription } from "../tool_description.js";
 
 const DESCRIPTION_FULL =
   "Answer a ring that was deferred to you (mesh_read_inbox lists them under rings.pending, with who rang " +

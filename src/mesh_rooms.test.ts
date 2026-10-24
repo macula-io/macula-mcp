@@ -8,7 +8,8 @@
 // mock without re-verifying that claim is still false.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER, closeRings } from "./ring_agents/rings.js";
+import { ANSWER } from "./ring_agents/rings.js";
+import { closeMachineDb } from "./machine_transcript.js";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
 import { closeRoster, upsertAgent } from "./roster.js";
 import { petname } from "./petname.js";
@@ -67,7 +68,7 @@ beforeEach(() => {
 afterEach(async () => {
   const { resetRoomsForTests } = await import("./rooms.js");
   resetRoomsForTests();
-  closeRings();
+  closeMachineDb();
   closeTranscript();
   closeRoster();
   delete process.env.MACULA_MCP_RINGS_DB;

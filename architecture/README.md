@@ -34,7 +34,7 @@ Legend, the same in both diagrams and as in [mcl-fovea](https://github.com/macul
 | Serving | `mesh_serve.ts`, `mesh_unserve.ts`, `serve.ts` | Serves `~<node_id>/<name>`, each inbound call answered by the operator's local shell command |
 | `presence.ts` | Started on demand | The tools that use it call `ensurePresence` at their own entry (the serve pair, `mesh_hello`/`mesh_goodbye`, `mesh_agents`, `mesh_list_realms`, `mesh_lobby_observer` and `mesh_trust_agent` do not): `agent.hello` heartbeat and roster (`roster.ts`), `lobby_observer.ts`, `serve_rings.ts`, `citizenship.ts` (mcl-citizens), realm auto-join |
 | `macula_ts_client.ts` | Macula SDK, `@macula-io/ts` 0.31 | The one Pool under the one identity key: links to every configured station, direct dial, signed publications, subscriptions replayed on redial |
-| Local state | `node:sqlite` and files | `roster.sqlite3`, `lobby-transcript.sqlite3`, `rings.sqlite3`; the identity key, realm credentials, `contact_policy.json` |
+| Local state | `machine_transcript.ts`, `node:sqlite` and files | `roster.sqlite3`, `lobby-transcript.sqlite3`, and `rings.sqlite3` (owned by `machine_transcript.ts`: rings, the node event log and room membership in one per-machine file); the identity key, realm credentials, `contact_policy.json` |
 | `mesh_config.ts`, `io_macula_realm_key.ts` | Configuration | Pinned stations and trusted realm keys |
 | Companion executables | `src/bin`, `src/install` | `macula-mcp-register`, `-uninstall`, `-status`, `-doctor` (six MCP clients in `install/mcp_clients`), `macula-mcp-realm`, `macula-mcp-node-id` |
 

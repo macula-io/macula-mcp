@@ -18,12 +18,9 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { isRoomTopic } from "./../envelope.js";
-import { ensureNodeEventsTable, firstRingReceivedAfter, lastNodeEventSeq, type NodeEvent } from "./../node_events.js";
-import { ensureRoomMembershipTable } from "./../room_membership.js";
+import { machineDb } from "../machine_transcript.js";
+import { isRoomTopic } from "../envelope.js";
+import { firstRingReceivedAfter, lastNodeEventSeq, type NodeEvent } from "../node_events.js";
 
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -266,35 +263,16 @@ export function parseRingReply(payload: unknown): RingReply | undefined {
 }
 
 // ---- the local record of rings
-
-function dbPath(): string {
-  return process.env.MACULA_MCP_RINGS_DB ?? join(homedir(), ".macula-mcp", "rings.sqlite3");
-}
-
-let db: DatabaseSync | undefined;
+//
+// The FILE these rows live in is machine_transcript.ts's (macula-mcp#44 step 8): one per machine, shared
+// with the node event log and room membership. This module owns the rings table's own shape, and installs
+// it on the connection that module hands out.
 
 /** A pending ring older than this is neither shown nor answerable: the caller has long stopped waiting, and the room it names may be gone. */
 export const PENDING_RING_TTL_MS = 24 * 60 * 60 * 1000;
 
-function open(): DatabaseSync {
-  if (db) return db;
-  const path = dbPath();
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  db = new DatabaseSync(path);
-  if (path !== ":memory:") {
-    try {
-      chmodSync(path, 0o600); // ring purposes and peers are this operator's business, not every local user's
-    } catch {
-      // best effort (e.g. a filesystem without POSIX modes)
-    }
-  }
-  db.exec("PRAGMA journal_mode = WAL");
-  // better-sqlite3 defaulted its busy timeout to 5000ms; node:sqlite
-  // defaults to 0, which throws "database is locked" immediately on any
-  // write collision instead of waiting -- a real regression here in
-  // particular, since serve_rings.ts and mesh_ring.ts both write from
-  // this same process (see the module header).
-  db.exec("PRAGMA busy_timeout = 5000");
+/** Installs the rings table, its migrations and its indexes on the per-machine connection (machine_transcript.ts calls this once per opened file). Idempotent. */
+export function ensureRingTables(db: DatabaseSync): void {
   migrateToCompositeRingKey(db);
   // The claim a deferred incoming ring is answered under (macula-mcp#42): a renewal of an old file gets the
   // column, so the owner has one shape to write. ADD COLUMN is the whole migration.
@@ -305,11 +283,6 @@ function open(): DatabaseSync {
   db.exec(`CREATE INDEX IF NOT EXISTS rings_self_idx ON rings (self, direction)`);
   // The node event log (macula-mcp#42, node_events.ts) shares this file on purpose: an entry is appended in
   // the same transaction as the ring row it describes, which two files could not give.
-  ensureNodeEventsTable(db);
-  // Room membership (macula-mcp#44 step 6, room_membership.ts) is the other tenant: it belongs beside the
-  // transcript it describes, and outlives the process that recorded it.
-  ensureRoomMembershipTable(db);
-  return db;
 }
 
 /** The current schema, `ring_id` NOT unique alone -- see migrateToCompositeRingKey's own doc for why. */
@@ -415,7 +388,7 @@ export interface RingRecord {
 
 /** One ring by id, only if it belongs to `self` (rows from another session on this machine are invisible). */
 export function getRing(ringId: string, self: string): RingRecord | undefined {
-  return open().prepare("SELECT * FROM rings WHERE ring_id = ? AND self = ?").get(ringId, self.toLowerCase()) as RingRecord | undefined;
+  return machineDb().prepare("SELECT * FROM rings WHERE ring_id = ? AND self = ?").get(ringId, self.toLowerCase()) as RingRecord | undefined;
 }
 
 /** How often waitRing polls while blocked -- same cadence and reasoning as rooms.ts's own REPLY_POLL_MS (cheap local reads already fed by the background tap; here, by handleRing's own append to the node event log on every real inbound ring, active whenever ring serving is, independent of whether anything is waiting). Not imported from rooms.ts: same value, deliberately duplicated rather than coupling two otherwise-independent modules over one shared constant -- matches how serve_rings.ts's own RENEW_RETRY_BASE_MS and presence.ts's reconnect backoff are documented as parallel, not shared via import. */
@@ -451,10 +424,10 @@ export interface WaitRingResult {
  * `timed_out: 1` on a plain timeout, the same as waitRoom.
  */
 export async function waitRing(args: { self: string; waitSeconds: number; afterSeq?: number }): Promise<WaitRingResult> {
-  const after = args.afterSeq ?? lastNodeEventSeq(open(), args.self);
+  const after = args.afterSeq ?? lastNodeEventSeq(machineDb(), args.self);
   const deadline = Date.now() + args.waitSeconds * 1000;
   while (Date.now() < deadline) {
-    const event = firstRingReceivedAfter(open(), args.self, after);
+    const event = firstRingReceivedAfter(machineDb(), args.self, after);
     if (event) return { ring: (event.ring_id === null ? undefined : getRing(event.ring_id, args.self)) ?? null, event, next_after_seq: event.seq, timed_out: 0 };
     await new Promise((resolve) => setTimeout(resolve, RING_POLL_MS));
   }
@@ -484,7 +457,7 @@ export function listRings(args: { self: string; direction?: Direction; pendingOn
   }
   params.limit = args.limit ?? 50;
   const sql = `SELECT * FROM rings WHERE ${where.join(" AND ")} ORDER BY recorded_at DESC LIMIT @limit`;
-  return open().prepare(sql).all(params) as unknown as RingRecord[];
+  return machineDb().prepare(sql).all(params) as unknown as RingRecord[];
 }
 
 /** Incoming rings the callee's model still has to answer (policy "ask"), for `self`, younger than PENDING_RING_TTL_MS. */
@@ -498,17 +471,4 @@ export function pendingSummary(self: string, peer: string): { count: number; fro
   return { count: rows.length, from_peer: rows.filter((r) => r.peer.toLowerCase() === peer.toLowerCase()).length };
 }
 
-/**
- * The connection the ring dossier writes through (macula-mcp#42): `ring_dossier.ts` is the one owner of
- * the rings rows, so the table's connection is exposed to it and to nothing else. Every statement it runs
- * there is a conditional UPDATE inside a transaction.
- */
-export function ringsDb(): DatabaseSync {
-  return open();
-}
 
-/** Test/shutdown hook -- releases the file handle. Re-opens lazily on next use. */
-export function closeRings(): void {
-  db?.close();
-  db = undefined;
-}

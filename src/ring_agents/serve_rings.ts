@@ -36,9 +36,9 @@
 // lifetime. stop() cancels a retry that has not fired yet.
 
 import type { JsonValue, Request, Served } from "@macula-io/ts";
-import { call, serve } from "./../macula_ts_client.js";
-import * as rooms from "./../rooms.js";
-import { isAllowlisted, loadContactPolicy, POLICY, policyLabel, type ContactPolicy, type Policy } from "./../policy.js";
+import { call, serve } from "../macula_ts_client.js";
+import * as rooms from "../rooms.js";
+import { isAllowlisted, loadContactPolicy, POLICY, policyLabel, type ContactPolicy, type Policy } from "../policy.js";
 import { ANSWER, buildRingAnswerArgs, getRing, parseRingAnswerArgs, parseRingAnswerReply, parseRingArgs, pendingSummary, ringAnswerProblems, ringProblems, ringProcedure, type Answer,
   type RingAnswerArgs,
   type RingAnswerReply,
@@ -48,7 +48,7 @@ import { ANSWER, buildRingAnswerArgs, getRing, parseRingAnswerArgs, parseRingAns
 } from "./rings.js";
 import { answerClaimedRing, claimDeferredRing, releaseClaim, ringReceived, ringReply } from "./ring_dossier.js";
 
-export { POLICY, type Policy } from "./../policy.js";
+export { POLICY, type Policy } from "../policy.js";
 
 /** First-registration retry backoff: doubles from the base, capped. */
 export const START_RETRY_BASE_MS = 1_000;

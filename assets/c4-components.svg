@@ -102,11 +102,11 @@
 <text class="t-desc" x="48" y="608">station, each pinned by its node_id; calls by direct dial, signed publications,</text>
 <text class="t-desc" x="48" y="624">subscriptions replayed onto a redialed link.</text>
 <rect class="b-cmp" x="668" y="522" width="300" height="112" rx="10"/>
-<text class="t-name" x="684" y="550">Local state</text>
-<text class="t-type" x="684" y="568">[node:sqlite and files]</text>
-<text class="t-desc" x="684" y="592">roster, lobby transcript, rings</text>
-<text class="t-desc" x="684" y="608">(SQLite); identity key, realm</text>
-<text class="t-desc" x="684" y="624">credentials, contact_policy.json</text>
+<text class="t-name" x="684" y="550">machine_transcript.ts</text>
+<text class="t-type" x="684" y="568">[node:sqlite and files, local state]</text>
+<text class="t-desc" x="684" y="592">roster and lobby transcript;</text>
+<text class="t-desc" x="684" y="608">rings.sqlite3 (rings, node events,</text>
+<text class="t-desc" x="684" y="624">room membership); keys, credentials</text>
 <rect class="b-cmp" x="32" y="658" width="936" height="88" rx="10"/>
 <text class="t-code" x="48" y="686">mesh_config.ts, io_macula_realm_key.ts</text>
 <text class="t-type" x="48" y="704">[configuration]</text>

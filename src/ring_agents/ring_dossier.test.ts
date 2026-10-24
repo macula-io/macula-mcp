@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { answerClaimedRing, claimDeferredRing, CLAIM_TTL_MS, releaseClaim, ringPlaced, ringReceived, ringReply } from "./ring_dossier.js";
-import { closeRings, getRing, ringsDb } from "./rings.js";
+import { getRing } from "./rings.js";
+import { closeMachineDb, machineDb } from "../machine_transcript.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
@@ -29,7 +30,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  closeRings();
+  closeMachineDb();
   rmSync(dir, { recursive: true, force: true });
   delete process.env.MACULA_MCP_RINGS_DB;
 });
@@ -107,7 +108,7 @@ describe("a deferred ring is claimed before it is answered", () => {
     const held = claimDeferredRing("8".repeat(32), ME);
     expect(held.ok).toBe(1);
     // Two minutes later the holder is assumed dead: the ring must not become unanswerable.
-    ringsDb()
+    machineDb()
       .prepare("UPDATE rings SET claimed_at = ? WHERE ring_id = ? AND direction = 'in'")
       .run(new Date(Date.now() - CLAIM_TTL_MS - 1000).toISOString(), "8".repeat(32));
     const takenOver = claimDeferredRing("8".repeat(32), ME);

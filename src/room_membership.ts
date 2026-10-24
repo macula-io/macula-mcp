@@ -8,7 +8,7 @@
 //
 // Now:
 //   - the table below is the membership, scoped by node id (`self`) exactly like the node event log, in the
-//     per-machine rings.sqlite3 that rings.ts owns;
+//     per-machine rings.sqlite3 that machine_transcript.ts owns;
 //   - every transition (open, join, leave, leave-all) runs through exclusive(), so no two of them interleave
 //     across their awaits -- the check "am I already in this room" and the record of being in it happen in
 //     one turn, which is what stops two concurrent joins (a ring accept and the model's own mesh_join_room)
@@ -21,7 +21,7 @@
 // something (say, a wait, mesh_join_room) re-taps them. Membership is per IDENTITY, not per machine: a
 // second identity on the same box has its own rows.
 import type { DatabaseSync } from "node:sqlite";
-import { ringsDb } from "./ring_agents/rings.js";
+import { machineDb } from "./machine_transcript.js";
 
 export interface RoomMembership {
   room_topic: string;
@@ -35,8 +35,8 @@ export interface RoomMembership {
 }
 
 /**
- * The table. rings.ts calls this from its own open(), the same way it does for the node event log: that
- * module owns the file's connection and schema, and this is one more tenant of the same per-machine file.
+ * The table. machine_transcript.ts calls this when it opens the file, the same way it does for the node
+ * event log: that module owns the connection, and this is one more tenant of the same per-machine file.
  */
 export function ensureRoomMembershipTable(db: DatabaseSync): void {
   db.exec(`CREATE TABLE IF NOT EXISTS room_membership (
@@ -73,17 +73,17 @@ function toMembership(row: MembershipRow): RoomMembership {
 
 /** Every room this identity is in, oldest join first. */
 export function memberships(self: string): RoomMembership[] {
-  const rows = ringsDb().prepare("SELECT room_topic, opened_by, opened_here, public, purpose, joined_at FROM room_membership WHERE self = ? ORDER BY joined_at, room_topic").all(self) as unknown as MembershipRow[];
+  const rows = machineDb().prepare("SELECT room_topic, opened_by, opened_here, public, purpose, joined_at FROM room_membership WHERE self = ? ORDER BY joined_at, room_topic").all(self) as unknown as MembershipRow[];
   return rows.map(toMembership);
 }
 
 export function isJoined(self: string, roomTopic: string): boolean {
-  return ringsDb().prepare("SELECT 1 FROM room_membership WHERE self = ? AND room_topic = ?").get(self, roomTopic) !== undefined;
+  return machineDb().prepare("SELECT 1 FROM room_membership WHERE self = ? AND room_topic = ?").get(self, roomTopic) !== undefined;
 }
 
 /** How many rooms this identity is in -- the room cap's check, without listing anything. */
 export function count(self: string): number {
-  const row = ringsDb().prepare("SELECT COUNT(*) AS n FROM room_membership WHERE self = ?").get(self) as { n: number };
+  const row = machineDb().prepare("SELECT COUNT(*) AS n FROM room_membership WHERE self = ?").get(self) as { n: number };
   return row.n;
 }
 
@@ -92,18 +92,18 @@ export function count(self: string): number {
  * original joined_at alone -- a re-tap is not a new join.
  */
 export function record(self: string, membership: RoomMembership): void {
-  ringsDb()
+  machineDb()
     .prepare("INSERT OR IGNORE INTO room_membership (self, room_topic, opened_by, opened_here, public, purpose, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(self, membership.room_topic, membership.opened_by, membership.opened_here, membership.public, membership.purpose ?? null, membership.joined_at);
 }
 
 export function forget(self: string, roomTopic: string): void {
-  ringsDb().prepare("DELETE FROM room_membership WHERE self = ? AND room_topic = ?").run(self, roomTopic);
+  machineDb().prepare("DELETE FROM room_membership WHERE self = ? AND room_topic = ?").run(self, roomTopic);
 }
 
 /** Test hook: the table is per-machine-per-identity in production; a test's is its own :memory: file. */
 export function resetForTests(): void {
-  ringsDb().exec("DELETE FROM room_membership");
+  machineDb().exec("DELETE FROM room_membership");
 }
 
 let mailbox: Promise<unknown> = Promise.resolve();

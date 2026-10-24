@@ -11,8 +11,8 @@
 // write -- and only when that transition reported it changed something. Nothing here reads a table
 // afterwards and infers an entry from what it finds, so an entry is the transition itself.
 //
-// Scope: per node (`self`), in the per-machine rings.sqlite3 file (rings.ts owns the connection and
-// creates the table), so a second process on the box -- bin/realm.ts confirming a join, say -- appends to
+// Scope: per node (`self`), in the per-machine rings.sqlite3 file (machine_transcript.ts owns the
+// connection; this module creates its own table), so a second process on the box -- bin/realm.ts confirming a join, say -- appends to
 // the same log the server reads. The seq is SQLite's own AUTOINCREMENT id: monotonic across every
 // process, never reused. The cursor belongs to the CLIENT (`after_seq`): the server never substitutes
 // "now" for a cursor the caller did not pass.
@@ -75,9 +75,9 @@ export interface NodeEvent {
 }
 
 /**
- * The log's table. rings.ts calls this from its own open(): that module owns the file's connection and
- * schema, and this table is one more tenant of the same file -- it has to be, since an entry and the ring
- * row it describes are written in one transaction.
+ * The log's table. machine_transcript.ts calls this when it opens the file: that module owns the
+ * connection, and this table is one more tenant of the same file -- it has to be, since an entry and the
+ * ring row it describes are written in one transaction.
  */
 export function ensureNodeEventsTable(db: DatabaseSync): void {
   db.exec(`CREATE TABLE IF NOT EXISTS node_events (

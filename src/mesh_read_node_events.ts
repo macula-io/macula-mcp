@@ -18,7 +18,8 @@ import { selfNodeId } from "./macula_ts_client.js";
 import { NODE_EVENT, readNodeEvents, type NodeEvent } from "./node_events.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
-import { answerLabel, ringsDb } from "./ring_agents/rings.js";
+import { answerLabel } from "./ring_agents/rings.js";
+import { machineDb } from "./machine_transcript.js";
 import { petname } from "./petname.js";
 import { toolDescription } from "./tool_description.js";
 
@@ -83,7 +84,7 @@ export function registerMeshReadNodeEvents(server: McpServer): void {
       presence.ensurePresence(server);
       try {
         const me = presence.currentNodeId() ?? (await selfNodeId());
-        const read = readNodeEvents(ringsDb(), { self: me, afterSeq: after_seq, limit });
+        const read = readNodeEvents(machineDb(), { self: me, afterSeq: after_seq, limit });
         return jsonContent({ events: read.events.map(eventView), next_after_seq: read.next_after_seq, returned: read.events.length });
       } catch (e) {
         return errorContent(`mesh_read_node_events: ${e instanceof Error ? e.message : String(e)}`);

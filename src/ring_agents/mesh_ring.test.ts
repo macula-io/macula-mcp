@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER, closeRings, getRing } from "./rings.js";
-import { newRoomTopic } from "./../envelope.js";
-import { closeTranscript, recordLoss } from "./../lobby_transcript.js";
-import { closeRoster, upsertAgent } from "./../roster.js";
-import { petname } from "./../petname.js";
+import { ANSWER, getRing } from "./rings.js";
+import { closeMachineDb } from "../machine_transcript.js";
+import { newRoomTopic } from "../envelope.js";
+import { closeTranscript, recordLoss } from "../lobby_transcript.js";
+import { closeRoster, upsertAgent } from "../roster.js";
+import { petname } from "../petname.js";
 
 const ME = "c".repeat(64);
 const CALLEE = "b".repeat(64);
@@ -17,12 +18,12 @@ const mocks = vi.hoisted(() => ({
   isJoined: vi.fn(),
   currentNodeId: vi.fn(),
 }));
-vi.mock("./../macula_ts_client.js", () => ({ call: mocks.call, selfNodeId: mocks.selfNodeId }));
-vi.mock("./../rooms.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./../rooms.js")>();
+vi.mock("../macula_ts_client.js", () => ({ call: mocks.call, selfNodeId: mocks.selfNodeId }));
+vi.mock("../rooms.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../rooms.js")>();
   return { ...actual, isJoined: mocks.isJoined };
 });
-vi.mock("./../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
+vi.mock("../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
 
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";
@@ -32,7 +33,7 @@ beforeEach(() => {
   mocks.isJoined.mockReturnValue(true); // a pre-supplied room_topic is always treated as already joined
 });
 afterEach(() => {
-  closeRings();
+  closeMachineDb();
   closeTranscript();
   closeRoster();
   delete process.env.MACULA_MCP_RINGS_DB;

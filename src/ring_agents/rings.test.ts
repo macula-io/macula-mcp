@@ -3,26 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ANSWER,
-  buildRingAnswerArgs,
-  buildRingArgs,
-  closeRings,
-  getRing,
-  listRings,
-  nodeIdFromRingProcedure,
-  parseRingAnswerArgs,
-  parseRingAnswerReply,
-  parseRingArgs,
-  parseRingReply,
-  pendingIncoming,
-  RingError,
-  ringAnswerProblems,
-  ringProblems,
-  ringProcedure,
-  RING_POLL_MS,
-  waitRing,
-} from "./rings.js";
+import { ANSWER, buildRingAnswerArgs, buildRingArgs, getRing, listRings, nodeIdFromRingProcedure, parseRingAnswerArgs, parseRingAnswerReply, parseRingArgs, parseRingReply, pendingIncoming, RingError, ringAnswerProblems, ringProblems, ringProcedure, RING_POLL_MS, waitRing } from "./rings.js";
+import { closeMachineDb } from "../machine_transcript.js";
 import { answerClaimedRing, claimDeferredRing, ringPlaced, ringReceived, ringReply } from "./ring_dossier.js";
 
 const ME = "a".repeat(64);
@@ -39,7 +21,7 @@ beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";
 });
 afterEach(() => {
-  closeRings();
+  closeMachineDb();
   delete process.env.MACULA_MCP_RINGS_DB;
 });
 
@@ -288,7 +270,7 @@ describe("schema migration: existing on-disk rings.sqlite3 from before the compo
       old.close();
 
       process.env.MACULA_MCP_RINGS_DB = dbFile;
-      closeRings(); // drop the :memory: handle from beforeEach so the next open() reads dbFile
+      closeMachineDb(); // drop the :memory: handle from beforeEach so the next open() reads dbFile
 
       // Old row survived the rebuild.
       expect(getRing("8".repeat(32), ME)).toMatchObject({ ring_id: "8".repeat(32), direction: "out", purpose: "pre-existing", self: ME });
@@ -303,7 +285,7 @@ describe("schema migration: existing on-disk rings.sqlite3 from before the compo
       expect(getRing(newRingId, ME)).toMatchObject({ direction: "out" });
       expect(getRing(newRingId, THEM)).toMatchObject({ direction: "in" });
     } finally {
-      closeRings();
+      closeMachineDb();
       rmSync(dir, { recursive: true, force: true });
     }
   });

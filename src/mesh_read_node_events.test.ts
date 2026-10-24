@@ -6,7 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { ringReceived } from "./ring_agents/ring_dossier.js";
 import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
-import { closeRings, ringsDb } from "./ring_agents/rings.js";
+import { closeMachineDb, machineDb } from "./machine_transcript.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
@@ -46,7 +46,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  closeRings();
+  closeMachineDb();
   rmSync(dir, { recursive: true, force: true });
   delete process.env.MACULA_MCP_RINGS_DB;
   vi.resetAllMocks();
@@ -55,7 +55,7 @@ afterEach(() => {
 describe("mesh_read_node_events", () => {
   it("serves the log oldest-first, with the cursor to continue from", async () => {
     ringReceived({ ring_id: "1".repeat(32), self: ME, peer: THEM, purpose: "pair on the plan", room_topic: ROOM, sent_at: 5, answer: 1 });
-    appendNodeEvent(ringsDb(), { self: ME, kind: NODE_EVENT.joinConfirmed, realm: "io.macula", org_identity: "mri:org:io.macula/raf", tier: "citizen" });
+    appendNodeEvent(machineDb(), { self: ME, kind: NODE_EVENT.joinConfirmed, realm: "io.macula", org_identity: "mri:org:io.macula/raf", tier: "citizen" });
 
     const { body } = await call();
     const events = body.events as Record<string, unknown>[];

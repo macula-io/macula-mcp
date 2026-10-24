@@ -36,7 +36,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import * as realm from "./realm.js";
 import { readNodeEvents } from "./node_events.js";
-import { closeRings, ringsDb } from "./ring_agents/rings.js";
+import { closeMachineDb, machineDb } from "./machine_transcript.js";
 
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
 let dir = "";
@@ -52,7 +52,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  closeRings();
+  closeMachineDb();
   realm.abandon();
   delete process.env.MACULA_MCP_REALM_DIR;
   delete process.env.MACULA_MCP_REALM_URL;
@@ -188,7 +188,7 @@ describe("join_confirmed in the node event log", () => {
     tier: "citizen",
     ...over,
   });
-  const events = () => readNodeEvents(ringsDb(), { self: NODE, limit: 50 }).events;
+  const events = () => readNodeEvents(machineDb(), { self: NODE, limit: 50 }).events;
 
   it("a membership established is one entry, carrying the realm and who was bound", async () => {
     await realm.storeCredential(cred());
@@ -211,7 +211,7 @@ describe("join_confirmed in the node event log", () => {
   it("a join from another process (the CLI) lands in the same log the server reads", async () => {
     // Nothing of ours holds the file, the way nothing in the server process does while macula-mcp-realm
     // joins from its own process.
-    closeRings();
+    closeMachineDb();
     await realm.storeCredential(cred({ org_identity: "mri:org:net.beam-campus/person" }), "net.beam-campus");
     expect(events().map((e) => e.realm)).toEqual(["net.beam-campus"]);
   });

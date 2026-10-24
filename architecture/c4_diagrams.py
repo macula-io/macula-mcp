@@ -168,8 +168,8 @@ def components():
           ["ONE Pool under ONE identity key (ML-DSA, pq_hybrid), linked to every configured",
            "station, each pinned by its node_id; calls by direct dial, signed publications,",
            "subscriptions replayed onto a redialed link."])
-    d.box("b-cmp", 668, 522, 300, 112, "Local state", "[node:sqlite and files]",
-          ["roster, lobby transcript, rings", "(SQLite); identity key, realm", "credentials, contact_policy.json"])
+    d.box("b-cmp", 668, 522, 300, 112, "machine_transcript.ts", "[node:sqlite and files, local state]",
+          ["roster and lobby transcript;", "rings.sqlite3 (rings, node events,", "room membership); keys, credentials"])
     d.box("b-cmp", 32, 658, 936, 88, "mesh_config.ts, io_macula_realm_key.ts", "[configuration]",
           ["MACULA_MESH_STATIONS (host:port@node_id, the six fleet stations by default), MACULA_MESH_REALMS (trusted realm keys)."], code=True)
     d.edge("M500 158V182"); d.text("t-rel", 508, 174, "registers")

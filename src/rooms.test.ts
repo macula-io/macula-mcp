@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
-import { closeRings } from "./ring_agents/rings.js";
+import { closeMachineDb } from "./machine_transcript.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
@@ -53,7 +53,7 @@ afterEach(() => {
   closeTranscript();
   delete process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB;
   delete process.env.MACULA_MCP_RINGS_DB;
-  closeRings();
+  closeMachineDb();
   vi.resetAllMocks();
   vi.useRealTimers();
 });
@@ -349,13 +349,13 @@ describe("one owner for room membership (macula-mcp#44)", () => {
   it("keeps the rooms this identity is in when the process restarts -- watched: 0 until something re-taps them", async () => {
     const roomDir = await mkdtemp(join(tmpdir(), "macula-mcp-restart-"));
     const { openRoom, listRooms } = await import("./rooms.js");
-    closeRings();
+    closeMachineDb();
     process.env.MACULA_MCP_RINGS_DB = join(roomDir, "rings.sqlite3");
     const { room_topic } = await openRoom({ purpose: "outlives the process" });
     expect(listRooms(ME).joined).toHaveLength(1);
 
     // A new process: nothing survives but the file, so the table has to be the membership.
-    closeRings();
+    closeMachineDb();
     vi.resetModules();
     mocks.isTapped.mockReturnValue(false);
     const restarted = await import("./rooms.js");
