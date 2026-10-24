@@ -38,7 +38,7 @@ import { toolDescription } from "./tool_description.js";
 function explainUnchangedPolicy(res: AllowlistMutationResult): string | undefined {
   if (res.policy_changed !== 0 || res.contact_policy === undefined) return undefined;
   if (res.policy_label === "closed") {
-    return `added to the allowlist, but contact_policy is "closed" -- ring_service.ts declines everyone under closed without even consulting the allowlist. Change contact_policy yourself (edit ${res.path}, or set MACULA_MCP_CONTACT_POLICY) if you want this peer through while staying closed to everyone else.`;
+    return `added to the allowlist, but contact_policy is "closed" -- serve_rings.ts declines everyone under closed without even consulting the allowlist. Change contact_policy yourself (edit ${res.path}, or set MACULA_MCP_CONTACT_POLICY) if you want this peer through while staying closed to everyone else.`;
   }
   if (res.policy_label === "open") {
     return `added to the allowlist, but contact_policy is already "open" -- everyone is already accepted, so this entry has no additional effect right now (it will matter if you switch to "allowlist" later).`;
@@ -70,7 +70,7 @@ const TRUST_DESCRIPTION_FULL =
   "also switches it to \"allowlist\" (an allowlist nobody is consulting does nothing); an explicit \"closed\" " +
   "or \"open\" policy is left as-is (closed stays authoritative, open already accepts everyone) -- the reply " +
   "says which happened. Keyed by node_id, never by operator_name, session_name, or petname: only node_id is a verified, " +
-  "signed identity here (see ring_service.ts's proof checks) -- operator_name/session_name are self-reported and petname " +
+  "signed identity here (see serve_rings.ts's proof checks) -- operator_name/session_name are self-reported and petname " +
   "can collide, none is safe as a trust boundary. The policy file re-reads on every ring, so this takes " +
   "effect immediately, no restart needed.";
 /** MACULA_MCP_TERSE_TOOLS=1 variant -- see tool_description.ts. The "keyed by node_id, never operator_name/session_name/petname" rule is a real trust-boundary fact, kept in full force. */

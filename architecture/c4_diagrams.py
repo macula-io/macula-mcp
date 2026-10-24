@@ -163,7 +163,7 @@ def components():
     d.box("b-cmp", 356, 356, 288, 126, "Serving", "[mesh_serve, serve.ts]",
           ["Serves ~<node_id>/<name>; each inbound", "call spawns the operator's local shell", "command (JSON on stdin, the caller in", "MACULA_MCP_CALLER)"], code=True)
     d.box("b-cmp", 664, 356, 288, 126, "presence.ts", "[mesh_hello / goodbye / agents]",
-          ["agent.hello heartbeat and roster,", "lobby_observer (central and rooms),", "ring_service (~<node_id>/ring),", "citizenship, device_membership"], code=True)
+          ["agent.hello heartbeat and roster,", "lobby_observer (central and rooms),", "serve_rings (~<node_id>/ring),", "citizenship, device_membership"], code=True)
     d.box("b-mac", 32, 522, 618, 112, "macula_ts_client.ts on @macula-io/ts 0.31", "[Macula SDK, wire 1.0]",
           ["ONE Pool under ONE identity key (ML-DSA, pq_hybrid), linked to every configured",
            "station, each pinned by its node_id; calls by direct dial, signed publications,",

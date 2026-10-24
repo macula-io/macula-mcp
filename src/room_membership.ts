@@ -21,7 +21,7 @@
 // something (say, a wait, mesh_join_room) re-taps them. Membership is per IDENTITY, not per machine: a
 // second identity on the same box has its own rows.
 import type { DatabaseSync } from "node:sqlite";
-import { ringsDb } from "./rings.js";
+import { ringsDb } from "./ring_agents/rings.js";
 
 export interface RoomMembership {
   room_topic: string;

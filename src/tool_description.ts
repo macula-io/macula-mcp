@@ -23,7 +23,7 @@
  * Whether this process should serve terse tool descriptions instead of
  * the full ones. Off (full, the historical default) unless explicitly
  * set to "1" -- every existing consumer's behavior is unchanged until it
- * opts in. Read fresh on every call, the same convention ring_service.ts's
+ * opts in. Read fresh on every call, the same convention serve_rings.ts's
  * own disabled() (MACULA_MCP_NO_RING) already uses, deliberately not
  * cached at module load -- lets a test flip it between two calls in the
  * same process instead of needing vi.resetModules() per variant.

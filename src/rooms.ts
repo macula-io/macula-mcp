@@ -65,7 +65,7 @@ const CENTRAL_SCAN_LIMIT = 200;
 
 export class RoomError extends Error {}
 
-/** Joining under a cap (ring_service.ts's room limit) refused: the cap was reached inside the join's own turn, not before it. */
+/** Joining under a cap (serve_rings.ts's room limit) refused: the cap was reached inside the join's own turn, not before it. */
 export class RoomCapacityError extends RoomError {}
 
 /** The node id every envelope from this agent carries: this server's one identity, the publisher its facts are verified as. */

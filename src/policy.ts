@@ -241,14 +241,14 @@ function readRawPolicyFile(path: string): { raw: Record<string, unknown> } | { e
   return { raw: parsed as Record<string, unknown> };
 }
 
-/** Writes `raw` back, 0600 in a 0700 directory -- same discipline as roster.sqlite3/ring_service.ts's socket dir/realm.ts's credential file. Preserves every key this module does not itself understand (only `allowlist` and, sometimes, `contact_policy` are ever touched by the callers below), so a field an operator added by hand survives a tool-driven edit. */
+/** Writes `raw` back, 0600 in a 0700 directory -- same discipline as roster.sqlite3/serve_rings.ts's socket dir/realm.ts's credential file. Preserves every key this module does not itself understand (only `allowlist` and, sometimes, `contact_policy` are ever touched by the callers below), so a field an operator added by hand survives a tool-driven edit. */
 function writeRawPolicyFile(path: string, raw: Record<string, unknown>): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, JSON.stringify(raw, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
   try {
     chmodSync(path, 0o600);
   } catch {
-    // best effort, same as roster.ts/ring_service.ts
+    // best effort, same as roster.ts/serve_rings.ts
   }
 }
 
@@ -275,7 +275,7 @@ function trustedPolicy(current: Policy | undefined): { policy: Policy; changed: 
  * POLICY.allowlist already existed and nothing used it), so trusting the
  * first peer is also the moment "ask" stops making sense as this
  * operator's standing answer. "closed" is left alone -- a deliberate
- * opt-out from everyone stays authoritative, ring_service.ts's own
+ * opt-out from everyone stays authoritative, serve_rings.ts's own
  * switch never even consults the allowlist under closed, so the entry is
  * recorded for later but has no effect until the operator changes
  * contact_policy themselves. "open" is left alone too -- already accepts

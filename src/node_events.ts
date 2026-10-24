@@ -28,7 +28,7 @@
 //     ring_answered(1 or 2), and a second answer to a decided ring gives nothing;
 //   - unreachable is not an answer: it writes no entry.
 import type { DatabaseSync } from "node:sqlite";
-import type { Answer, Direction } from "./rings.js";
+import type { Answer, Direction } from "./ring_agents/rings.js";
 
 /** The three business facts this node's postbag records. */
 export const NODE_EVENT = {

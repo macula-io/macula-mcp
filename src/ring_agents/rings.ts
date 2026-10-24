@@ -1,5 +1,5 @@
 // Rings: the addressed invite. A ring travels as a mesh CALL to the
-// callee's own served procedure, ~<node_id>/ring (ring_service.ts), so it
+// callee's own served procedure, ~<node_id>/ring (serve_rings.ts), so it
 // is acknowledged, answered, or explicitly unreachable -- what a publish
 // into a topic could never be. macula 12 signs the CALL with the caller's
 // key and the RESULT with the callee's, and only the node a ~<node_id>
@@ -13,7 +13,7 @@
 // both ends) and the local record of rings sent and received, in its
 // own SQLite file (same reasoning as roster.ts: a different domain and
 // retention shape from the transcript, disposable, one writer per
-// process -- except that ring_service.ts and mesh_ring.ts both write
+// process -- except that serve_rings.ts and mesh_ring.ts both write
 // from this process, which one connection serves fine).
 
 import { DatabaseSync } from "node:sqlite";
@@ -21,9 +21,9 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { isRoomTopic } from "./envelope.js";
-import { ensureNodeEventsTable, firstRingReceivedAfter, lastNodeEventSeq, type NodeEvent } from "./node_events.js";
-import { ensureRoomMembershipTable } from "./room_membership.js";
+import { isRoomTopic } from "./../envelope.js";
+import { ensureNodeEventsTable, firstRingReceivedAfter, lastNodeEventSeq, type NodeEvent } from "./../node_events.js";
+import { ensureRoomMembershipTable } from "./../room_membership.js";
 
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -111,7 +111,7 @@ function ringBodyProblems(p: Record<string, unknown>): string[] {
   return problems;
 }
 
-/** Every way a payload fails to be ring args. Empty means valid. `from` must also be the verified caller, which only the callee can check (ring_service.ts). */
+/** Every way a payload fails to be ring args. Empty means valid. `from` must also be the verified caller, which only the callee can check (serve_rings.ts). */
 export function ringProblems(payload: unknown): string[] {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return ["not an object"];
   const p = payload as Record<string, unknown>;
@@ -292,7 +292,7 @@ function open(): DatabaseSync {
   // better-sqlite3 defaulted its busy timeout to 5000ms; node:sqlite
   // defaults to 0, which throws "database is locked" immediately on any
   // write collision instead of waiting -- a real regression here in
-  // particular, since ring_service.ts and mesh_ring.ts both write from
+  // particular, since serve_rings.ts and mesh_ring.ts both write from
   // this same process (see the module header).
   db.exec("PRAGMA busy_timeout = 5000");
   migrateToCompositeRingKey(db);
@@ -337,7 +337,7 @@ const RINGS_SCHEMA = `
  * mesh_wait_ring): `ring_id TEXT PRIMARY KEY` alone meant a ring's TWO
  * legitimate rows -- the caller's own "out" row (recordRing, in
  * mesh_ring.ts's placeRing(), written BEFORE the network call even goes
- * out) and the callee's own "in" row (recordRing, in ring_service.ts's
+ * out) and the callee's own "in" row (recordRing, in serve_rings.ts's
  * handleRing(), written when the call arrives) -- collided on the same
  * ring_id in this one-file-per-MACHINE store (see the module header:
  * identities are per session, but rings.sqlite3 is shared by every
@@ -418,7 +418,7 @@ export function getRing(ringId: string, self: string): RingRecord | undefined {
   return open().prepare("SELECT * FROM rings WHERE ring_id = ? AND self = ?").get(ringId, self.toLowerCase()) as RingRecord | undefined;
 }
 
-/** How often waitRing polls while blocked -- same cadence and reasoning as rooms.ts's own REPLY_POLL_MS (cheap local reads already fed by the background tap; here, by handleRing's own append to the node event log on every real inbound ring, active whenever ring serving is, independent of whether anything is waiting). Not imported from rooms.ts: same value, deliberately duplicated rather than coupling two otherwise-independent modules over one shared constant -- matches how ring_service.ts's own RENEW_RETRY_BASE_MS and presence.ts's reconnect backoff are documented as parallel, not shared via import. */
+/** How often waitRing polls while blocked -- same cadence and reasoning as rooms.ts's own REPLY_POLL_MS (cheap local reads already fed by the background tap; here, by handleRing's own append to the node event log on every real inbound ring, active whenever ring serving is, independent of whether anything is waiting). Not imported from rooms.ts: same value, deliberately duplicated rather than coupling two otherwise-independent modules over one shared constant -- matches how serve_rings.ts's own RENEW_RETRY_BASE_MS and presence.ts's reconnect backoff are documented as parallel, not shared via import. */
 export const RING_POLL_MS = 250;
 
 export interface WaitRingResult {
@@ -492,7 +492,7 @@ export function pendingIncoming(self: string): RingRecord[] {
   return listRings({ self, direction: "in", pendingOnly: true, limit: 100 });
 }
 
-/** How many incoming rings for `self` are pending right now, and whether one from `peer` is among them -- the caps in ring_service.ts. */
+/** How many incoming rings for `self` are pending right now, and whether one from `peer` is among them -- the caps in serve_rings.ts. */
 export function pendingSummary(self: string, peer: string): { count: number; from_peer: number } {
   const rows = pendingIncoming(self);
   return { count: rows.length, from_peer: rows.filter((r) => r.peer.toLowerCase() === peer.toLowerCase()).length };

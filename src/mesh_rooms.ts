@@ -21,8 +21,8 @@ import { ensurePresence } from "./presence.js";
 import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { CENTRAL_TOPIC, KINDS, MAX_TO, TALK_KINDS } from "./envelope.js";
-import { ANSWER, MAX_PURPOSE_CHARS, listRings, RingError } from "./rings.js";
-import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./mesh_ring.js";
+import { ANSWER, MAX_PURPOSE_CHARS, listRings, RingError } from "./ring_agents/rings.js";
+import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./ring_agents/mesh_ring.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { petname } from "./petname.js";
 import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
@@ -50,7 +50,7 @@ async function inviteParticipants(args: {
   const purpose = args.purpose && args.purpose.trim().length > 0 ? args.purpose : DEFAULT_INVITE_PURPOSE;
   // Case-insensitively deduped: a repeated node id would otherwise ring
   // the same agent twice in one call, the second one landing inside
-  // ring_service.ts's own RING_RATE_LIMIT_MS and coming back a spurious
+  // serve_rings.ts's own RING_RATE_LIMIT_MS and coming back a spurious
   // "declined: rate limited" for an agent that never actually declined.
   const seen = new Set<string>();
   const deduped = args.participants.filter((to) => {

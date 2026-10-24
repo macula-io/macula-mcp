@@ -44,7 +44,7 @@ import { carriedPublicKey, JOIN_SESSION_PROCEDURE, proveDeviceRequest, selfNodeI
 import { realmIdOf } from "./mesh_config.js";
 import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
 import { acquireLock, releaseLock } from "./realm_lock.js";
-import { ringsDb } from "./rings.js";
+import { ringsDb } from "./ring_agents/rings.js";
 import { serverVersion } from "./version.js";
 
 export const DEFAULT_REALM_URL = "https://realm.macula.io";

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { claimDeferredRing, answerClaimedRing, ringPlaced, ringReceived, ringReply } from "./ring_dossier.js";
 import { closeRings, getRing, pendingIncoming, ringProcedure } from "./rings.js";
-import { POLICY, type ContactPolicy, type Policy } from "./policy.js";
+import { POLICY, type ContactPolicy, type Policy } from "./../policy.js";
 
 const ME = "c".repeat(64);
 const CALLER = "a".repeat(64);
@@ -19,8 +19,8 @@ function policyOf(contact_policy: Policy, allowlist: string[] = []): ContactPoli
 }
 
 const mocks = vi.hoisted(() => ({ serve: vi.fn(), call: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({ serve: mocks.serve, call: mocks.call }));
-vi.mock("./rooms.js", () => ({
+vi.mock("./../macula_ts_client.js", () => ({ serve: mocks.serve, call: mocks.call }));
+vi.mock("./../rooms.js", () => ({
   joinRoom: vi.fn(),
   isJoined: vi.fn().mockReturnValue(false),
   joinedRoomCount: vi.fn().mockReturnValue(0),
@@ -32,7 +32,7 @@ beforeEach(() => {
   process.env.MACULA_MCP_CONTACT_POLICY_FILE = "/nonexistent/macula-mcp-test/contact_policy.json";
 });
 afterEach(async () => {
-  const svc = await import("./ring_service.js");
+  const svc = await import("./serve_rings.js");
   await svc.stop();
   svc.resetRateLimitForTests();
   closeRings();
@@ -54,7 +54,7 @@ function answerFrom(from: string, over: Record<string, unknown> = {}) {
 
 describe("contactPolicy", () => {
   it("defaults to ask, reads the env override by name or number, never a boolean", async () => {
-    const { contactPolicy } = await import("./ring_service.js");
+    const { contactPolicy } = await import("./serve_rings.js");
     expect(contactPolicy()).toBe(POLICY.ask);
     process.env.MACULA_MCP_CONTACT_POLICY = "open";
     expect(contactPolicy()).toBe(POLICY.open);
@@ -67,7 +67,7 @@ describe("contactPolicy", () => {
 
 describe("handleRing: a ring", () => {
   it("accepts under an open policy: joins the room first, then answers 1", async () => {
-    const { handleRing, MAX_JOINED_ROOMS } = await import("./ring_service.js");
+    const { handleRing, MAX_JOINED_ROOMS } = await import("./serve_rings.js");
     const joinRoom = vi.fn().mockResolvedValue({});
     const reply = await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom });
     expect(joinRoom).toHaveBeenCalledWith({ room_topic: ROOM, openedBy: CALLER, maxJoinedRooms: MAX_JOINED_ROOMS });
@@ -76,7 +76,7 @@ describe("handleRing: a ring", () => {
   });
 
   it("defers under ask: records the ring as pending, answers 3, joins nothing", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     const joinRoom = vi.fn();
     const reply = await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.ask), now: NOW, joinRoom });
     expect(reply).toMatchObject({ ring_id: "d".repeat(32), answer: 3, room_topic: ROOM });
@@ -85,14 +85,14 @@ describe("handleRing: a ring", () => {
   });
 
   it("declines under closed, with a reason, and records it", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     const reply = await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.closed), now: NOW });
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringContaining("closed") });
     expect(getRing("d".repeat(32), ME)).toMatchObject({ answer: 2 });
   });
 
   it("under allowlist, accepts a listed caller and declines anyone else", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     const policy = policyOf(POLICY.allowlist, [CALLER.toUpperCase()]);
     const joinRoom = vi.fn().mockResolvedValue({});
     expect(await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy, now: NOW, joinRoom })).toMatchObject({ answer: 1 });
@@ -104,7 +104,7 @@ describe("handleRing: a ring", () => {
   });
 
   it("declines, before policy or any record, a ring whose from is not the verified caller", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     const joinRoom = vi.fn();
     const reply = await handleRing(ringFrom(CALLER), { caller: "b".repeat(64), nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom });
     expect(reply).toMatchObject({ ring_id: "d".repeat(32), answer: 2, reason: expect.stringContaining("not the verified caller") });
@@ -113,24 +113,24 @@ describe("handleRing: a ring", () => {
   });
 
   it("declines a ring addressed to another node id", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     const reply = await handleRing(ringFrom(CALLER, { to: "f".repeat(64) }), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW });
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringContaining("wrong callee") });
   });
 
   it("declines malformed args by naming the problems", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     const reply = await handleRing({ kind: "ring", urgent: true }, { caller: CALLER, nodeId: ME, now: NOW });
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringMatching(/invalid: .*boolean at "urgent"/) });
   });
 
   it("declines when the service is not active at all", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     expect(await handleRing(ringFrom(CALLER), { caller: CALLER })).toMatchObject({ answer: 2, reason: expect.stringContaining("not active") });
   });
 
   it("rate-limits a second ring from the same caller within the window, regardless of policy", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     const joinRoom = vi.fn().mockResolvedValue({});
     expect(await handleRing(ringFrom(CALLER, { ring_id: "1".repeat(32) }), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom })).toMatchObject({ answer: 1 });
     const reply = await handleRing(ringFrom(CALLER, { ring_id: "2".repeat(32) }), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom });
@@ -138,7 +138,7 @@ describe("handleRing: a ring", () => {
   });
 
   it("declines once a caller already has MAX_PENDING_PER_PEER rings pending", async () => {
-    const { handleRing, MAX_PENDING_PER_PEER } = await import("./ring_service.js");
+    const { handleRing, MAX_PENDING_PER_PEER } = await import("./serve_rings.js");
     for (let i = 0; i < MAX_PENDING_PER_PEER; i++) {
       received(`${i}`.repeat(32), ME, CALLER, "p", NOW);
     }
@@ -147,8 +147,8 @@ describe("handleRing: a ring", () => {
   });
 
   it("declines an accept whose join is refused at the room limit -- the cap is decided inside the join (macula-mcp#44 step 6)", async () => {
-    const { handleRing, MAX_JOINED_ROOMS } = await import("./ring_service.js");
-    const rooms = await import("./rooms.js");
+    const { handleRing, MAX_JOINED_ROOMS } = await import("./serve_rings.js");
+    const rooms = await import("./../rooms.js");
     const joinRoom = vi.fn().mockRejectedValue(new rooms.RoomCapacityError(`this agent has reached its room limit (${MAX_JOINED_ROOMS})`));
     const reply = await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom });
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringContaining("room limit") });
@@ -160,7 +160,7 @@ describe("handleRing: a ring_answer to a ring this agent placed", () => {
   const CALLEE = "b".repeat(64);
 
   it("records the callee's answer against the outgoing deferred ring and acknowledges", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     { placed("e".repeat(32), ME, CALLEE, "p", 1); ringReply("e".repeat(32), 3); };
     const reply = await handleRing(answerFrom(CALLEE, { answer: 2, reason: "busy today" }), { caller: CALLEE, nodeId: ME, now: NOW });
     expect(reply).toEqual({ ring_id: "e".repeat(32), received: 1 });
@@ -168,7 +168,7 @@ describe("handleRing: a ring_answer to a ring this agent placed", () => {
   });
 
   it("keeps the first answer and says so on a repeat", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     { placed("e".repeat(32), ME, CALLEE, "p", 1); ringReply("e".repeat(32), 1); };
     const reply = await handleRing(answerFrom(CALLEE, { answer: 2 }), { caller: CALLEE, nodeId: ME, now: NOW });
     expect(reply).toEqual({ ring_id: "e".repeat(32), received: 1, already_answered: 1 });
@@ -176,7 +176,7 @@ describe("handleRing: a ring_answer to a ring this agent placed", () => {
   });
 
   it("refuses an answer from anyone but the verified callee, for a ring it never placed, or for another room", async () => {
-    const { handleRing } = await import("./ring_service.js");
+    const { handleRing } = await import("./serve_rings.js");
     expect(await handleRing(answerFrom(CALLEE), { caller: CALLEE, nodeId: ME, now: NOW })).toMatchObject({ answer: 2, reason: expect.stringContaining("unknown ring") });
     { placed("e".repeat(32), ME, CALLEE, "p", 1); ringReply("e".repeat(32), 3); };
     const impostor = "f".repeat(64);
@@ -198,7 +198,7 @@ describe("answerPendingRing", () => {
   }
 
   it("accept: joins the room first, records, then carries the ring_answer to the caller's own ~<node_id>/ring", async () => {
-    const { answerPendingRing, MAX_JOINED_ROOMS } = await import("./ring_service.js");
+    const { answerPendingRing, MAX_JOINED_ROOMS } = await import("./serve_rings.js");
     pending();
     const order: string[] = [];
     const joinRoom = vi.fn(async () => {
@@ -218,7 +218,7 @@ describe("answerPendingRing", () => {
   });
 
   it("decline: records with the reason, notifies, joins nothing", async () => {
-    const { answerPendingRing } = await import("./ring_service.js");
+    const { answerPendingRing } = await import("./serve_rings.js");
     pending();
     const joinRoom = vi.fn();
     mocks.call.mockResolvedValue({ procedure: "x", payload: { ring_id: "f".repeat(32), received: 1 }, duration_ms: 1 });
@@ -230,7 +230,7 @@ describe("answerPendingRing", () => {
   });
 
   it("still records the answer when the caller cannot be reached, and says so", async () => {
-    const { answerPendingRing } = await import("./ring_service.js");
+    const { answerPendingRing } = await import("./serve_rings.js");
     pending();
     mocks.call.mockRejectedValue(new Error("no trusted provider"));
     const res = await answerPendingRing({ ring_id: "f".repeat(32), answer: 2 }, { nodeId: ME });
@@ -241,7 +241,7 @@ describe("answerPendingRing", () => {
   // macula-mcp#42: the row was read, the room join awaited, then the answer written -- so two attempts
   // both read "pending", both joined, and the last write decided. One answer per ring, from here on.
   it("two attempts at one deferred ring: one answers it, the other refuses (#42)", async () => {
-    const { answerPendingRing } = await import("./ring_service.js");
+    const { answerPendingRing } = await import("./serve_rings.js");
     pending();
     mocks.call.mockResolvedValue({ procedure: "x", payload: { ring_id: "f".repeat(32), received: 1 }, duration_ms: 1 });
     const joinRoom = async () => {
@@ -259,7 +259,7 @@ describe("answerPendingRing", () => {
   });
 
   it("refuses a ring that is unknown or already answered", async () => {
-    const { answerPendingRing } = await import("./ring_service.js");
+    const { answerPendingRing } = await import("./serve_rings.js");
     await expect(answerPendingRing({ ring_id: "f".repeat(32), answer: 1 }, { nodeId: ME })).rejects.toThrow(/no incoming ring/);
     received("f".repeat(32), ME, THEM, "pair", 1, 1);
     await expect(answerPendingRing({ ring_id: "f".repeat(32), answer: 2 }, { nodeId: ME })).rejects.toThrow(/already answered/);
@@ -268,7 +268,7 @@ describe("answerPendingRing", () => {
 
 describe("start / status / stop", () => {
   it("serves ~<node_id>/ring on the pool, handing each call's verified caller to handleRing", async () => {
-    const svc = await import("./ring_service.js");
+    const svc = await import("./serve_rings.js");
     const stop = vi.fn().mockResolvedValue(undefined);
     mocks.serve.mockResolvedValue({ stop });
     process.env.MACULA_MCP_CONTACT_POLICY = "open";
@@ -276,7 +276,7 @@ describe("start / status / stop", () => {
     expect(status).toMatchObject({ serving: 1, procedure: ringProcedure(ME), contact_policy: POLICY.open });
     const { procedure, handler } = mocks.serve.mock.calls[0]![0] as { procedure: string; handler: (r: unknown) => Promise<unknown> };
     expect(procedure).toBe(`~${ME}/ring`);
-    const joinedVia = await import("./rooms.js");
+    const joinedVia = await import("./../rooms.js");
     vi.mocked(joinedVia.joinRoom).mockResolvedValue({} as never);
     const reply = await handler({ caller: "b".repeat(64), realm: "00".repeat(32), procedure, payload: ringFrom("b".repeat(64)), deadlineMs: NOW });
     expect(reply).toMatchObject({ answer: 1 });
@@ -288,7 +288,7 @@ describe("start / status / stop", () => {
   });
 
   it("serves nothing when MACULA_MCP_NO_RING is set, and says so", async () => {
-    const svc = await import("./ring_service.js");
+    const svc = await import("./serve_rings.js");
     process.env.MACULA_MCP_NO_RING = "1";
     expect(await svc.start({ nodeId: ME })).toMatchObject({ serving: 0, disabled: 1 });
     expect(mocks.serve).not.toHaveBeenCalled();
@@ -299,7 +299,7 @@ describe("start / status / stop", () => {
   // registration was never retried.
   it("retries a failed first registration with backoff instead of giving up", async () => {
     vi.useFakeTimers();
-    const svc = await import("./ring_service.js");
+    const svc = await import("./serve_rings.js");
     mocks.serve
       .mockRejectedValueOnce(new Error("no link up"))
       .mockRejectedValueOnce(new Error("still down"))
@@ -318,7 +318,7 @@ describe("start / status / stop", () => {
 
   it("stop() cancels a pending retry instead of leaving it to fire later", async () => {
     vi.useFakeTimers();
-    const svc = await import("./ring_service.js");
+    const svc = await import("./serve_rings.js");
     mocks.serve.mockRejectedValueOnce(new Error("down"));
     await expect(svc.start({ nodeId: ME })).rejects.toThrow("down");
     await svc.stop();

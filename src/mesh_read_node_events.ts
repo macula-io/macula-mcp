@@ -18,7 +18,7 @@ import { selfNodeId } from "./macula_ts_client.js";
 import { NODE_EVENT, readNodeEvents, type NodeEvent } from "./node_events.js";
 import { errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
-import { answerLabel, ringsDb } from "./rings.js";
+import { answerLabel, ringsDb } from "./ring_agents/rings.js";
 import { petname } from "./petname.js";
 import { toolDescription } from "./tool_description.js";
 

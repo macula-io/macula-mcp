@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
-import { closeRings } from "./rings.js";
+import { closeRings } from "./ring_agents/rings.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);

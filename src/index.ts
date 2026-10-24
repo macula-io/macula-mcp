@@ -35,9 +35,9 @@ import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshMemory } from "./mesh_memory.js";
 import { registerMeshRooms } from "./mesh_rooms.js";
 import { registerMeshWaitRoom } from "./mesh_wait_room.js";
-import { registerMeshRing } from "./mesh_ring.js";
-import { registerMeshAnswerRing } from "./mesh_answer_ring.js";
-import { registerMeshWaitRing } from "./mesh_wait_ring.js";
+import { registerMeshRing } from "./ring_agents/mesh_ring.js";
+import { registerMeshAnswerRing } from "./ring_agents/mesh_answer_ring.js";
+import { registerMeshWaitRing } from "./ring_agents/mesh_wait_ring.js";
 import { registerMeshTrustAgent } from "./mesh_trust_agent.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
 import { registerMeshReadNodeEvents } from "./mesh_read_node_events.js";
@@ -198,7 +198,7 @@ registerMeshWaitRoom(server);
 registerMeshRing(server);
 // mesh_answer_ring: the callee's model answering a deferred ring -- join
 // the room, record, carry the answer back as a call to the caller's own
-// ring endpoint. See ring_service.ts's answerPendingRing.
+// ring endpoint. See serve_rings.ts's answerPendingRing.
 registerMeshAnswerRing(server);
 // mesh_wait_ring: mesh_wait_room's counterpart for rings -- block on the
 // node event log (node_events.ts, already appended for every real inbound

@@ -23,7 +23,7 @@ vi.mock("./lobby_observer.js", () => ({
   tapRoom: vi.fn(),
   untapRoom: vi.fn(),
 }));
-vi.mock("./ring_service.js", () => ({
+vi.mock("./ring_agents/serve_rings.js", () => ({
   start: vi.fn().mockResolvedValue({ serving: 0 }),
   stop: vi.fn().mockResolvedValue(undefined),
   status: vi.fn().mockReturnValue({ serving: 0 }),
@@ -38,8 +38,8 @@ vi.mock("./device_membership.js", () => ({
 }));
 
 import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
-import * as ringService from "./ring_service.js";
-import { closeRings } from "./rings.js";
+import * as ringService from "./ring_agents/serve_rings.js";
+import { closeRings } from "./ring_agents/rings.js";
 import * as presence from "./presence.js";
 
 const NODE_ID = "a".repeat(64);
@@ -270,7 +270,7 @@ describe("the lifecycle mailbox (macula-mcp#44 step 7)", () => {
     expect(await stopping).toEqual({ said_goodbye: true });
     expect(presence.isActive()).toBe(false);
     for (const sub of subs) expect(sub.stop).toHaveBeenCalledTimes(1);
-    const ringService = await import("./ring_service.js");
+    const ringService = await import("./ring_agents/serve_rings.js");
     expect(ringService.stop).toHaveBeenCalled();
     const lobbyObserver = await import("./lobby_observer.js");
     expect(lobbyObserver.stop).toHaveBeenCalled();

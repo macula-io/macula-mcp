@@ -21,7 +21,7 @@ import * as presence from "./presence.js";
 import * as rooms from "./rooms.js";
 import { factsAfter, recentFacts } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, LIFECYCLE_KINDS, threadEnvelopes } from "./envelope.js";
-import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./rings.js";
+import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./ring_agents/rings.js";
 import { petname } from "./petname.js";
 import { toolDescription } from "./tool_description.js";
 

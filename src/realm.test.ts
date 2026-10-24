@@ -36,7 +36,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import * as realm from "./realm.js";
 import { readNodeEvents } from "./node_events.js";
-import { closeRings, ringsDb } from "./rings.js";
+import { closeRings, ringsDb } from "./ring_agents/rings.js";
 
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
 let dir = "";

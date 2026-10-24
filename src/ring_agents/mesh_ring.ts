@@ -1,7 +1,7 @@
 // Tool: mesh_ring -- the addressed invite.
 //
 // A ring is a mesh_call to the callee's own served procedure, ~<node_id>/ring
-// (ring_service.ts on their side), carrying the room to talk in. A call,
+// (serve_rings.ts on their side), carrying the room to talk in. A call,
 // not a publish, so the caller learns one of exactly four things: accepted
 // (they are joining the room), declined (with a reason), deferred (their
 // model will decide; the room stays open), or unreachable (nobody is
@@ -16,22 +16,22 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { call, selfNodeId } from "./macula_ts_client.js";
-import { describeMeshError, errorContent, jsonContent } from "./reply.js";
-import * as presence from "./presence.js";
-import * as rooms from "./rooms.js";
-import { factsAfter, lastFactId } from "./lobby_transcript.js";
-import { parseEnvelope } from "./envelope.js";
+import { call, selfNodeId } from "./../macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./../reply.js";
+import * as presence from "./../presence.js";
+import * as rooms from "./../rooms.js";
+import { factsAfter, lastFactId } from "./../lobby_transcript.js";
+import { parseEnvelope } from "./../envelope.js";
 import { ANSWER, answerLabel, buildRingArgs, MAX_PURPOSE_CHARS, parseRingReply, ringProcedure, RingError } from "./rings.js";
 import { ringPlaced, ringReply } from "./ring_dossier.js";
-import { assertNoLikelySecret } from "./secret_scan.js";
-import { petname } from "./petname.js";
-import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
-import { toolDescription } from "./tool_description.js";
-import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
-import * as lobbyObserver from "./lobby_observer.js";
+import { assertNoLikelySecret } from "./../secret_scan.js";
+import { petname } from "./../petname.js";
+import { nodeIdOrPetnameSchema, resolveNodeId } from "./../resolve_node_id.js";
+import { toolDescription } from "./../tool_description.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./../dropped_events.js";
+import * as lobbyObserver from "./../lobby_observer.js";
 
-// The callee's own handler (ring_service.ts, HANDLER_TIMEOUT_SECONDS=30,
+// The callee's own handler (serve_rings.ts, HANDLER_TIMEOUT_SECONDS=30,
 // plus the local relay's own 25 s budget) can legitimately take close to
 // 30 s to answer an accept -- it joins a room and publishes on the real
 // mesh inside the call. This timeout MUST stay comfortably above that,

@@ -2,7 +2,7 @@
 // periodic agent.hello heartbeat, subscriptions to agent.hello and
 // agent.goodbye feeding the local roster (roster.ts), the lobby observer
 // (lobby_observer.ts) watching central and this agent's rooms, the ring
-// endpoint (ring_service.ts), realm auto-join (device_membership.ts) and
+// endpoint (serve_rings.ts), realm auto-join (device_membership.ts) and
 // the citizens-directory registration (citizenship.ts). mesh_hello.ts,
 // mesh_goodbye.ts and mesh_agents.ts are thin tool wrappers around
 // start()/stop()/roster reads.
@@ -32,7 +32,7 @@ import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 import { petname } from "./petname.js";
 import * as lobbyObserver from "./lobby_observer.js";
-import * as ringService from "./ring_service.js";
+import * as ringService from "./ring_agents/serve_rings.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
 import * as deviceMembership from "./device_membership.js";
@@ -153,7 +153,7 @@ export interface StartResult {
   interval_seconds: number;
   already_active: boolean;
   lobby_topic: string;
-  /** Whether this agent can be rung (ring_service.ts). */
+  /** Whether this agent can be rung (serve_rings.ts). */
   ring: ringService.RingServiceStatus;
   /** The same node_id, named for what it is in the citizens directory. */
   citizen_did: string;

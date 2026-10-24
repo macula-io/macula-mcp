@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { ringReceived } from "./ring_dossier.js";
+import { ringReceived } from "./ring_agents/ring_dossier.js";
 import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
-import { closeRings, ringsDb } from "./rings.js";
+import { closeRings, ringsDb } from "./ring_agents/rings.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);

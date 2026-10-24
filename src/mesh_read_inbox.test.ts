@@ -92,8 +92,8 @@ vi.mock("./presence.js", () => ({ ensurePresence: toolMocks.ensurePresence, curr
 vi.mock("./macula_ts_client.js", () => ({ selfNodeId: toolMocks.selfNodeId }));
 vi.mock("./rooms.js", () => ({ listRooms: toolMocks.listRooms, resumeWatching: toolMocks.resumeWatching }));
 vi.mock("./lobby_transcript.js", () => ({ recentFacts: toolMocks.recentFacts }));
-vi.mock("./rings.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./rings.js")>();
+vi.mock("./ring_agents/rings.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ring_agents/rings.js")>();
   return { ...actual, pendingIncoming: toolMocks.pendingIncoming, listRings: toolMocks.listRings };
 });
 

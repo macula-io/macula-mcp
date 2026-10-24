@@ -17,7 +17,7 @@
 // Each transition that changed a row also appends the node event log's entry for it (node_events.ts), in
 // this same transaction: that is what lets a client read what happened instead of diffing snapshots.
 import { randomBytes } from "node:crypto";
-import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
+import { appendNodeEvent, NODE_EVENT } from "./../node_events.js";
 import { ANSWER, ringsDb, type Answer, type Direction, type RingRecord } from "./rings.js";
 
 /** How long a claim may sit before another attempt may take it: a process killed mid-answer must not make a

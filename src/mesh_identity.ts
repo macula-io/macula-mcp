@@ -12,7 +12,7 @@ import { nodeKeyPath } from "./mesh_config.js";
 import { KEY_PROFILE, selfNodeId } from "./macula_ts_client.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
-import * as ringService from "./ring_service.js";
+import * as ringService from "./ring_agents/serve_rings.js";
 
 export function registerIdentity(server: McpServer): void {
   server.resource(

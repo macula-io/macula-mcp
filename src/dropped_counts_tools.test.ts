@@ -35,15 +35,15 @@ vi.mock("./lobby_observer.js", async (importOriginal) => ({
   start: mocks.observerStart,
   status: mocks.observerStatus,
 }));
-vi.mock("./rings.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./rings.js")>()),
+vi.mock("./ring_agents/rings.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./ring_agents/rings.js")>()),
   pendingIncoming: () => [],
   listRings: () => [],
 }));
 
 import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
 import { registerMeshReadInbox } from "./mesh_read_inbox.js";
-import { registerMeshRing } from "./mesh_ring.js";
+import { registerMeshRing } from "./ring_agents/mesh_ring.js";
 import { registerMeshRooms } from "./mesh_rooms.js";
 import { registerMeshWaitRoom } from "./mesh_wait_room.js";
 

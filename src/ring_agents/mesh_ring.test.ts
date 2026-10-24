@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER, closeRings, getRing } from "./rings.js";
-import { newRoomTopic } from "./envelope.js";
-import { closeTranscript, recordLoss } from "./lobby_transcript.js";
-import { closeRoster, upsertAgent } from "./roster.js";
-import { petname } from "./petname.js";
+import { newRoomTopic } from "./../envelope.js";
+import { closeTranscript, recordLoss } from "./../lobby_transcript.js";
+import { closeRoster, upsertAgent } from "./../roster.js";
+import { petname } from "./../petname.js";
 
 const ME = "c".repeat(64);
 const CALLEE = "b".repeat(64);
 
 // Boundary mock: the client layer placeRing calls through. rooms.js and
-// presence.js are narrowed the same way ring_service.test.ts narrows them,
+// presence.js are narrowed the same way serve_rings.test.ts narrows them,
 // so this suite stays about the ring itself.
 const mocks = vi.hoisted(() => ({
   call: vi.fn(),
@@ -17,12 +17,12 @@ const mocks = vi.hoisted(() => ({
   isJoined: vi.fn(),
   currentNodeId: vi.fn(),
 }));
-vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, selfNodeId: mocks.selfNodeId }));
-vi.mock("./rooms.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./rooms.js")>();
+vi.mock("./../macula_ts_client.js", () => ({ call: mocks.call, selfNodeId: mocks.selfNodeId }));
+vi.mock("./../rooms.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./../rooms.js")>();
   return { ...actual, isJoined: mocks.isJoined };
 });
-vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
+vi.mock("./../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
 
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";

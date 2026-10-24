@@ -93,7 +93,7 @@
 <text class="t-type" x="680" y="402">[mesh_hello / goodbye / agents]</text>
 <text class="t-desc" x="680" y="426">agent.hello heartbeat and roster,</text>
 <text class="t-desc" x="680" y="442">lobby_observer (central and rooms),</text>
-<text class="t-desc" x="680" y="458">ring_service (~&lt;node_id&gt;/ring),</text>
+<text class="t-desc" x="680" y="458">serve_rings (~&lt;node_id&gt;/ring),</text>
 <text class="t-desc" x="680" y="474">citizenship, device_membership</text>
 <rect class="b-mac" x="32" y="522" width="618" height="112" rx="10"/>
 <text class="t-name" x="48" y="550">macula_ts_client.ts on @macula-io/ts 0.31</text>

@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { answerClaimedRing, claimDeferredRing, releaseClaim, ringPlaced, ringReceived, ringReply } from "./ring_dossier.js";
+import { answerClaimedRing, claimDeferredRing, releaseClaim, ringPlaced, ringReceived, ringReply } from "./ring_agents/ring_dossier.js";
 import { lastNodeEventSeq, readNodeEvents } from "./node_events.js";
-import { closeRings, ringsDb } from "./rings.js";
+import { closeRings, ringsDb } from "./ring_agents/rings.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);

@@ -8,7 +8,7 @@
 // mock without re-verifying that claim is still false.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER, closeRings } from "./rings.js";
+import { ANSWER, closeRings } from "./ring_agents/rings.js";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
 import { closeRoster, upsertAgent } from "./roster.js";
 import { petname } from "./petname.js";
