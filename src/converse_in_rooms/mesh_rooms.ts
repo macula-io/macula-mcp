@@ -15,7 +15,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "../dropped_events.js";
-import { selfNodeId } from "../macula_ts_client.js";
+import { selfNodeId } from "../connect_to_mesh.js";
 import { describeMeshError, errorContent, jsonContent } from "../reply.js";
 import { ensurePresence } from "../be_present/presence.js";
 import * as presence from "../be_present/presence.js";

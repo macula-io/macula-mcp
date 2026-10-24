@@ -5,7 +5,7 @@
 // Topology: thin client, but a direct one. macula-mcp speaks MCP over
 // stdio to the agent, and the macula 12 wire to the mesh itself,
 // in-process, through ONE @macula-io/ts pool under ONE identity key
-// (macula_ts_client.ts): links to every configured station, each pinned by
+// (connect_to_mesh.ts): links to every configured station, each pinned by
 // its node_id, calls by direct dial, signed publications, subscriptions
 // that survive a redial, and procedures served in this agent's own
 // namespace, ~<node_id>/<name>. No subprocess, no separately installed
@@ -53,7 +53,7 @@ import { serverVersion } from "./version.js";
 import { registerMeshJoinRealm } from "./mesh_join_realm.js";
 import { registerMeshListRealms } from "./mesh_list_realms.js";
 import * as serve from "./serve.js";
-import { closePool } from "./macula_ts_client.js";
+import { closePool } from "./connect_to_mesh.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -163,7 +163,7 @@ registerEtiquette(server);
 registerHelp(server);
 registerRole(server);
 
-// Tools — actions on the shared pool (see macula_ts_client.ts). Every one
+// Tools — actions on the shared pool (see connect_to_mesh.ts). Every one
 // below (mesh_read_inbox and the room tools included) also
 // calls presence.ensurePresence(server) at its own entry point --
 // fire-and-forget, never blocking this tool's own result on it -- so

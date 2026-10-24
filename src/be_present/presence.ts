@@ -15,7 +15,7 @@
 // public fleet unprompted. A deliberate mesh_goodbye stays honored until
 // an explicit mesh_hello (see explicitlyLeft).
 //
-// Everything rides the one shared pool (macula_ts_client.ts): both
+// Everything rides the one shared pool (connect_to_mesh.ts): both
 // subscriptions and every heartbeat, under this server's one identity.
 // The pool re-links and replays a subscription when a link drops, so
 // there is no reconnect logic here.
@@ -28,7 +28,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Event, Subscription } from "@macula-io/ts";
 import { primaryStation } from "../mesh_config.js";
 import { droppedEvents } from "../dropped_events.js";
-import { publish, selfNodeId, subscribe } from "../macula_ts_client.js";
+import { publish, selfNodeId, subscribe } from "../connect_to_mesh.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 import { petname } from "../petname.js";
 import * as lobbyObserver from "../converse_in_rooms/watch_lobby.js";

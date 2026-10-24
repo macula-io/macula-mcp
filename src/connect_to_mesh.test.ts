@@ -36,7 +36,7 @@ import {
   resetForTests,
   selfNodeId,
   watch,
-} from "./macula_ts_client.js";
+} from "./connect_to_mesh.js";
 import { droppedEvents, onLoss } from "./dropped_events.js";
 import { DEFAULT_SEEDS, IO_MACULA_REALM_ID, IO_MACULA_REALM_KEY, MeshError } from "./mesh_config.js";
 
@@ -345,7 +345,7 @@ describe("realm proof v2", () => {
     const proof = { v: 2, timestamp: 1, nonce: "00".repeat(16), signature: "ab" };
     const deviceRequestProof = vi.fn(async () => proof);
     loadOrCreate.mockResolvedValue({ nodeIdHex: () => SELF, publicKey: () => new Uint8Array([1, 2, 3]), deviceRequestProof });
-    const { carriedPublicKey, proveDeviceRequest } = await import("./macula_ts_client.js");
+    const { carriedPublicKey, proveDeviceRequest } = await import("./connect_to_mesh.js");
     const request = { public_key: "AQID", ttl_seconds: 60 };
     await expect(proveDeviceRequest(IO_MACULA_REALM_ID, "macula_realm.membership_ucan", request, "mesh")).resolves.toEqual(proof);
     expect(deviceRequestProof).toHaveBeenCalledWith(IO_MACULA_REALM_ID, "macula_realm.membership_ucan", request, "mesh");

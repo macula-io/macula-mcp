@@ -11,7 +11,7 @@
 // Nothing here publishes; it only records, with each fact's verified
 // publisher, into the local transcript (lobby_transcript.ts).
 //
-// Every topic is one subscription on the shared pool (macula_ts_client.ts),
+// Every topic is one subscription on the shared pool (connect_to_mesh.ts),
 // which re-links and replays it when a link drops.
 //
 // Never retroactive: observing only sees facts published after a tap
@@ -20,7 +20,7 @@
 import type { Event, Subscription } from "@macula-io/ts";
 import { primaryStation } from "../mesh_config.js";
 import { droppedEvents, onLoss } from "../dropped_events.js";
-import { selfNodeId, subscribe } from "../macula_ts_client.js";
+import { selfNodeId, subscribe } from "../connect_to_mesh.js";
 import { lostOn, recordFact, recordLoss } from "./lobby_transcript.js";
 import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "../envelope.js";
 

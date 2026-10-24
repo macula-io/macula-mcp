@@ -32,11 +32,11 @@ too.
 
 CI's `test` job is deliberately offline-only (see its own comment in
 `ci.yml`): every tool here talks to the mesh in-process via
-`@macula-io/ts` (`macula_ts_client.ts`), which the test suite mocks at
+`@macula-io/ts` (`connect_to_mesh.ts`), which the test suite mocks at
 that module boundary where it's tested at all (`mesh_stations.test.ts`,
 `mesh_memory.test.ts`, `converse_in_rooms/rooms.test.ts`, `citizenship.test.ts`,
 `presence.test.ts`, `ring_agents/serve_rings.test.ts`, `serve.test.ts`, `mesh_call.test.ts`
-— see any of those for the pattern), and `macula_ts_client.test.ts` tests the
+— see any of those for the pattern), and `connect_to_mesh.test.ts` tests the
 client layer itself against a fake `Pool`. That means `npm test` passing does
 not confirm a tool actually works against a real station.
 
@@ -62,10 +62,10 @@ locally.
 
 ## Code conventions
 
-**Talking to the mesh: always go through `macula_ts_client.ts`, never
+**Talking to the mesh: always go through `connect_to_mesh.ts`, never
 touch `@macula-io/ts`'s `Pool`/`NodeKey` directly from a tool file.**
 There is one pool and one key per process, shared by every tool;
-`macula_ts_client.ts` owns both, maps every mesh error onto `MeshError`
+`connect_to_mesh.ts` owns both, maps every mesh error onto `MeshError`
 with its code, and refuses what the wire cannot carry (booleans) before
 anything is sent. If you add a new operation, add it there, next to the
 existing ones.

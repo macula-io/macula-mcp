@@ -24,7 +24,7 @@
 // Proof: the session is created with this node's key as carried and a realm
 // proof v2 (macula-realm#29) over the whole body as sent, device_info
 // included, for io.macula and "macula_realm.join_session", with a fresh
-// nonce (macula_ts_client.ts's proveDeviceRequest, over macula-go's
+// nonce (connect_to_mesh.ts's proveDeviceRequest, over macula-go's
 // devicerequest). macula-realm's DeviceRequestProof checks it and derives the
 // node_id from the key, so nobody can create a session for a key they do not
 // hold, or change what the person confirming it reads.
@@ -40,7 +40,7 @@ import { hostname, arch, homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import QRCode from "qrcode";
 import type { JsonValue } from "@macula-io/ts";
-import { carriedPublicKey, JOIN_SESSION_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
+import { carriedPublicKey, JOIN_SESSION_PROCEDURE, proveDeviceRequest, selfNodeId } from "./connect_to_mesh.js";
 import { realmIdOf } from "./mesh_config.js";
 import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
 import { acquireLock, releaseLock } from "./realm_lock.js";

@@ -34,7 +34,7 @@
 // alongside it.
 
 import { isRunDirectly } from "./run_directly.js";
-import { carriedPublicKey, selfNodeId } from "../macula_ts_client.js";
+import { carriedPublicKey, selfNodeId } from "../connect_to_mesh.js";
 import { parseRealmName, realmBaseURL } from "../realm_name.js";
 import {
   POLL_INTERVAL_MS,

@@ -10,7 +10,7 @@ import { join } from "node:path";
 // checks the proof's bytes against the realm's own vector); the realm's HTTP
 // side is a scripted fake below.
 const mocks = vi.hoisted(() => ({ selfNodeId: vi.fn(), carriedPublicKey: vi.fn(), proveDeviceRequest: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({
+vi.mock("./connect_to_mesh.js", () => ({
   selfNodeId: mocks.selfNodeId,
   carriedPublicKey: mocks.carriedPublicKey,
   proveDeviceRequest: mocks.proveDeviceRequest,

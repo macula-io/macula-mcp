@@ -55,7 +55,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 // Same as mesh_stations.ts: mcl-rag is called in the realm its own
 // advertisement names, discovered first.
-import { KEY_PROFILE, call, callWithReport, discoverProcedureRealm } from "./macula_ts_client.js";
+import { KEY_PROFILE, call, callWithReport, discoverProcedureRealm } from "./connect_to_mesh.js";
 import { inCorpus, verifyCorpus, type CorpusCheck, type Description } from "./rag_corpus.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./be_present/presence.js";

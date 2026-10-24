@@ -6,7 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 // means, so an agent reads 0 as "nothing lost", not "unknown", and a timeout
 // after a loss is not read as silence. The feeds and their counts are mocked:
 // rooms.test.ts, watch_lobby.test.ts, presence.test.ts and
-// macula_ts_client.test.ts cover where the counts come from.
+// connect_to_mesh.test.ts cover where the counts come from.
 const ME = "a".repeat(64);
 const ROOM = `agents.room.${"1".repeat(32)}`;
 

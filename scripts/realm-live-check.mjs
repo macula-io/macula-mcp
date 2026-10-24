@@ -29,7 +29,7 @@ async function step(name, run) {
 }
 
 try {
-  const { selfNodeId } = await import("../dist/macula_ts_client.js");
+  const { selfNodeId } = await import("../dist/connect_to_mesh.js");
   const realm = await import("../dist/realm.js");
   const { joinDevice } = await import("../dist/device_membership.js");
   const node = await selfNodeId();

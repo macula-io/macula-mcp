@@ -21,7 +21,7 @@
 // (2026-09-04) The macula-cli binary probe that used to run first here
 // is gone too -- this package no longer shells out to a separately
 // installed macula-cli for anything (mesh operations run in-process via
-// @macula-io/ts, see macula_ts_client.ts), so there is nothing left to
+// @macula-io/ts, see connect_to_mesh.ts), so there is nothing left to
 // detect or advise installing before the registered MCP entry works.
 //
 // Exit codes: 0 = ok, 1 = bad input, 2 = no MCP clients detected.

@@ -15,10 +15,10 @@ const mocks = vi.hoisted(() => ({
   ensurePresence: vi.fn(),
 }));
 // Boundary mock, same pattern as mesh_stations.test.ts/rooms.test.ts: replace
-// the module mesh_memory.ts talks to the mesh THROUGH (macula_ts_client.js)
+// the module mesh_memory.ts talks to the mesh THROUGH (connect_to_mesh.js)
 // -- both the DHT discovery half and the actual mcl-rag call go through
 // it now that realm support landed, so this is the one seam to mock.
-vi.mock("./macula_ts_client.js", () => ({
+vi.mock("./connect_to_mesh.js", () => ({
   call: mocks.call, callWithReport: mocks.callWithReport, discoverProcedureRealm: mocks.discoverProcedureRealm,
   KEY_PROFILE: "pq_hybrid",
 }));

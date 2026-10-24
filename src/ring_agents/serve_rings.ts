@@ -14,7 +14,7 @@
 // is served); a policy of "closed" still serves, and declines, so a caller
 // learns the answer is no rather than silence.
 //
-// The endpoint is served in-process on the shared pool (macula_ts_client.ts),
+// The endpoint is served in-process on the shared pool (connect_to_mesh.ts),
 // which advertises it, renews it and re-advertises it after a redial. A
 // node's own namespace is authorized by the node's signature alone, so no
 // org and no realm vouch for it, and only this node can serve it: a caller
@@ -36,7 +36,7 @@
 // lifetime. stop() cancels a retry that has not fired yet.
 
 import type { JsonValue, Request, Served } from "@macula-io/ts";
-import { call, serve } from "../macula_ts_client.js";
+import { call, serve } from "../connect_to_mesh.js";
 import * as rooms from "../converse_in_rooms/rooms.js";
 import { isAllowlisted, loadContactPolicy, POLICY, policyLabel, type ContactPolicy, type Policy } from "../policy.js";
 import { ANSWER, buildRingAnswerArgs, getRing, parseRingAnswerArgs, parseRingAnswerReply, parseRingArgs, pendingSummary, ringAnswerProblems, ringProblems, ringProcedure, type Answer,

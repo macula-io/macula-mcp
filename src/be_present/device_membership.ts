@@ -17,7 +17,7 @@
 // moduledoc). The proof is realm proof v2 (macula-realm#29): the key as
 // carried (ML-DSA, the realm's pq_hybrid profile), from which the realm
 // derives the node_id, signs the realm, the procedure, a nonce and the whole
-// payload, ttl_seconds included; macula_ts_client.ts's proveDeviceRequest
+// payload, ttl_seconds included; connect_to_mesh.ts's proveDeviceRequest
 // builds it.
 //
 // Realm targeting is not discovery-based like citizenship.ts's: the same
@@ -36,7 +36,7 @@
 // commons realm the moment this ships.
 import { realmIdOf } from "../mesh_config.js";
 import type { JsonValue } from "@macula-io/ts";
-import { call, carriedPublicKey, MEMBERSHIP_UCAN_PROCEDURE, proveDeviceRequest, selfNodeId } from "../macula_ts_client.js";
+import { call, carriedPublicKey, MEMBERSHIP_UCAN_PROCEDURE, proveDeviceRequest, selfNodeId } from "../connect_to_mesh.js";
 import { listCredentials, loadCredential, storeCredentialUnlessWeaker, storeRenewal, type RealmCredential, type RealmTier } from "../realm.js";
 
 /**

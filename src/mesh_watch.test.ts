@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 const mocks = vi.hoisted(() => ({ watch: vi.fn(), ensurePresence: vi.fn() }));
-vi.mock("./macula_ts_client.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./macula_ts_client.js")>()),
+vi.mock("./connect_to_mesh.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./connect_to_mesh.js")>()),
   watch: mocks.watch,
 }));
 vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence, HELLO_TOPIC: "agent.hello", GOODBYE_TOPIC: "agent.goodbye" }));

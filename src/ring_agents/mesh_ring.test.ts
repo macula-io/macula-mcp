@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   isJoined: vi.fn(),
   currentNodeId: vi.fn(),
 }));
-vi.mock("../macula_ts_client.js", () => ({ call: mocks.call, selfNodeId: mocks.selfNodeId }));
+vi.mock("../connect_to_mesh.js", () => ({ call: mocks.call, selfNodeId: mocks.selfNodeId }));
 vi.mock("../converse_in_rooms/rooms.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../converse_in_rooms/rooms.js")>();
   return { ...actual, isJoined: mocks.isJoined };

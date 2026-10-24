@@ -5,7 +5,7 @@
 // does, so a launcher can list its agents' node ids before any of them starts (crew-code#18's
 // roster). Never touches the mesh.
 import { isRunDirectly } from "./run_directly.js";
-import { selfNodeId } from "../macula_ts_client.js";
+import { selfNodeId } from "../connect_to_mesh.js";
 
 export async function nodeIdLine(): Promise<string> {
   return `${await selfNodeId()}\n`;

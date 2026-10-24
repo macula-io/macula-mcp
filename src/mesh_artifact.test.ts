@@ -4,7 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 const MCID = "0255" + "ab".repeat(48);
 
 const mocks = vi.hoisted(() => ({ shareContent: vi.fn(), getContent: vi.fn(), ensurePresence: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({ shareContent: mocks.shareContent, getContent: mocks.getContent }));
+vi.mock("./connect_to_mesh.js", () => ({ shareContent: mocks.shareContent, getContent: mocks.getContent }));
 vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<{ isError?: boolean; content: { text: string }[] }>;

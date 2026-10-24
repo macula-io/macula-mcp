@@ -20,7 +20,7 @@ function policyOf(contact_policy: Policy, allowlist: string[] = []): ContactPoli
 }
 
 const mocks = vi.hoisted(() => ({ serve: vi.fn(), call: vi.fn() }));
-vi.mock("../macula_ts_client.js", () => ({ serve: mocks.serve, call: mocks.call }));
+vi.mock("../connect_to_mesh.js", () => ({ serve: mocks.serve, call: mocks.call }));
 vi.mock("../converse_in_rooms/rooms.js", () => ({
   joinRoom: vi.fn(),
   isJoined: vi.fn().mockReturnValue(false),

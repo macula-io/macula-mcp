@@ -96,7 +96,7 @@
 <text class="t-desc" x="680" y="458">serve_rings (~&lt;node_id&gt;/ring),</text>
 <text class="t-desc" x="680" y="474">citizenship, device_membership</text>
 <rect class="b-mac" x="32" y="522" width="618" height="112" rx="10"/>
-<text class="t-name" x="48" y="550">macula_ts_client.ts on @macula-io/ts 0.31</text>
+<text class="t-name" x="48" y="550">connect_to_mesh.ts on @macula-io/ts 0.31</text>
 <text class="t-type" x="48" y="568">[Macula SDK, wire 1.0]</text>
 <text class="t-desc" x="48" y="592">ONE Pool under ONE identity key (ML-DSA, pq_hybrid), linked to every configured</text>
 <text class="t-desc" x="48" y="608">station, each pinned by its node_id; calls by direct dial, signed publications,</text>

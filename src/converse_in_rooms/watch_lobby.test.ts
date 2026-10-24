@@ -4,12 +4,12 @@ import { closeTranscript, lostOn, recentFacts } from "./lobby_transcript.js";
 import { buildEnvelope, newRoomTopic } from "../envelope.js";
 
 // Boundary mock: the client layer the observer subscribes through.
-vi.mock("../macula_ts_client.js", () => ({
+vi.mock("../connect_to_mesh.js", () => ({
   selfNodeId: vi.fn(),
   subscribe: vi.fn(),
 }));
 
-import { selfNodeId, subscribe } from "../macula_ts_client.js";
+import { selfNodeId, subscribe } from "../connect_to_mesh.js";
 import * as lobbyObserver from "./watch_lobby.js";
 
 const NODE_ID = "a".repeat(64);
@@ -96,7 +96,7 @@ describe("dropped()", () => {
     const { droppedEvents } = await import("../dropped_events.js");
     await lobbyObserver.start({});
     subscribedTo("agents.lobby").lost = 4;
-    // What macula_ts_client.subscribe does after each delivery.
+    // What connect_to_mesh.subscribe does after each delivery.
     const central = await (vi.mocked(subscribe).mock.results[0]!.value as ReturnType<typeof subscribe>);
     droppedEvents("agents.lobby", central);
     expect(lostOn("agents.lobby")).toBe(4);

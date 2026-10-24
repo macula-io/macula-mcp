@@ -41,7 +41,7 @@
 // (isAttestedFact). There is no published seq; each envelope's own
 // message_id/sent_at is the ordering signal.
 
-import { publish, selfNodeId as ownNodeId } from "../macula_ts_client.js";
+import { publish, selfNodeId as ownNodeId } from "../connect_to_mesh.js";
 import * as presence from "../be_present/presence.js";
 import * as lobbyObserver from "./watch_lobby.js";
 import * as roomMembership from "./room_membership.js";

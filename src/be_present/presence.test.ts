@@ -3,7 +3,7 @@ import type { Event } from "@macula-io/ts";
 import { closeRoster, listAgents } from "./roster.js";
 
 // Boundary mock: the client layer presence talks to the mesh through.
-vi.mock("../macula_ts_client.js", () => ({
+vi.mock("../connect_to_mesh.js", () => ({
   selfNodeId: vi.fn(),
   publish: vi.fn(),
   subscribe: vi.fn(),
@@ -37,7 +37,7 @@ vi.mock("./device_membership.js", () => ({
   keepMembershipsRenewed: vi.fn().mockReturnValue(undefined),
 }));
 
-import { publish, selfNodeId, subscribe } from "../macula_ts_client.js";
+import { publish, selfNodeId, subscribe } from "../connect_to_mesh.js";
 import * as ringService from "../ring_agents/serve_rings.js";
 import { closeMachineDb } from "../machine_transcript.js";
 import * as presence from "./presence.js";

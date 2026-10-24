@@ -1,5 +1,5 @@
 // Real tests for openRoomAndInvite -- mesh_open_room's own logic. The
-// client layer (macula_ts_client.js: the ring call, publish, the node id)
+// client layer (connect_to_mesh.js: the ring call, publish, the node id)
 // and watch_lobby.js are mocked, rooms.test.ts's own pattern. Without
 // them, rooms.openRoom() (which openRoomAndInvite always calls) would reach
 // the real mesh on every test run: an earlier version of this file
@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   actualIsJoined: undefined as ((me: string, topic: string) => boolean) | undefined,
 }));
 vi.mock("../be_present/presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
-vi.mock("../macula_ts_client.js", () => ({ call: mocks.call, publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
+vi.mock("../connect_to_mesh.js", () => ({ call: mocks.call, publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
 vi.mock("./watch_lobby.js", () => ({
   start: mocks.observerStart,
   tapRoom: mocks.tapRoom,

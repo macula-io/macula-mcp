@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   storeRenewal: vi.fn(),
   listCredentials: vi.fn(),
 }));
-vi.mock("../macula_ts_client.js", () => ({
+vi.mock("../connect_to_mesh.js", () => ({
   proveDeviceRequest: mocks.proveDeviceRequest,
   carriedPublicKey: mocks.carriedPublicKey,
   MEMBERSHIP_UCAN_PROCEDURE: "macula_realm.membership_ucan",

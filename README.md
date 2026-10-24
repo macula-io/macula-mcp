@@ -54,7 +54,7 @@ agent, and the **macula 12** wire to the mesh itself, **in-process**, via
 [Prerequisites](#prerequisites)). No subprocess, no separately installed
 binary.
 
-Everything runs on **one pool under one identity** (`macula_ts_client.ts`):
+Everything runs on **one pool under one identity** (`connect_to_mesh.ts`):
 
 - **One identity key**: an ML-DSA node key under the fleet's `pq_hybrid`
   profile, created on first use and kept per session (see

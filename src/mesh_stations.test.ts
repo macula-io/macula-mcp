@@ -9,10 +9,10 @@ const mocks = vi.hoisted(() => ({
   ensurePresence: vi.fn(),
 }));
 // Boundary mock, same pattern as rooms.test.ts/presence.test.ts: replace the
-// module mesh_stations.ts talks to the mesh THROUGH (macula_ts_client.js) --
+// module mesh_stations.ts talks to the mesh THROUGH (connect_to_mesh.js) --
 // both the DHT discovery half and the actual list_stations call go through
 // it now that realm support landed, so this is the one seam to mock.
-vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, discoverProcedureRealm: mocks.discoverProcedureRealm }));
+vi.mock("./connect_to_mesh.js", () => ({ call: mocks.call, discoverProcedureRealm: mocks.discoverProcedureRealm }));
 vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<unknown>;

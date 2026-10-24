@@ -2,7 +2,7 @@
 //
 // The agent's hands. A provider advertises a procedure; the agent calls it
 // over the mesh instead of a local sandbox or a US SaaS runner. The call
-// goes by direct dial on the shared pool (macula_ts_client.ts): the
+// goes by direct dial on the shared pool (connect_to_mesh.ts): the
 // provider's signed advertisement from the DHT, trusted only when the
 // realm's key authorizes it, then the station it serves from. The call is
 // signed with this server's identity, which is what the provider sees as
@@ -13,7 +13,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { IO_MACULA_REALM_ID, MeshError, realmIdOf, splitRealmPrefix } from "./mesh_config.js";
-import { callWithReport, selfNodeId, type Seal } from "./macula_ts_client.js";
+import { callWithReport, selfNodeId, type Seal } from "./connect_to_mesh.js";
 import { listCredentials } from "./realm.js";
 import { tokenExpiry } from "./be_present/device_membership.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";

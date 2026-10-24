@@ -126,7 +126,7 @@ extensions:
 ## 2. Tools
 
 Every tool works on one pool of links under one identity key
-(`src/macula_ts_client.ts`): links to every configured station, each
+(`src/connect_to_mesh.ts`): links to every configured station, each
 pinned by its node_id (`MACULA_MESH_STATIONS`, as `host:port@<node_id>`),
 and trust in io.macula plus any realm in `MACULA_MESH_REALMS`. No tool
 takes a station.

@@ -9,7 +9,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { nodeKeyPath } from "./mesh_config.js";
-import { KEY_PROFILE, selfNodeId } from "./macula_ts_client.js";
+import { KEY_PROFILE, selfNodeId } from "./connect_to_mesh.js";
 import * as citizenship from "./be_present/citizenship.js";
 import * as realm from "./realm.js";
 import * as ringService from "./ring_agents/serve_rings.js";

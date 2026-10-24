@@ -4,7 +4,7 @@
 // caller's verified node_id in MACULA_MCP_CALLER).
 //
 // Each is served in this agent's own namespace, ~<node_id>/<name>, on the
-// shared pool (macula_ts_client.ts), which advertises it, renews it and
+// shared pool (connect_to_mesh.ts), which advertises it, renews it and
 // re-advertises it after a redial. A node's own namespace needs no org and
 // no realm to vouch for it, and only this node can serve in it.
 //
@@ -17,7 +17,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import type { BytesOutput, JsonValue, Request, Served, ServedConfidential } from "@macula-io/ts";
-import { ownProcedure, serve as serveProcedure } from "./macula_ts_client.js";
+import { ownProcedure, serve as serveProcedure } from "./connect_to_mesh.js";
 import { findLikelySecret } from "./secret_scan.js";
 
 interface Registration {

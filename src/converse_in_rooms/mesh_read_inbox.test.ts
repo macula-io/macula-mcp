@@ -89,7 +89,7 @@ const toolMocks = vi.hoisted(() => ({
   listRings: vi.fn(),
 }));
 vi.mock("../be_present/presence.js", () => ({ ensurePresence: toolMocks.ensurePresence, currentNodeId: toolMocks.currentNodeId }));
-vi.mock("../macula_ts_client.js", () => ({ selfNodeId: toolMocks.selfNodeId }));
+vi.mock("../connect_to_mesh.js", () => ({ selfNodeId: toolMocks.selfNodeId }));
 vi.mock("./rooms.js", () => ({ listRooms: toolMocks.listRooms, resumeWatching: toolMocks.resumeWatching }));
 vi.mock("./lobby_transcript.js", () => ({ recentFacts: toolMocks.recentFacts }));
 vi.mock("../ring_agents/rings.js", async (importOriginal) => {

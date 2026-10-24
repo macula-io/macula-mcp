@@ -5,7 +5,7 @@ const SELF = "c".repeat(64);
 const CALLER = "a".repeat(64);
 
 const mocks = vi.hoisted(() => ({ serve: vi.fn(), ownProcedure: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({ serve: mocks.serve, ownProcedure: mocks.ownProcedure }));
+vi.mock("./connect_to_mesh.js", () => ({ serve: mocks.serve, ownProcedure: mocks.ownProcedure }));
 
 type Handler = (r: Request) => Promise<unknown>;
 let served: { procedure: string; handler: Handler; stop: ReturnType<typeof vi.fn>; bytes?: string }[];

@@ -16,7 +16,7 @@
 // operator privacy even though nothing here is a bearer credential or a
 // state change.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { selfNodeId } from "./macula_ts_client.js";
+import { selfNodeId } from "./connect_to_mesh.js";
 import { jsonContent } from "./reply.js";
 import { listCredentials, type RealmMembership } from "./realm.js";
 import { toolDescription } from "./tool_description.js";

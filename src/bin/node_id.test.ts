@@ -1,6 +1,6 @@
 // macula-mcp-node-id prints the node id this configuration's server uses, so a launcher can list its
 // agents' ids (crew-code#18's roster) without starting a server. NodeKey is faked at the @macula-io/ts
-// boundary, as in macula_ts_client.test.ts.
+// boundary, as in connect_to_mesh.test.ts.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { homedir } from "node:os";
 import { join } from "node:path";

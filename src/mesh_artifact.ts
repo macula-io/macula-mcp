@@ -10,7 +10,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getContent, shareContent } from "./macula_ts_client.js";
+import { getContent, shareContent } from "./connect_to_mesh.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { ensurePresence } from "./be_present/presence.js";
 import { assertNoLikelySecretInBase64Content } from "./secret_scan.js";

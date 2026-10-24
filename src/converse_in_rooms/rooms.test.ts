@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => ({
   dropped: vi.fn(),
 }));
 // Boundary mock, same pattern as presence.test.ts's own: replace the module
-// rooms.ts talks to the mesh THROUGH (macula_ts_client.js), not mesh_config.js
-vi.mock("../macula_ts_client.js", () => ({ publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
+// rooms.ts talks to the mesh THROUGH (connect_to_mesh.js), not mesh_config.js
+vi.mock("../connect_to_mesh.js", () => ({ publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
 vi.mock("../be_present/presence.js", () => ({ currentNodeId: mocks.currentNodeId }));
 vi.mock("./watch_lobby.js", () => ({
   start: mocks.observerStart,

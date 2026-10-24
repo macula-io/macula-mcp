@@ -52,7 +52,7 @@ jobs:
           node-version: "24.20.0"
       - run: npm ci
       # Offline only -- every tool in this repo talks to the mesh
-      # in-process via @macula-io/ts (macula_ts_client.ts), which this
+      # in-process via @macula-io/ts (connect_to_mesh.ts), which this
       # suite mocks at the module boundary (see mesh_call.test.ts and
       # its siblings); live verification against the real fleet is done
       # by hand, not in CI.

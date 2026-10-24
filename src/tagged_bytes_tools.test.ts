@@ -4,7 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 // The agent-facing tools hand agents bytes as {"$bytes": "<base64>"} instead
 // of "0x" hex, so an id that came back from one call can go straight into the
 // next (a channel id, for one), and each tool's description says
-// so. The wire layer is mocked at macula_ts_client.js/serve.js: these tests
+// so. The wire layer is mocked at connect_to_mesh.js/serve.js: these tests
 // pin what the tools ask for and what they tell agents. The encoding itself
 // is @macula-io/ts's, covered by its own Go and live tests.
 const mocks = vi.hoisted(() => ({
@@ -13,8 +13,8 @@ const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   serve: vi.fn(),
 }));
-vi.mock("./macula_ts_client.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./macula_ts_client.js")>()),
+vi.mock("./connect_to_mesh.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./connect_to_mesh.js")>()),
   callWithReport: mocks.callWithReport,
   watch: mocks.watch,
   publish: mocks.publish,

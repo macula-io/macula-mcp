@@ -7,7 +7,7 @@ const PROVIDER = "cd".repeat(32);
 const NODE = "4f769c4e76402f3a0114f00f81a6b255f8f3298a1a9029ea5cf8a25c1463d7a0";
 
 const mocks = vi.hoisted(() => ({ callWithReport: vi.fn(), ensurePresence: vi.fn(), selfNodeId: vi.fn(), listCredentials: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({ callWithReport: mocks.callWithReport, selfNodeId: mocks.selfNodeId }));
+vi.mock("./connect_to_mesh.js", () => ({ callWithReport: mocks.callWithReport, selfNodeId: mocks.selfNodeId }));
 vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 vi.mock("./realm.js", () => ({ listCredentials: mocks.listCredentials }));
 

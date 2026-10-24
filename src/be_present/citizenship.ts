@@ -14,7 +14,7 @@
 // the CALL's caller, which macula signs end to end with that identity's key
 // and the provider verifies, so no proof travels in the payload and nothing
 // is signed here. register() learns the directory's realm from its verified
-// advertisement (macula_ts_client.ts's discoverProcedureRealm).
+// advertisement (connect_to_mesh.ts's discoverProcedureRealm).
 //
 // Registration is presence, not identity: entries expire (mcl-citizens
 // keeps one at most twenty minutes), so this re-registers every
@@ -30,7 +30,7 @@
 // Opt out with MACULA_MCP_NO_CITIZENSHIP=1: registering puts this agent
 // in a public directory, same category of decision as presence's own
 // agent.hello broadcast (see presence.ts on why that is on by default).
-import { call, discoverProcedureRealm } from "../macula_ts_client.js";
+import { call, discoverProcedureRealm } from "../connect_to_mesh.js";
 
 export const REGISTER_PROCEDURE = "mcl-citizens/register_presence";
 export const CITIZEN_KIND = "agent";

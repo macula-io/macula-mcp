@@ -2,7 +2,7 @@
 // system-prompt body VERBATIM from the shared mesh corpus -- mcl-rag's
 // get_document_verbatim, not a local file and not a semantic approximation.
 // Boundary mocks, same pattern as mesh_memory.test.ts: the one module this
-// talks to the mesh through (macula_ts_client.js -- realm discovery and the
+// talks to the mesh through (connect_to_mesh.js -- realm discovery and the
 // call both go through it) plus presence.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   discoverProcedureRealm: vi.fn(),
   ensurePresence: vi.fn(),
 }));
-vi.mock("./macula_ts_client.js", () => ({
+vi.mock("./connect_to_mesh.js", () => ({
   call: mocks.call,
   discoverProcedureRealm: mocks.discoverProcedureRealm,
 }));
