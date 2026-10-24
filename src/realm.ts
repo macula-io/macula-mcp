@@ -34,10 +34,10 @@
 // keeps its membership for as long as that identity exists; name the
 // agent (MACULA_MCP_AGENT) or pin MACULA_MCP_IDENTITY to keep both across
 // harness sessions.
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { hostname, arch, homedir, platform } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import QRCode from "qrcode";
 import type { JsonValue } from "@macula-io/ts";
 import { carriedPublicKey, JOIN_SESSION_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
@@ -152,23 +152,123 @@ function recordJoinConfirmed(cred: RealmCredential, realmName: string): void {
   }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The membership owner: the one writer of a credential file.
+//
+// A node's membership in a realm is one fact, and until macula-mcp#44 four code paths wrote it with four
+// different ideas of what was already there: this file's own join flow, device_membership.ts's silent
+// auto-join and its renewal, and macula-mcp-realm, a SEPARATE process the human runs. Each read the file,
+// decided, and wrote -- with an await in between in most cases -- so the writer that finished last won,
+// and the rule "a citizen credential is never replaced by a device one" held only in the paths that
+// happened to re-read at the right moment.
+//
+// So every write goes through storeMembership, which takes a lock file next to the credential (the CLI is
+// another OS process, so an in-process mutex is not enough), re-reads the file under that lock, applies
+// the caller's POLICY to what is on disk now, and writes through a temp file and a rename. Nothing else
+// writes a credential: the three exported functions below are the three policies, not three writers.
+const LOCK_TIMEOUT_MS = 5_000;
+const LOCK_STALE_MS = 30_000;
+const LOCK_RETRY_MS = 10;
+
+/** How long a store waits for the credential lock. MACULA_MCP_REALM_LOCK_TIMEOUT_MS exists for the tests. */
+function lockTimeoutMs(): number {
+  const configured = Number(process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : LOCK_TIMEOUT_MS;
+}
+
+function lockPath(nodeId: string, realmName: string): string {
+  return join(realmDir(), nodeId, `${realmName}.lock`);
+}
+
+/** Sleeps this thread only: the lock is taken synchronously, and a store is never on an await. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function lockHolder(path: string): { pid?: number } | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown };
+    return { pid: typeof parsed.pid === "number" ? parsed.pid : undefined };
+  } catch {
+    return undefined;
+  }
+}
+
+function processAlive(pid: number | undefined): boolean {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 /**
- * Writes the credential 0600 in a 0700 directory and returns its path.
- *
- * Through a temp file and a rename in the same directory (macula-mcp#43): a
- * reader that catches the write sees the membership before it or the one
- * after it, never a half-written file. readCredentialFile() reads an
- * unparsable file as "not joined", so a truncated one used to look like a
- * membership this node does not have -- and started an auto-join over one it
- * does.
- *
- * A credential that establishes a membership is also appended to this node's event log, after the file
- * lands (recordJoinConfirmed) -- the membership is never announced before it exists.
+ * A lock its holder is done with: that process is gone (a CLI killed mid-join, the common case), or the
+ * file is older than any store has any business being (a holder that died without a readable pid). Without
+ * this, one crashed process would wedge every later join behind a five-second timeout forever.
  */
-export function storeCredential(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string {
-  const before = loadCredential(cred.node_id, realmName);
-  mkdirSync(join(realmDir(), cred.node_id), { recursive: true, mode: 0o700 });
-  const path = credentialPath(cred.node_id, realmName);
+function abandonedLock(path: string): boolean {
+  const holder = lockHolder(path);
+  if (holder?.pid !== undefined && !processAlive(holder.pid)) return true;
+  try {
+    return Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return true;
+  }
+}
+
+function tryLock(path: string): number | undefined {
+  try {
+    const fd = openSync(path, "wx", 0o600);
+    writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }));
+    return fd;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return undefined;
+    throw e;
+  }
+}
+
+/** Takes the credential lock, or throws: a store that cannot be sure what is on disk must not write. */
+function acquireLock(path: string): number {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + lockTimeoutMs();
+  for (;;) {
+    const held = tryLock(path);
+    if (held !== undefined) return held;
+    if (abandonedLock(path)) {
+      try {
+        unlinkSync(path);
+      } catch {
+        // another waiter got there first, which is fine: it holds, or it does not
+      }
+      continue;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`realm: the credential lock ${path} is held by another process (pid ${lockHolder(path)?.pid ?? "unknown"}); gave up after ${lockTimeoutMs()} ms without writing`);
+    }
+    sleepSync(LOCK_RETRY_MS);
+  }
+}
+
+function releaseLock(path: string, fd: number): void {
+  try {
+    closeSync(fd);
+  } catch {
+    // nothing to release
+  }
+  // Reclaimed while we held it (we overran the stale window): the file is someone else's now.
+  if (lockHolder(path)?.pid !== process.pid) return;
+  try {
+    unlinkSync(path);
+  } catch {
+    // already gone
+  }
+}
+
+/** Writes the credential 0600 through a temp file and a rename, so no reader ever sees half a file. */
+function writeCredentialFile(path: string, cred: RealmCredential): void {
   const tmp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(cred, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
@@ -182,27 +282,73 @@ export function storeCredential(cred: RealmCredential, realmName: string = DEFAU
     }
     throw e;
   }
-  if (isNewMembership(before, cred)) recordJoinConfirmed(cred, realmName);
-  return path;
 }
 
 /** How strong a credential's tier is, so a weaker one can never replace a stronger (macula-mcp#43). */
 const tierRank = (tier: RealmTier): number => (tier === "citizen" ? 2 : 1);
 
 /**
+ * What a store does with a credential, given what the file holds NOW (read under the lock):
+ * - replace: a fresh join for this (node, realm) replaces what was there.
+ * - unless-weaker: keep a stronger one already in place (the silent device join).
+ * - renewal: keep a credential that landed during the renewing call's await and outranks the one it
+ *   renewed, but otherwise store the new token even at a lower tier (see storeRenewal).
+ */
+type StorePolicy = { kind: "replace" } | { kind: "unless-weaker" } | { kind: "renewal"; renewedFrom: RealmTier };
+
+function keepsWhatIsStored(policy: StorePolicy, held: RealmCredential | undefined, cred: RealmCredential, realmName: string): boolean {
+  if (held === undefined) return false;
+  if (policy.kind === "unless-weaker") return tierRank(held.tier) > tierRank(cred.tier);
+  if (policy.kind !== "renewal") return false;
+  if (tierRank(held.tier) <= tierRank(policy.renewedFrom)) return false;
+  console.error(`realm: a ${held.tier} credential for ${cred.node_id} in ${realmName} landed while its ${policy.renewedFrom} membership renewed; kept it`);
+  return true;
+}
+
+/** Re-reads, decides and writes under the credential lock; returns the path, or undefined when it kept. */
+function storeMembership(cred: RealmCredential, realmName: string, policy: { kind: "replace" }): string;
+function storeMembership(cred: RealmCredential, realmName: string, policy: StorePolicy): string | undefined;
+function storeMembership(cred: RealmCredential, realmName: string, policy: StorePolicy): string | undefined {
+  const path = credentialPath(cred.node_id, realmName);
+  const lock = lockPath(cred.node_id, realmName);
+  const fd = acquireLock(lock);
+  try {
+    const held = readCredentialFile(path);
+    if (keepsWhatIsStored(policy, held, cred, realmName)) return undefined;
+    writeCredentialFile(path, cred);
+    // Inside the lock: the event is appended by the same writer that made the file true, so two
+    // processes cannot both read "no membership" and both announce one.
+    if (isNewMembership(held, cred)) recordJoinConfirmed(cred, realmName);
+    return path;
+  } finally {
+    releaseLock(lock, fd);
+  }
+}
+
+/**
+ * Writes the credential 0600 in a 0700 directory and returns its path.
+ *
+ * Under the credential lock, from a re-read taken there (macula-mcp#44): the file this replaces is whatever
+ * another process stored a moment ago, not what this process saw before it started.
+ *
+ * A credential that establishes a membership is also appended to this node's event log, after the file
+ * lands (recordJoinConfirmed) -- the membership is never announced before it exists.
+ */
+export function storeCredential(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string {
+  return storeMembership(cred, realmName, { kind: "replace" });
+}
+
+/**
  * Stores a credential unless this realm already holds a stronger one for this
  * node, and returns its path, or undefined when it kept what was there.
  *
- * The read and the decision happen HERE, at the write (macula-mcp#43). Both
- * callers used to decide before an await -- auto-join before it joined,
- * renewal before the realm answered -- so a citizen credential that landed in
- * that window was replaced by the device-tier one the call had already
- * started, which is the one rule this store must never break.
+ * The read and the decision happen HERE, at the write, under the lock (macula-mcp#43, macula-mcp#44).
+ * Both callers used to decide before an await -- auto-join before it joined, renewal before the realm
+ * answered -- so a citizen credential that landed in that window was replaced by the device-tier one the
+ * call had already started, which is the one rule this store must never break.
  */
 export function storeCredentialUnlessWeaker(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string | undefined {
-  const held = loadCredential(cred.node_id, realmName);
-  if (held !== undefined && tierRank(held.tier) > tierRank(cred.tier)) return undefined;
-  return storeCredential(cred, realmName);
+  return storeMembership(cred, realmName, { kind: "unless-weaker" });
 }
 
 /**
@@ -221,12 +367,7 @@ export function storeCredentialUnlessWeaker(cred: RealmCredential, realmName: st
  * already there outranks what it is about to mint.
  */
 export function storeRenewal(held: RealmMembership, renewed: RealmCredential): string | undefined {
-  const landed = loadCredential(renewed.node_id, held.realm);
-  if (landed !== undefined && tierRank(landed.tier) > tierRank(held.tier)) {
-    console.error(`realm: a ${landed.tier} credential for ${renewed.node_id} in ${held.realm} landed while its ${held.tier} membership renewed; kept it`);
-    return undefined;
-  }
-  return storeCredential(renewed, held.realm);
+  return storeMembership(renewed, held.realm, { kind: "renewal", renewedFrom: held.tier });
 }
 
 export interface RealmMembership extends RealmCredential {
@@ -385,12 +526,20 @@ export function parseSessionStatus(httpStatus: number, body: unknown): SessionSt
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
+/**
+ * A realm call that never answers must not hold the membership owner's mailbox (macula-mcp#44): while a
+ * poll is in flight, a begin behind it waits, so the wait is bounded here rather than left to the
+ * operating system's own TCP timeouts.
+ */
+const REALM_HTTP_TIMEOUT_MS = 15_000;
+
 /** baseURL defaults to realmUrl() (today's single-realm env-var-or-default) -- bin/realm.ts's multi-realm CLI is the only caller that ever passes something else (realm_name.ts's realmBaseURL, resolved from a typed realm name), never the MCP-tool path. */
 export async function createSession(body: Record<string, unknown>, fetchImpl: FetchLike = fetch, baseURL: string = realmUrl()): Promise<CreatedSession> {
   const res = await fetchImpl(`${baseURL}/api/v1/join/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(REALM_HTTP_TIMEOUT_MS),
   });
   return parseCreated(res.status, await res.json().catch(() => ({})));
 }
@@ -399,6 +548,7 @@ export async function createSession(body: Record<string, unknown>, fetchImpl: Fe
 export async function pollSession(sessionId: string, fetchImpl: FetchLike = fetch, baseURL: string = realmUrl()): Promise<SessionStatus> {
   const res = await fetchImpl(`${baseURL}/api/v1/join/sessions/${encodeURIComponent(sessionId)}`, {
     headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(REALM_HTTP_TIMEOUT_MS),
   });
   return parseSessionStatus(res.status, await res.json().catch(() => ({})));
 }
@@ -457,12 +607,33 @@ interface Pending {
   session_id: string;
   join_url: string;
   expires_at: string;
+  /** The realm this session was opened against: the confirmation is stored under it, never a default. */
+  realm: string;
   timer?: NodeJS.Timeout;
-  polling: boolean;
 }
 
 let pending: Pending | undefined;
 let lastError: string | undefined;
+
+/**
+ * The pending session's mailbox (macula-mcp#44): begin, the background poll, a wait and an abandon are
+ * transitions of ONE piece of state, so they are handled one at a time, in the order they arrived.
+ *
+ * Two concurrent begins used to each open a session -- the second replaced the first's pending state
+ * without clearing its interval timer, so that timer polled a session nobody would ever hear about, and a
+ * person confirming the FIRST link got nothing. And a poll that had answered after its session was
+ * abandoned applied to whatever was current, so a late "expired" cleared a fresh session.
+ */
+let mailbox: Promise<unknown> = Promise.resolve();
+
+function serialized<T>(op: () => T | Promise<T>): Promise<T> {
+  const run = mailbox.then(op, op);
+  mailbox = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 export interface RealmStatus {
   portal: string;
@@ -511,35 +682,37 @@ export interface RealmStatus {
  * calling this tool, and it needs the real link to be useful at all.
  * Only status reached through some OTHER, incidental read is redacted.
  */
-export function status(nodeId: string | undefined, opts: { redactPending?: boolean } = {}): RealmStatus {
-  const base: RealmStatus = { portal: realmUrl(), joined: false };
-  if (!nodeId) return base;
-  const cred = loadCredential(nodeId);
-  if (cred) {
-    return {
-      ...base,
-      joined: true,
-      org_identity: cred.org_identity,
-      handle: handleOf(cred.org_identity),
-      account: cred.account,
-      joined_at: cred.joined_at,
-      credential_path: credentialPath(nodeId),
-      citizen_did: cred.citizen_did,
-      has_ucan: Boolean(cred.ucan),
-      tier: cred.tier,
-    };
-  }
+export function status(nodeId: string | undefined, opts: { redactPending?: boolean; realm?: string } = {}): RealmStatus {
+  if (!nodeId) return { portal: realmUrl(), joined: false };
+  const realmName = opts.realm ?? DEFAULT_REALM_NAME;
+  const cred = loadCredential(nodeId, realmName);
+  if (cred) return { portal: realmUrl(), joined: true, ...joinedFields(nodeId, realmName, cred) };
+  const session = pendingFor(nodeId, realmName);
+  return { portal: realmUrl(), joined: false, ...pendingFields(session, opts.redactPending === true), ...(lastError ? { error: lastError } : {}) };
+}
+
+function joinedFields(nodeId: string, realmName: string, cred: RealmCredential): Omit<RealmStatus, "portal" | "joined"> {
   return {
-    ...base,
-    ...(pending && pending.node_id === nodeId
-      ? {
-          pending: opts.redactPending
-            ? { expires_at: pending.expires_at }
-            : { session_id: pending.session_id, join_url: pending.join_url, expires_at: pending.expires_at },
-        }
-      : {}),
-    ...(lastError ? { error: lastError } : {}),
+    org_identity: cred.org_identity,
+    handle: handleOf(cred.org_identity),
+    account: cred.account,
+    joined_at: cred.joined_at,
+    credential_path: credentialPath(nodeId, realmName),
+    citizen_did: cred.citizen_did,
+    has_ucan: Boolean(cred.ucan),
+    tier: cred.tier,
   };
+}
+
+/** The in-flight session for exactly this (node, realm), if there is one. */
+function pendingFor(nodeId: string, realmName: string): Pending | undefined {
+  if (pending === undefined || pending.node_id !== nodeId || pending.realm !== realmName) return undefined;
+  return pending;
+}
+
+function pendingFields(p: Pending | undefined, redact: boolean): Pick<RealmStatus, "pending"> {
+  if (p === undefined) return {};
+  return { pending: redact ? { expires_at: p.expires_at } : { session_id: p.session_id, join_url: p.join_url, expires_at: p.expires_at } };
 }
 
 function expired(iso: string): boolean {
@@ -547,20 +720,32 @@ function expired(iso: string): boolean {
   return Number.isFinite(t) && t <= Date.now();
 }
 
-/** Records a confirmed join and clears the pending session. */
+/**
+ * Records a confirmed join and clears the pending session.
+ *
+ * The credential goes to the realm the SESSION was opened against (p.realm), never to a default: a
+ * confirmation for net.beam-campus stored as io.macula is a membership of a realm this node never joined.
+ *
+ * Throws when the store could not take the credential lock, and deliberately does NOT clear the session
+ * then: the person HAS confirmed at the realm, so the poll is left running and the next one retries the
+ * write, instead of losing a membership that exists on the other side.
+ */
 function confirmedJoin(p: Pending, outcome: Extract<SessionStatus, { status: "confirmed" }>): void {
-  storeCredential({
-    node_id: p.node_id,
-    portal: realmUrl(),
-    org_identity: outcome.org_identity,
-    account: outcome.oauth_account,
-    cert_pem: outcome.cert_pem,
-    refresh_token: outcome.refresh_token,
-    joined_at: new Date().toISOString(),
-    citizen_did: outcome.citizen_did,
-    ucan: outcome.ucan,
-    tier: "citizen",
-  });
+  storeCredential(
+    {
+      node_id: p.node_id,
+      portal: realmUrl(),
+      org_identity: outcome.org_identity,
+      account: outcome.oauth_account,
+      cert_pem: outcome.cert_pem,
+      refresh_token: outcome.refresh_token,
+      joined_at: new Date().toISOString(),
+      citizen_did: outcome.citizen_did,
+      ucan: outcome.ucan,
+      tier: "citizen",
+    },
+    p.realm,
+  );
   lastError = undefined;
   clearPending();
 }
@@ -586,16 +771,28 @@ function applyPollOutcome(p: Pending, outcome: SessionStatus): void {
   }
 }
 
-async function pollOnce(fetchImpl: FetchLike): Promise<void> {
-  if (!pending || pending.polling) return;
+/**
+ * One poll of the pending session, applied only if that session is still the current one.
+ *
+ * Called from the mailbox (serialized), so two polls never overlap and no `polling` flag is needed. The
+ * identity check is what a flag could never do: a poll that answers after its session was abandoned or
+ * replaced is DROPPED, where it used to apply its verdict to whatever session happened to be current.
+ */
+async function pollPending(fetchImpl: FetchLike): Promise<void> {
   const p = pending;
-  p.polling = true;
+  if (!p) return;
+  let outcome: SessionStatus;
   try {
-    applyPollOutcome(p, await pollSession(p.session_id, fetchImpl));
+    outcome = await pollSession(p.session_id, fetchImpl);
+  } catch (e) {
+    if (pending === p) lastError = e instanceof Error ? e.message : String(e);
+    return;
+  }
+  if (pending !== p) return;
+  try {
+    applyPollOutcome(p, outcome);
   } catch (e) {
     lastError = e instanceof Error ? e.message : String(e);
-  } finally {
-    if (pending === p) p.polling = false;
   }
 }
 
@@ -615,11 +812,21 @@ export interface BeginResult extends CreatedSession {
  * Create a join session for this node (or hand back the one still
  * pending), start polling it in the background, and return the link plus
  * its QR renderings. Throws when the realm refuses.
+ *
+ * Through the mailbox: two begins that arrive together open ONE session (the second finds the first's and
+ * reuses it). `realm` is the realm the session is opened against and the confirmation will be stored
+ * under; it defaults to io.macula, which is what the MCP tool path has always joined. This process holds
+ * one pending session at a time -- the multi-realm CLI (bin/realm.ts) keeps its own, in its own process.
  */
-export async function begin(input: { connectedVia?: string; fetchImpl?: FetchLike } = {}): Promise<BeginResult> {
+export async function begin(input: { connectedVia?: string; realm?: string; fetchImpl?: FetchLike } = {}): Promise<BeginResult> {
+  return serialized(() => openJoinSession(input));
+}
+
+async function openJoinSession(input: { connectedVia?: string; realm?: string; fetchImpl?: FetchLike }): Promise<BeginResult> {
   const fetchImpl = input.fetchImpl ?? fetch;
+  const realmName = input.realm ?? DEFAULT_REALM_NAME;
   const nodeId = await selfNodeId();
-  if (pending && pending.node_id === nodeId && !expired(pending.expires_at)) {
+  if (pending && pending.node_id === nodeId && pending.realm === realmName && !expired(pending.expires_at)) {
     return {
       node_id: nodeId,
       reused: true,
@@ -633,11 +840,11 @@ export async function begin(input: { connectedVia?: string; fetchImpl?: FetchLik
   clearPending();
   // Proven right before the call, never ahead: the realm allows 60 s of skew.
   const body = joinRequest({ nodeId, publicKey: await carriedPublicKey(), connectedVia: input.connectedVia });
-  const created = await createSession(await signedJoinRequest(body), fetchImpl);
+  const created = await createSession(await signedJoinRequest(body, realmName), fetchImpl);
   lastError = undefined;
-  const timer = setInterval(() => void pollOnce(fetchImpl), POLL_INTERVAL_MS);
+  const timer = setInterval(() => void serialized(() => pollPending(fetchImpl)), POLL_INTERVAL_MS);
   timer.unref();
-  pending = { node_id: nodeId, ...created, timer, polling: false };
+  pending = { node_id: nodeId, realm: realmName, ...created, timer };
   return {
     node_id: nodeId,
     reused: false,
@@ -647,18 +854,29 @@ export async function begin(input: { connectedVia?: string; fetchImpl?: FetchLik
   };
 }
 
-/** Wait up to `seconds` for the pending session to resolve either way; returns the status afterwards. */
+/**
+ * Wait up to `seconds` for the pending session to resolve either way; returns that realm's status
+ * afterwards. Each poll is its own turn in the mailbox, not one long hold on it, so a wait never starves a
+ * begin.
+ */
 export async function waitForOutcome(nodeId: string, seconds: number, fetchImpl: FetchLike = fetch): Promise<RealmStatus> {
   const deadline = Date.now() + Math.max(0, seconds) * 1000;
+  const realmName = pending?.realm ?? DEFAULT_REALM_NAME;
   while (Date.now() < deadline && pending && pending.node_id === nodeId) {
-    await pollOnce(fetchImpl);
+    await serialized(() => pollPending(fetchImpl));
     if (!pending) break;
     await new Promise((r) => setTimeout(r, Math.min(POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()))));
   }
-  return status(nodeId);
+  return status(nodeId, { realm: realmName });
 }
 
-/** Forget the pending session (nothing to cancel on the realm side; it expires on its own). */
+/**
+ * Forget the pending session (nothing to cancel on the realm side; it expires on its own).
+ *
+ * Not queued on the mailbox, deliberately: a person asking to stop must not wait behind a poll in flight.
+ * The poll that is already out carries its own session identity and drops whatever it brings back, so this
+ * cannot race the session that takes its place.
+ */
 export function abandon(): void {
   clearPending();
 }

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, utimesSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -539,5 +541,176 @@ describe("join flow against a fake realm", () => {
     expect(after.joined).toBe(false);
     expect(after.pending).toBeUndefined();
     expect(after.error).toMatch(/expired/);
+  });
+});
+
+// macula-mcp#44 step 5. A realm membership is one fact, written by four code paths in two OS processes
+// (the server's own join flow, the silent device join and its renewal, and macula-mcp-realm). The one
+// defect these pin down is that each of them decided on its OWN read, outside any lock, so the write that
+// landed last won regardless of which credential was stronger.
+describe("one owner for realm membership (macula-mcp#44)", () => {
+  const NODE = "7c".repeat(32);
+  const CARRIED = Buffer.alloc(3118, 4).toString("base64");
+  const CITIZEN = {
+    node_id: NODE,
+    portal: "https://realm.beam-campus.net",
+    org_identity: "mri:org:net.beam-campus/rgfaber",
+    refresh_token: "mrt_holder",
+    joined_at: "2026-10-24T00:00:00Z",
+    tier: "citizen" as const,
+  };
+  const DEVICE = { ...CITIZEN, org_identity: "mri:org:net.beam-campus/machine", refresh_token: "mrt_device", tier: "device" as const };
+
+  const credPath = () => join(dir, NODE, "net.beam-campus.json");
+  const lockPath = () => join(dir, NODE, "net.beam-campus.lock");
+  /** One realm HTTP reply in FetchLike's own shape, and the 201 that opens a session. */
+  const reply = (status: number, body: unknown) => ({ status, json: async () => body });
+  const sessionOpened = (id: string) => reply(201, { session_id: id, join_url: `https://realm.test/join/${id}`, expires_at: "2999-01-01T00:00:00Z" });
+
+  beforeEach(() => {
+    mocks.selfNodeId.mockResolvedValue(NODE);
+    mocks.carriedPublicKey.mockResolvedValue(CARRIED);
+    mocks.proveDeviceRequest.mockImplementation(async () => ({ v: 2, timestamp: Date.now(), nonce: "00".repeat(16), signature: "cd".repeat(5139) }));
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  /**
+   * A real second process holding the credential lock, the way macula-mcp-realm does: it takes the lock,
+   * writes its own credential `writeAtMs` later, and lets go at `holdMs`. Nothing in this one event loop
+   * can interleave with itself, so this is the only honest way to test a cross-process lock.
+   */
+  async function startHolder(holdMs: number, writeAtMs: number): Promise<{ exited: Promise<void> }> {
+    const script = join(dir, "holder.mjs");
+    await writeFile(
+      script,
+      [
+        'import { closeSync, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";',
+        "const [dir, node, realm, credJson, holdMs, writeAtMs] = process.argv.slice(2);",
+        "const nodeDir = `${dir}/${node}`;",
+        "mkdirSync(nodeDir, { recursive: true, mode: 0o700 });",
+        "const lock = `${nodeDir}/${realm}.lock`;",
+        'const fd = openSync(lock, "wx", 0o600);',
+        "writeSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }));",
+        "setTimeout(() => {",
+        "  const tmp = `${nodeDir}/${realm}.json.${process.pid}.tmp`;",
+        `  writeFileSync(tmp, credJson, { encoding: "utf8", mode: 0o600 });`,
+        "  renameSync(tmp, `${nodeDir}/${realm}.json`);",
+        "}, Number(writeAtMs));",
+        "setTimeout(() => { closeSync(fd); unlinkSync(lock); process.exit(0); }, Number(holdMs));",
+      ].join("\n"),
+      "utf8",
+    );
+    const child = spawn(process.execPath, [script, dir, NODE, "net.beam-campus", JSON.stringify(CITIZEN), String(holdMs), String(writeAtMs)], { stdio: "ignore" });
+    // Wrapped, not returned bare: an async function ADOPTS a returned promise, so `await startHolder(...)`
+    // would wait for the child to exit -- the whole lock hold, and the point of the test.
+    const exited = new Promise<void>((resolve, reject) => child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`holder exited ${code}`)))));
+    await vi.waitFor(() => expect(existsSync(lockPath())).toBe(true));
+    return { exited };
+  }
+
+  it("waits for another process's lock, then decides on what it finds there -- not on the empty store it saw before", async () => {
+    writes.renamed.length = 0;
+    const { exited } = await startHolder(900, 600);
+    // A device credential over a citizen one is exactly what the old read-then-write let through.
+    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBeUndefined();
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.refresh_token).toBe("mrt_holder");
+    expect(writes.renamed.filter(([, to]) => to === credPath())).toHaveLength(0);
+    await exited;
+  });
+
+  it("takes a lock left behind by a process that has exited, instead of waiting on it forever", async () => {
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    await mkdir(join(dir, NODE), { recursive: true });
+    await writeFile(lockPath(), JSON.stringify({ pid: dead, at: Date.now() }), "utf8");
+    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
+    expect(existsSync(lockPath())).toBe(false);
+  });
+
+  it("takes a lock held far past the stale window, even though its recorded pid is still alive", async () => {
+    await mkdir(join(dir, NODE), { recursive: true });
+    await writeFile(lockPath(), JSON.stringify({ pid: process.pid, at: Date.now() }), "utf8");
+    const old = new Date(Date.now() - 10 * 60_000);
+    utimesSync(lockPath(), old, old);
+    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
+    expect(existsSync(lockPath())).toBe(false);
+  });
+
+  it("does not steal a lock a live process is holding: it gives up loudly and writes nothing", async () => {
+    process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS = "150";
+    try {
+      await mkdir(join(dir, NODE), { recursive: true });
+      await writeFile(lockPath(), JSON.stringify({ pid: process.pid, at: Date.now() }), "utf8");
+      expect(() => realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toThrow(/credential lock/);
+      expect(existsSync(credPath())).toBe(false);
+      expect(existsSync(lockPath())).toBe(true);
+    } finally {
+      delete process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS;
+    }
+  });
+
+  it("two begins at once open ONE join session, and the second reuses the one already open", async () => {
+    let resolveFirst: (r: ReturnType<typeof sessionOpened>) => void = () => {};
+    const first = new Promise<ReturnType<typeof sessionOpened>>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const calls: string[] = [];
+    const fetchImpl: realm.FetchLike = async () => {
+      calls.push("session");
+      if (calls.length === 1) return first;
+      return sessionOpened("s-late");
+    };
+    const a = realm.begin({ fetchImpl });
+    const b = realm.begin({ fetchImpl });
+    resolveFirst(sessionOpened("s-one"));
+    const [one, two] = await Promise.all([a, b]);
+    expect(calls).toHaveLength(1);
+    expect(one.session_id).toBe("s-one");
+    expect(two.session_id).toBe("s-one");
+    expect(two.reused).toBe(true);
+  });
+
+  it("a poll that answers for a session already abandoned cannot clear the one opened after it", async () => {
+    let resolvePoll: (r: ReturnType<typeof sessionOpened>) => void = () => {};
+    const latePoll = new Promise<ReturnType<typeof sessionOpened>>((resolve) => {
+      resolvePoll = resolve;
+    });
+    const calls = { n: 0 };
+    const fetchImpl: realm.FetchLike = async () => {
+      calls.n += 1;
+      if (calls.n === 1) return sessionOpened("s-old");
+      if (calls.n === 2) return latePoll;
+      return sessionOpened("s-new");
+    };
+    await realm.begin({ fetchImpl });
+    const waiting = realm.waitForOutcome(NODE, 30, fetchImpl);
+    await vi.waitFor(() => expect(calls.n).toBe(2));
+    realm.abandon();
+    const reopened = realm.begin({ fetchImpl });
+    // A bounded wait, not an await: once the session owner serializes its own transitions, this begin is
+    // QUEUED behind the poll still in flight and cannot answer until that poll does -- which is exactly
+    // the point. A build that lets the begin through instead opens s-new here, and the late answer for
+    // the abandoned s-old then wipes it.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    resolvePoll(reply(410, { error: "session_expired" }));
+    await waiting;
+    expect((await reopened).session_id).toBe("s-new");
+    expect(realm.status(NODE).pending?.session_id).toBe("s-new");
+  });
+
+  it("a confirmation for another realm is stored under that realm, never under the default", async () => {
+    const bodies = [
+      sessionOpened("s-r"),
+      reply(200, { status: "confirmed", refresh_token: "mrt_r", org_identity: "mri:org:net.beam-campus/rgfaber" }),
+    ];
+    const fetchImpl: realm.FetchLike = async () => bodies.shift() ?? reply(500, { error: "script exhausted" });
+    await realm.begin({ realm: "net.beam-campus", fetchImpl });
+    const after = await realm.waitForOutcome(NODE, 30, fetchImpl);
+    expect(after.joined).toBe(true);
+    expect(after.tier).toBe("citizen");
+    expect(realm.loadCredential(NODE, "net.beam-campus")?.refresh_token).toBe("mrt_r");
+    expect(realm.loadCredential(NODE)).toBeUndefined();
   });
 });
