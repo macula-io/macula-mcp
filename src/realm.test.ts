@@ -753,6 +753,48 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     }
   });
 
+  // Review r2 on step 7: the stores went async and the confirmation path was left calling one without
+  // awaiting it. A join the person had just confirmed at the realm, landing while another process held the
+  // credential lock, cleared its own session, dropped the membership, and left a rejected promise that
+  // exits the MCP server (no unhandledRejection handler is registered).
+  it("a confirmation that cannot take the credential lock stays pending and is stored once the lock frees", async () => {
+    process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS = "150";
+    const rejections: string[] = [];
+    const onRejection = (e: unknown): void => {
+      rejections.push(e instanceof Error ? e.message : String(e));
+    };
+    process.on("unhandledRejection", onRejection);
+    try {
+      await mkdir(join(dir, NODE), { recursive: true });
+      // Another process holds the credential lock at the moment the person confirms.
+      await writeFile(lockPath(), JSON.stringify({ pid: process.pid, at: Date.now() }), "utf8");
+      const confirmed = reply(200, { status: "confirmed", refresh_token: "mrt_c", org_identity: "mri:org:net.beam-campus/rgfaber" });
+      let calls = 0;
+      const fetchImpl: realm.FetchLike = async () => {
+        calls += 1;
+        return calls === 1 ? sessionOpened("s-locked") : confirmed;
+      };
+      await realm.begin({ realm: "net.beam-campus", fetchImpl });
+
+      await realm.waitForOutcome(NODE, 0.5, fetchImpl);
+      const blocked = realm.status(NODE, { realm: "net.beam-campus" });
+      expect(blocked.joined).toBe(false);
+      expect(blocked.pending?.session_id).toBe("s-locked");
+      expect(existsSync(credPath())).toBe(false);
+
+      // The lock frees: the session is still pending, so the next poll stores the membership.
+      await rm(lockPath(), { force: true });
+      await realm.waitForOutcome(NODE, 0.5, fetchImpl);
+      const after = realm.status(NODE, { realm: "net.beam-campus" });
+      expect(after.joined).toBe(true);
+      expect(after.pending).toBeUndefined();
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+      delete process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS;
+    }
+  });
+
   it("a confirmation for another realm is stored under that realm, never under the default", async () => {
     const bodies = [
       sessionOpened("s-r"),

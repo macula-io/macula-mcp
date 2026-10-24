@@ -642,8 +642,8 @@ function expired(iso: string): boolean {
  * then: the person HAS confirmed at the realm, so the poll is left running and the next one retries the
  * write, instead of losing a membership that exists on the other side.
  */
-function confirmedJoin(p: Pending, outcome: Extract<SessionStatus, { status: "confirmed" }>): void {
-  storeCredential(
+async function confirmedJoin(p: Pending, outcome: Extract<SessionStatus, { status: "confirmed" }>): Promise<void> {
+  await storeCredential(
     {
       node_id: p.node_id,
       portal: realmUrl(),
@@ -663,9 +663,11 @@ function confirmedJoin(p: Pending, outcome: Extract<SessionStatus, { status: "co
 }
 
 /** Applies one poll reply to the pending session's state. */
-function applyPollOutcome(p: Pending, outcome: SessionStatus): void {
+async function applyPollOutcome(p: Pending, outcome: SessionStatus): Promise<void> {
   if (outcome.status === "confirmed") {
-    confirmedJoin(p, outcome);
+    // Awaited: the session is cleared only once the credential is really stored, so a store that could not
+    // take the lock leaves the poll running instead of dropping a membership the person has confirmed.
+    await confirmedJoin(p, outcome);
     return;
   }
   if (outcome.status === "expired") {
@@ -702,7 +704,7 @@ async function pollPending(fetchImpl: FetchLike): Promise<void> {
   }
   if (pending !== p) return;
   try {
-    applyPollOutcome(p, outcome);
+    await applyPollOutcome(p, outcome);
   } catch (e) {
     lastError = e instanceof Error ? e.message : String(e);
   }
