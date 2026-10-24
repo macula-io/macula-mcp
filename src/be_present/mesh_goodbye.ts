@@ -17,10 +17,10 @@
 // mesh_hello undoes a goodbye.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { describeMeshError, errorContent, jsonContent } from "./reply.js";
+import { describeMeshError, errorContent, jsonContent } from "../reply.js";
 import * as presence from "./presence.js";
-import * as rooms from "./converse_in_rooms/rooms.js";
-import { toolDescription } from "./tool_description.js";
+import * as rooms from "../converse_in_rooms/rooms.js";
+import { toolDescription } from "../tool_description.js";
 
 const DESCRIPTION_FULL =
   "Leave the mesh deliberately: leaves every room you are in (participant_left, or room_closed " +

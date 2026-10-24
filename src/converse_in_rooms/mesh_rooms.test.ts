@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER } from "../ring_agents/rings.js";
 import { closeMachineDb } from "../machine_transcript.js";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
-import { closeRoster, upsertAgent } from "../roster.js";
+import { closeRoster, upsertAgent } from "../be_present/roster.js";
 import { petname } from "../petname.js";
 
 const ME = "d".repeat(64);
@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   isJoined: vi.fn(),
   actualIsJoined: undefined as ((me: string, topic: string) => boolean) | undefined,
 }));
-vi.mock("../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
+vi.mock("../be_present/presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
 vi.mock("../macula_ts_client.js", () => ({ call: mocks.call, publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
 vi.mock("./watch_lobby.js", () => ({
   start: mocks.observerStart,

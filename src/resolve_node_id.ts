@@ -23,7 +23,7 @@
 
 import { z } from "zod";
 import { petname } from "./petname.js";
-import { listAllNodeIds, pruneStale } from "./roster.js";
+import { listAllNodeIds, pruneStale } from "./be_present/roster.js";
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 /** Matches mesh_agents.ts's own staleness window -- a petname should not resolve against a roster entry mesh_agents itself would already consider gone. */

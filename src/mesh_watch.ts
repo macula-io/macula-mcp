@@ -13,7 +13,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { DROPPED_MEANS } from "./dropped_events.js";
 import { watch } from "./macula_ts_client.js";
-import { HELLO_TOPIC, GOODBYE_TOPIC, ensurePresence } from "./presence.js";
+import { HELLO_TOPIC, GOODBYE_TOPIC, ensurePresence } from "./be_present/presence.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import { toolDescription } from "./tool_description.js";
 

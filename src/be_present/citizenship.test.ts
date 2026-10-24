@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   call: vi.fn(),
   discoverProcedureRealm: vi.fn(),
 }));
-vi.mock("./macula_ts_client.js", () => ({
+vi.mock("../macula_ts_client.js", () => ({
   call: mocks.call,
   discoverProcedureRealm: mocks.discoverProcedureRealm,
 }));

@@ -14,7 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { findRecord, findRecords, findRecordsByType, RECORD_TYPE_NAMES } from "./macula_ts_client.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
-import { ensurePresence } from "./presence.js";
+import { ensurePresence } from "./be_present/presence.js";
 import { toolDescription } from "./tool_description.js";
 
 const KEY_DESCRIPTION =

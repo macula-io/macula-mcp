@@ -22,7 +22,7 @@ vi.mock("./macula_ts_client.js", () => ({
   call: mocks.call, callWithReport: mocks.callWithReport, discoverProcedureRealm: mocks.discoverProcedureRealm,
   KEY_PROFILE: "pq_hybrid",
 }));
-vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
+vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<unknown>;
 

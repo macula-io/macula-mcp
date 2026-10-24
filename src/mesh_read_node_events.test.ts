@@ -13,7 +13,7 @@ const THEM = "b".repeat(64);
 const ROOM = `agents.room.${"1".repeat(32)}`;
 
 const mocks = vi.hoisted(() => ({ currentNodeId: vi.fn() }));
-vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
+vi.mock("./be_present/presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
 
 type Handler = (args: Record<string, unknown>) => Promise<{ content: { text: string }[]; isError?: boolean }>;
 

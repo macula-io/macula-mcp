@@ -23,7 +23,7 @@ import { z } from "zod";
 import { call, discoverProcedureRealm } from "./macula_ts_client.js";
 import { MeshError } from "./mesh_config.js";
 import { describeMeshError } from "./reply.js";
-import { ensurePresence } from "./presence.js";
+import { ensurePresence } from "./be_present/presence.js";
 
 const VERBATIM_PROCEDURE = "mcl-rag/get_document_verbatim";
 const ROLE_PATH_PREFIX = "mcl-corpus/roles/";

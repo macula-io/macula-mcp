@@ -17,14 +17,14 @@ const mocks = vi.hoisted(() => ({
   storeRenewal: vi.fn(),
   listCredentials: vi.fn(),
 }));
-vi.mock("./macula_ts_client.js", () => ({
+vi.mock("../macula_ts_client.js", () => ({
   proveDeviceRequest: mocks.proveDeviceRequest,
   carriedPublicKey: mocks.carriedPublicKey,
   MEMBERSHIP_UCAN_PROCEDURE: "macula_realm.membership_ucan",
   call: mocks.call,
   selfNodeId: mocks.selfNodeId,
 }));
-vi.mock("./realm.js", () => ({
+vi.mock("../realm.js", () => ({
   loadCredential: mocks.loadCredential,
   storeCredential: mocks.storeCredential,
   storeCredentialUnlessWeaker: mocks.storeCredentialUnlessWeaker,
@@ -117,7 +117,7 @@ describe("joinDevice", () => {
   it("signs the request it sends (realm proof v2, the mesh rule) for the realm named, calls issue_membership_ucan there, and returns a device-tier credential", async () => {
     mocks.call.mockResolvedValue({ procedure: "x", payload: { citizen_did: NODE, ucan: "eyJ.fake.token" }, duration_ms: 10 });
     const { joinDevice, membershipUcanProcedure } = await import("./device_membership.js");
-    const { realmIdOf } = await import("./mesh_config.js");
+    const { realmIdOf } = await import("../mesh_config.js");
 
     const cred = await joinDevice({ realmName: "io.macula" });
 

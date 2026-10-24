@@ -26,17 +26,17 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Event, Subscription } from "@macula-io/ts";
-import { primaryStation } from "./mesh_config.js";
-import { droppedEvents } from "./dropped_events.js";
-import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
+import { primaryStation } from "../mesh_config.js";
+import { droppedEvents } from "../dropped_events.js";
+import { publish, selfNodeId, subscribe } from "../macula_ts_client.js";
 import { removeAgent, upsertAgent } from "./roster.js";
-import { petname } from "./petname.js";
-import * as lobbyObserver from "./converse_in_rooms/watch_lobby.js";
-import * as ringService from "./ring_agents/serve_rings.js";
+import { petname } from "../petname.js";
+import * as lobbyObserver from "../converse_in_rooms/watch_lobby.js";
+import * as ringService from "../ring_agents/serve_rings.js";
 import * as citizenship from "./citizenship.js";
-import * as realm from "./realm.js";
+import * as realm from "../realm.js";
 import * as deviceMembership from "./device_membership.js";
-import * as rooms from "./converse_in_rooms/rooms.js";
+import * as rooms from "../converse_in_rooms/rooms.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";

@@ -15,9 +15,9 @@ import { z } from "zod";
 import { IO_MACULA_REALM_ID, MeshError, realmIdOf, splitRealmPrefix } from "./mesh_config.js";
 import { callWithReport, selfNodeId, type Seal } from "./macula_ts_client.js";
 import { listCredentials } from "./realm.js";
-import { tokenExpiry } from "./device_membership.js";
+import { tokenExpiry } from "./be_present/device_membership.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
-import { ensurePresence } from "./presence.js";
+import { ensurePresence } from "./be_present/presence.js";
 import { assertNoLikelySecret } from "./secret_scan.js";
 import { toolDescription } from "./tool_description.js";
 

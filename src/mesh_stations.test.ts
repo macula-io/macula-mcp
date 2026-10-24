@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 // both the DHT discovery half and the actual list_stations call go through
 // it now that realm support landed, so this is the one seam to mock.
 vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, discoverProcedureRealm: mocks.discoverProcedureRealm }));
-vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
+vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 type Handler = (args: Record<string, unknown>) => Promise<unknown>;
 

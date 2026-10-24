@@ -20,7 +20,7 @@ vi.mock("./macula_ts_client.js", () => ({
   call: mocks.call,
   discoverProcedureRealm: mocks.discoverProcedureRealm,
 }));
-vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
+vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence }));
 
 interface CapturedPrompt {
   config: { description?: string; argsSchema?: { role: { safeParse: (v: unknown) => { success: boolean } } } };

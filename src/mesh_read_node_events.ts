@@ -17,7 +17,7 @@ import { z } from "zod";
 import { selfNodeId } from "./macula_ts_client.js";
 import { NODE_EVENT, readNodeEvents, type NodeEvent } from "./node_events.js";
 import { errorContent, jsonContent } from "./reply.js";
-import * as presence from "./presence.js";
+import * as presence from "./be_present/presence.js";
 import { answerLabel } from "./ring_agents/rings.js";
 import { machineDb } from "./machine_transcript.js";
 import { petname } from "./petname.js";

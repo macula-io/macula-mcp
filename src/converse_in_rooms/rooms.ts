@@ -42,7 +42,7 @@
 // message_id/sent_at is the ordering signal.
 
 import { publish, selfNodeId as ownNodeId } from "../macula_ts_client.js";
-import * as presence from "../presence.js";
+import * as presence from "../be_present/presence.js";
 import * as lobbyObserver from "./watch_lobby.js";
 import * as roomMembership from "./room_membership.js";
 import type { RoomMembership } from "./room_membership.js";

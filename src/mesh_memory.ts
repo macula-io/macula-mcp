@@ -58,7 +58,7 @@ import { z } from "zod";
 import { KEY_PROFILE, call, callWithReport, discoverProcedureRealm } from "./macula_ts_client.js";
 import { inCorpus, verifyCorpus, type CorpusCheck, type Description } from "./rag_corpus.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
-import { ensurePresence } from "./presence.js";
+import { ensurePresence } from "./be_present/presence.js";
 import { assertNoLikelySecret, findLikelySecret, isExcludedPath } from "./secret_scan.js";
 import { toolDescription } from "./tool_description.js";
 

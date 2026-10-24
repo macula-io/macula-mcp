@@ -47,10 +47,10 @@
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeMeshError, errorContent, jsonContent } from "./reply.js";
+import { describeMeshError, errorContent, jsonContent } from "../reply.js";
 import * as presence from "./presence.js";
-import { assertNoLikelySecret } from "./secret_scan.js";
-import { toolDescription } from "./tool_description.js";
+import { assertNoLikelySecret } from "../secret_scan.js";
+import { toolDescription } from "../tool_description.js";
 
 const DEFAULT_BANNER = `
    __  __   _   ___ _   _ _      _

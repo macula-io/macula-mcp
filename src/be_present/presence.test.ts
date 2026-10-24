@@ -3,7 +3,7 @@ import type { Event } from "@macula-io/ts";
 import { closeRoster, listAgents } from "./roster.js";
 
 // Boundary mock: the client layer presence talks to the mesh through.
-vi.mock("./macula_ts_client.js", () => ({
+vi.mock("../macula_ts_client.js", () => ({
   selfNodeId: vi.fn(),
   publish: vi.fn(),
   subscribe: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock("./citizenship.js", () => ({
   stop: vi.fn(),
   displayName: (op?: string, via?: string, handle?: string) => op ?? handle ?? via ?? "macula-mcp agent",
 }));
-vi.mock("./converse_in_rooms/watch_lobby.js", () => ({
+vi.mock("../converse_in_rooms/watch_lobby.js", () => ({
   LOBBY_TOPIC: "agents.lobby",
   start: vi.fn().mockResolvedValue({}),
   stop: vi.fn(),
@@ -23,12 +23,12 @@ vi.mock("./converse_in_rooms/watch_lobby.js", () => ({
   tapRoom: vi.fn(),
   untapRoom: vi.fn(),
 }));
-vi.mock("./ring_agents/serve_rings.js", () => ({
+vi.mock("../ring_agents/serve_rings.js", () => ({
   start: vi.fn().mockResolvedValue({ serving: 0 }),
   stop: vi.fn().mockResolvedValue(undefined),
   status: vi.fn().mockReturnValue({ serving: 0 }),
 }));
-vi.mock("./realm.js", () => ({
+vi.mock("../realm.js", () => ({
   orgHandle: vi.fn().mockReturnValue(undefined),
   status: vi.fn().mockReturnValue({ joined: 0 }),
 }));
@@ -37,9 +37,9 @@ vi.mock("./device_membership.js", () => ({
   keepMembershipsRenewed: vi.fn().mockReturnValue(undefined),
 }));
 
-import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
-import * as ringService from "./ring_agents/serve_rings.js";
-import { closeMachineDb } from "./machine_transcript.js";
+import { publish, selfNodeId, subscribe } from "../macula_ts_client.js";
+import * as ringService from "../ring_agents/serve_rings.js";
+import { closeMachineDb } from "../machine_transcript.js";
 import * as presence from "./presence.js";
 
 const NODE_ID = "a".repeat(64);
@@ -96,7 +96,7 @@ describe("start()", () => {
   });
 
   it("asks realm.status() to redact any pending join link, on a fresh and on an already-active start", async () => {
-    const realm = await import("./realm.js");
+    const realm = await import("../realm.js");
     await presence.start({});
     expect(realm.status).toHaveBeenCalledWith(NODE_ID, { redactPending: true });
     vi.mocked(realm.status).mockClear();
@@ -151,9 +151,9 @@ describe("start()", () => {
   // agent was absent and unringable over a room it was not even talking in.
   it("starts even when a room it must re-watch refuses the tap", async () => {
     process.env.MACULA_MCP_RINGS_DB = ":memory:";
-    const roomMembership = await import("./converse_in_rooms/room_membership.js");
+    const roomMembership = await import("../converse_in_rooms/room_membership.js");
     roomMembership.record(NODE_ID, { room_topic: `agents.room.${"e".repeat(32)}`, opened_by: NODE_ID, opened_here: 1, public: 0, joined_at: new Date().toISOString() });
-    const lobbyObserver = await import("./converse_in_rooms/watch_lobby.js");
+    const lobbyObserver = await import("../converse_in_rooms/watch_lobby.js");
     vi.mocked(lobbyObserver.isTapped).mockReturnValue(false);
     vi.mocked(lobbyObserver.start).mockResolvedValue({} as never);
     vi.mocked(lobbyObserver.tapRoom).mockRejectedValue(new Error("station refused the subscription"));
@@ -270,9 +270,9 @@ describe("the lifecycle mailbox (macula-mcp#44 step 7)", () => {
     expect(await stopping).toEqual({ said_goodbye: true });
     expect(presence.isActive()).toBe(false);
     for (const sub of subs) expect(sub.stop).toHaveBeenCalledTimes(1);
-    const ringService = await import("./ring_agents/serve_rings.js");
+    const ringService = await import("../ring_agents/serve_rings.js");
     expect(ringService.stop).toHaveBeenCalled();
-    const lobbyObserver = await import("./converse_in_rooms/watch_lobby.js");
+    const lobbyObserver = await import("../converse_in_rooms/watch_lobby.js");
     expect(lobbyObserver.stop).toHaveBeenCalled();
     // ... and the teardown is complete, not a half-state a second stop has to finish.
     expect(await presence.stop()).toEqual({ said_goodbye: false });
@@ -299,7 +299,7 @@ describe("the lifecycle mailbox (macula-mcp#44 step 7)", () => {
     expect(presence.isActive()).toBe(true);
     // The restart's observer start is the LAST word on the observer: the stop that finished first cannot
     // leave the new presence unwatched.
-    const lobbyObserver = await import("./converse_in_rooms/watch_lobby.js");
+    const lobbyObserver = await import("../converse_in_rooms/watch_lobby.js");
     const lastStart = vi.mocked(lobbyObserver.start).mock.invocationCallOrder.at(-1)!;
     const lastStop = vi.mocked(lobbyObserver.stop).mock.invocationCallOrder.at(-1)!;
     expect(lastStart).toBeGreaterThan(lastStop);

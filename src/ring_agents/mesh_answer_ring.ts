@@ -8,7 +8,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { describeMeshError, errorContent, jsonContent } from "../reply.js";
-import { ensurePresence } from "../presence.js";
+import { ensurePresence } from "../be_present/presence.js";
 import * as ringService from "./serve_rings.js";
 import * as rooms from "../converse_in_rooms/rooms.js";
 import { assertNoLikelySecret } from "../secret_scan.js";

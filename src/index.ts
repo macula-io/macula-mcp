@@ -23,7 +23,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
-import * as presence from "./presence.js";
+import * as presence from "./be_present/presence.js";
 import { registerIdentity } from "./mesh_identity.js";
 import { registerEtiquette } from "./mesh_etiquette.js";
 import { registerHelp } from "./mesh_help.js";
@@ -43,9 +43,9 @@ import { registerMeshReadInbox } from "./converse_in_rooms/mesh_read_inbox.js";
 import { registerMeshReadNodeEvents } from "./mesh_read_node_events.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
-import { registerMeshHello } from "./mesh_hello.js";
-import { registerMeshGoodbye } from "./mesh_goodbye.js";
-import { registerMeshAgents } from "./mesh_agents.js";
+import { registerMeshHello } from "./be_present/mesh_hello.js";
+import { registerMeshGoodbye } from "./be_present/mesh_goodbye.js";
+import { registerMeshAgents } from "./be_present/mesh_agents.js";
 import { registerMeshServe } from "./mesh_serve.js";
 import { registerMeshUnserve } from "./mesh_unserve.js";
 import { registerMeshLobbyObserver } from "./converse_in_rooms/mesh_lobby_observer.js";

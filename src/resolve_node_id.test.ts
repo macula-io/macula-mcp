@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeRoster, upsertAgent } from "./roster.js";
+import { closeRoster, upsertAgent } from "./be_present/roster.js";
 import { petname } from "./petname.js";
 import { resolveNodeId } from "./resolve_node_id.js";
 

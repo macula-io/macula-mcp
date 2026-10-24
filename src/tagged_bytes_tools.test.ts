@@ -23,8 +23,8 @@ vi.mock("./serve.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./serve.js")>()),
   serve: mocks.serve,
 }));
-vi.mock("./presence.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./presence.js")>()),
+vi.mock("./be_present/presence.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./be_present/presence.js")>()),
   ensurePresence: vi.fn(),
 }));
 

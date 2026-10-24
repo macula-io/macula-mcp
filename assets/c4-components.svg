@@ -76,7 +76,7 @@
 <text class="t-desc" x="680" y="332">mesh_role: role prompts via mcl-rag</text>
 <rect class="b-cmp" x="48" y="356" width="288" height="126" rx="10"/>
 <text class="t-code" x="64" y="384">Realm membership</text>
-<text class="t-type" x="64" y="402">[realm.ts, device_membership.ts]</text>
+<text class="t-type" x="64" y="402">[realm.ts, the presence slice]</text>
 <text class="t-desc" x="64" y="426">mesh_join_realm, mesh_list_realms:</text>
 <text class="t-desc" x="64" y="442">an RFC 8628-shaped join session over</text>
 <text class="t-desc" x="64" y="458">HTTPS, polled in the background; the</text>
@@ -89,8 +89,8 @@
 <text class="t-desc" x="372" y="458">command (JSON on stdin, the caller in</text>
 <text class="t-desc" x="372" y="474">MACULA_MCP_CALLER)</text>
 <rect class="b-cmp" x="664" y="356" width="288" height="126" rx="10"/>
-<text class="t-code" x="680" y="384">presence.ts</text>
-<text class="t-type" x="680" y="402">[mesh_hello / goodbye / agents]</text>
+<text class="t-code" x="680" y="384">be_present/</text>
+<text class="t-type" x="680" y="402">[presence, hello/goodbye/agents]</text>
 <text class="t-desc" x="680" y="426">agent.hello heartbeat and roster,</text>
 <text class="t-desc" x="680" y="442">watch_lobby (central and rooms),</text>
 <text class="t-desc" x="680" y="458">serve_rings (~&lt;node_id&gt;/ring),</text>

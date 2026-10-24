@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   isActive: vi.fn(),
   status: vi.fn(),
 }));
-vi.mock("../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
+vi.mock("../be_present/presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
 vi.mock("./serve_rings.js", () => ({ isActive: mocks.isActive, status: mocks.status }));
 vi.mock("./rings.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./rings.js")>();

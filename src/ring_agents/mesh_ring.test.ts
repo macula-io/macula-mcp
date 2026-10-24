@@ -3,7 +3,7 @@ import { ANSWER, getRing } from "./rings.js";
 import { closeMachineDb } from "../machine_transcript.js";
 import { newRoomTopic } from "../envelope.js";
 import { closeTranscript, recordLoss } from "../converse_in_rooms/lobby_transcript.js";
-import { closeRoster, upsertAgent } from "../roster.js";
+import { closeRoster, upsertAgent } from "../be_present/roster.js";
 import { petname } from "../petname.js";
 
 const ME = "c".repeat(64);
@@ -23,7 +23,7 @@ vi.mock("../converse_in_rooms/rooms.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../converse_in_rooms/rooms.js")>();
   return { ...actual, isJoined: mocks.isJoined };
 });
-vi.mock("../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
+vi.mock("../be_present/presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
 
 beforeEach(() => {
   process.env.MACULA_MCP_RINGS_DB = ":memory:";

@@ -8,12 +8,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_MEANS } from "./dropped_events.js";
-import { errorContent, jsonContent } from "./reply.js";
+import { DROPPED_MEANS } from "../dropped_events.js";
+import { errorContent, jsonContent } from "../reply.js";
 import * as presence from "./presence.js";
 import { listAgents, pruneStale } from "./roster.js";
-import { petname } from "./petname.js";
-import { toolDescription } from "./tool_description.js";
+import { petname } from "../petname.js";
+import { toolDescription } from "../tool_description.js";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;

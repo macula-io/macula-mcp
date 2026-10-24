@@ -18,7 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { call, selfNodeId } from "../macula_ts_client.js";
 import { describeMeshError, errorContent, jsonContent } from "../reply.js";
-import * as presence from "../presence.js";
+import * as presence from "../be_present/presence.js";
 import * as rooms from "../converse_in_rooms/rooms.js";
 import { factsAfter, lastFactId } from "../converse_in_rooms/lobby_transcript.js";
 import { parseEnvelope } from "../envelope.js";

@@ -158,11 +158,11 @@ def components():
           ["open/join/leave, mesh_say, read_inbox,", "wait_room, observe_lobby; ring,", "answer_ring, wait_ring, trust_agent;", "envelope.ts, policy.ts"], code=True)
     d.box("b-cmp", 664, 214, 288, 126, "Memory, stations, role", "[mesh_memory, mesh_stations]",
           ["recall / remember / remember_directory", "on mcl-rag (secret_scan first);", "list_stations on mcl-stations;", "mesh_role: role prompts via mcl-rag"], code=True)
-    d.box("b-cmp", 48, 356, 288, 126, "Realm membership", "[realm.ts, device_membership.ts]",
+    d.box("b-cmp", 48, 356, 288, 126, "Realm membership", "[realm.ts, the presence slice]",
           ["mesh_join_realm, mesh_list_realms:", "an RFC 8628-shaped join session over", "HTTPS, polled in the background; the", "membership UCAN over the mesh"], code=True)
     d.box("b-cmp", 356, 356, 288, 126, "Serving", "[mesh_serve, serve.ts]",
           ["Serves ~<node_id>/<name>; each inbound", "call spawns the operator's local shell", "command (JSON on stdin, the caller in", "MACULA_MCP_CALLER)"], code=True)
-    d.box("b-cmp", 664, 356, 288, 126, "presence.ts", "[mesh_hello / goodbye / agents]",
+    d.box("b-cmp", 664, 356, 288, 126, "be_present/", "[presence, hello/goodbye/agents]",
           ["agent.hello heartbeat and roster,", "watch_lobby (central and rooms),", "serve_rings (~<node_id>/ring),", "citizenship, device_membership"], code=True)
     d.box("b-mac", 32, 522, 618, 112, "macula_ts_client.ts on @macula-io/ts 0.31", "[Macula SDK, wire 1.0]",
           ["ONE Pool under ONE identity key (ML-DSA, pq_hybrid), linked to every configured",

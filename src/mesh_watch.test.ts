@@ -6,7 +6,7 @@ vi.mock("./macula_ts_client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./macula_ts_client.js")>()),
   watch: mocks.watch,
 }));
-vi.mock("./presence.js", () => ({ ensurePresence: mocks.ensurePresence, HELLO_TOPIC: "agent.hello", GOODBYE_TOPIC: "agent.goodbye" }));
+vi.mock("./be_present/presence.js", () => ({ ensurePresence: mocks.ensurePresence, HELLO_TOPIC: "agent.hello", GOODBYE_TOPIC: "agent.goodbye" }));
 
 type Handler = (args: Record<string, unknown>) => Promise<{ isError?: boolean; content: { text: string }[] }>;
 

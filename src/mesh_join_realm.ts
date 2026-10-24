@@ -7,7 +7,7 @@ import * as realm from "./realm.js";
 import { nodeKeyPath } from "./mesh_config.js";
 import { selfNodeId } from "./macula_ts_client.js";
 import { errorContent } from "./reply.js";
-import { connectedViaLabel, ensurePresence } from "./presence.js";
+import { connectedViaLabel, ensurePresence } from "./be_present/presence.js";
 import { toolDescription } from "./tool_description.js";
 
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };

@@ -34,10 +34,10 @@
 // and pressure-test against net.beam-campus first, then flip it on for
 // io.macula") rather than defaulting to minting credentials against the
 // commons realm the moment this ships.
-import { realmIdOf } from "./mesh_config.js";
+import { realmIdOf } from "../mesh_config.js";
 import type { JsonValue } from "@macula-io/ts";
-import { call, carriedPublicKey, MEMBERSHIP_UCAN_PROCEDURE, proveDeviceRequest, selfNodeId } from "./macula_ts_client.js";
-import { listCredentials, loadCredential, storeCredentialUnlessWeaker, storeRenewal, type RealmCredential, type RealmTier } from "./realm.js";
+import { call, carriedPublicKey, MEMBERSHIP_UCAN_PROCEDURE, proveDeviceRequest, selfNodeId } from "../macula_ts_client.js";
+import { listCredentials, loadCredential, storeCredentialUnlessWeaker, storeRenewal, type RealmCredential, type RealmTier } from "../realm.js";
 
 /**
  * The procedure string is NOT a constant -- macula_topic:build/6 embeds
