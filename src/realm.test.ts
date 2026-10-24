@@ -460,7 +460,10 @@ describe("join flow against a fake realm", () => {
     expect(server.calls.length).toBe(1);
   });
 
-  it("waitForOutcome stores the credential once the person confirms, including the membership UCAN", async () => {
+  // Its script answers pending, then confirmed, so this test sits through one full POLL_INTERVAL_MS (4 s) by
+  // design -- a second under the 5 s default, which a slower CI runner crossed (the store it now awaits is
+  // also on that same clock). The timeout is the test's own budget, not a widened assertion.
+  it("waitForOutcome stores the credential once the person confirms, including the membership UCAN", { timeout: 20_000 }, async () => {
     const server = fakeRealm([
       { status: 201, body: { session_id: "s2", join_url: "https://realm.test/join/s2", expires_at: "2999-01-01T00:00:00Z" } },
       { status: 200, body: { status: "pending", expires_at: "2999-01-01T00:00:00Z" } },
@@ -504,7 +507,7 @@ describe("join flow against a fake realm", () => {
 
   // macula-mcp#40, the end-to-end half: a person confirms at the portal, the realm answers with a
   // membership UCAN and no refresh_token, and the next poll has to finalize rather than stay pending.
-  it("waitForOutcome finalizes a ucan-only confirmation, with no refresh_token (#40)", async () => {
+  it("waitForOutcome finalizes a ucan-only confirmation, with no refresh_token (#40)", { timeout: 20_000 }, async () => {
     const server = fakeRealm([
       { status: 201, body: { session_id: "s4", join_url: "https://realm.test/join/s4", expires_at: "2999-01-01T00:00:00Z" } },
       { status: 200, body: { status: "pending", expires_at: "2999-01-01T00:00:00Z" } },
