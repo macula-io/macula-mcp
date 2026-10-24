@@ -154,8 +154,8 @@ def components():
     d.bound(32, 182, 936, 316, "Tools and what presence starts [tools that need presence call ensurePresence at their entry]")
     d.box("b-cmp", 48, 214, 288, 126, "Calls, DHT, content", "[mesh_call, mesh_dht, mesh_artifact]",
           ["mesh_call (sealed when the provider", "names a KEM key), mesh_find_record*,", "mesh_put / mesh_get; mesh_publish,", "mesh_watch"], code=True)
-    d.box("b-cmp", 356, 214, 288, 126, "Rooms and rings", "[mesh_rooms, mesh_ring, rooms, rings]",
-          ["open/join/leave, mesh_say, read_inbox,", "wait_room; ring, answer_ring,", "wait_ring, trust_agent; envelope.ts,", "policy.ts (the contact policy)"], code=True)
+    d.box("b-cmp", 356, 214, 288, 126, "Rooms and rings", "[converse_in_rooms/, ring_agents/]",
+          ["open/join/leave, mesh_say, read_inbox,", "wait_room, observe_lobby; ring,", "answer_ring, wait_ring, trust_agent;", "envelope.ts, policy.ts"], code=True)
     d.box("b-cmp", 664, 214, 288, 126, "Memory, stations, role", "[mesh_memory, mesh_stations]",
           ["recall / remember / remember_directory", "on mcl-rag (secret_scan first);", "list_stations on mcl-stations;", "mesh_role: role prompts via mcl-rag"], code=True)
     d.box("b-cmp", 48, 356, 288, 126, "Realm membership", "[realm.ts, device_membership.ts]",
@@ -163,7 +163,7 @@ def components():
     d.box("b-cmp", 356, 356, 288, 126, "Serving", "[mesh_serve, serve.ts]",
           ["Serves ~<node_id>/<name>; each inbound", "call spawns the operator's local shell", "command (JSON on stdin, the caller in", "MACULA_MCP_CALLER)"], code=True)
     d.box("b-cmp", 664, 356, 288, 126, "presence.ts", "[mesh_hello / goodbye / agents]",
-          ["agent.hello heartbeat and roster,", "lobby_observer (central and rooms),", "serve_rings (~<node_id>/ring),", "citizenship, device_membership"], code=True)
+          ["agent.hello heartbeat and roster,", "watch_lobby (central and rooms),", "serve_rings (~<node_id>/ring),", "citizenship, device_membership"], code=True)
     d.box("b-mac", 32, 522, 618, 112, "macula_ts_client.ts on @macula-io/ts 0.31", "[Macula SDK, wire 1.0]",
           ["ONE Pool under ONE identity key (ML-DSA, pq_hybrid), linked to every configured",
            "station, each pinned by its node_id; calls by direct dial, signed publications,",

@@ -2,7 +2,7 @@
 // whoever opens it, carried to the other participants (by a ring; by a
 // public room_opened on central; or out of band), and watched in the
 // background by every participant for as long as they stay --
-// lobby_observer.ts's subscriptions do the watching; this module owns
+// watch_lobby.ts's subscriptions do the watching; this module owns
 // which rooms THIS agent is in and what it says there.
 //
 // A direct message is simply a two-party room. The deterministic
@@ -41,9 +41,9 @@
 // (isAttestedFact). There is no published seq; each envelope's own
 // message_id/sent_at is the ordering signal.
 
-import { publish, selfNodeId as ownNodeId } from "./macula_ts_client.js";
-import * as presence from "./presence.js";
-import * as lobbyObserver from "./lobby_observer.js";
+import { publish, selfNodeId as ownNodeId } from "./../macula_ts_client.js";
+import * as presence from "./../presence.js";
+import * as lobbyObserver from "./watch_lobby.js";
 import * as roomMembership from "./room_membership.js";
 import type { RoomMembership } from "./room_membership.js";
 import { factsAfter, lastFactId, recentFacts, type ObservedFact } from "./lobby_transcript.js";
@@ -57,7 +57,7 @@ import {
   type Envelope,
   type Kind,
   type ObservedEnvelope,
-} from "./envelope.js";
+} from "./../envelope.js";
 
 /** How often the reply wait re-reads the transcript. Cheap: one indexed SQLite query per tick. */
 export const REPLY_POLL_MS = 250;

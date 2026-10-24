@@ -5,7 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 // watch) says in its reply how many events that feed lost, and what the count
 // means, so an agent reads 0 as "nothing lost", not "unknown", and a timeout
 // after a loss is not read as silence. The feeds and their counts are mocked:
-// rooms.test.ts, lobby_observer.test.ts, presence.test.ts and
+// rooms.test.ts, watch_lobby.test.ts, presence.test.ts and
 // macula_ts_client.test.ts cover where the counts come from.
 const ME = "a".repeat(64);
 const ROOM = `agents.room.${"1".repeat(32)}`;
@@ -23,14 +23,14 @@ vi.mock("./presence.js", async (importOriginal) => ({
   ensurePresence: vi.fn(),
   currentNodeId: () => ME,
 }));
-vi.mock("./rooms.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./rooms.js")>()),
+vi.mock("./converse_in_rooms/rooms.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./converse_in_rooms/rooms.js")>()),
   listRooms: mocks.listRooms,
   waitRoom: mocks.waitRoom,
   say: mocks.say,
 }));
-vi.mock("./lobby_observer.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./lobby_observer.js")>()),
+vi.mock("./converse_in_rooms/watch_lobby.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./converse_in_rooms/watch_lobby.js")>()),
   dropped: mocks.dropped,
   start: mocks.observerStart,
   status: mocks.observerStatus,
@@ -41,11 +41,11 @@ vi.mock("./ring_agents/rings.js", async (importOriginal) => ({
   listRings: () => [],
 }));
 
-import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
-import { registerMeshReadInbox } from "./mesh_read_inbox.js";
+import { registerMeshLobbyObserver } from "./converse_in_rooms/mesh_lobby_observer.js";
+import { registerMeshReadInbox } from "./converse_in_rooms/mesh_read_inbox.js";
 import { registerMeshRing } from "./ring_agents/mesh_ring.js";
-import { registerMeshRooms } from "./mesh_rooms.js";
-import { registerMeshWaitRoom } from "./mesh_wait_room.js";
+import { registerMeshRooms } from "./converse_in_rooms/mesh_rooms.js";
+import { registerMeshWaitRoom } from "./converse_in_rooms/mesh_wait_room.js";
 
 type Handler = (args: Record<string, unknown>) => Promise<{ isError?: boolean; content: { text: string }[] }>;
 
@@ -120,7 +120,7 @@ describe("feed tools report what their feed lost", () => {
     const one = await reply(registerMeshLobbyObserver, "mesh_lobby_transcript", { topic: ROOM, limit: 10 });
     expect(one.dropped).toBe(4);
     expect(one.dropped_means).toMatch(/0 means none were discarded/);
-    const { recordFact } = await import("./lobby_transcript.js");
+    const { recordFact } = await import("./converse_in_rooms/lobby_transcript.js");
     recordFact({ topic: ROOM, payload: { text: "x" }, at: new Date().toISOString() });
     const all = await reply(registerMeshLobbyObserver, "mesh_lobby_transcript", { limit: 10 });
     expect(all.dropped_by_topic).toEqual({ [ROOM]: 4 });

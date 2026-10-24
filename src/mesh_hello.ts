@@ -18,7 +18,7 @@
 // else's agent.hello/agent.goodbye (feeding mesh_agents' roster), AND
 // to central (agents.lobby) and every room this agent opens, joins or
 // sees announced there (feeding mesh_read_inbox/mesh_lobby_transcript,
-// see lobby_observer.ts and rooms.ts). Being discoverable, reachable,
+// see watch_lobby.ts and rooms.ts). Being discoverable, reachable,
 // and present on central are all the same action now. A later call while
 // already active just updates operator_name/session_name/message/model/
 // connected_via for future heartbeats, without restarting anything.

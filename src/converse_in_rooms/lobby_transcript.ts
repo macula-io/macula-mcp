@@ -1,4 +1,4 @@
-// A local, persistent cache of what lobby_observer.ts has seen on
+// A local, persistent cache of what watch_lobby.ts has seen on
 // agents.lobby (central) and every room topic it watches, whether
 // announced there or joined deliberately (rooms.ts) --
 // the same shape and same reasoning as roster.ts (its own header

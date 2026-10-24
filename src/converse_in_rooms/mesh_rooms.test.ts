@@ -1,6 +1,6 @@
 // Real tests for openRoomAndInvite -- mesh_open_room's own logic. The
 // client layer (macula_ts_client.js: the ring call, publish, the node id)
-// and lobby_observer.js are mocked, rooms.test.ts's own pattern. Without
+// and watch_lobby.js are mocked, rooms.test.ts's own pattern. Without
 // them, rooms.openRoom() (which openRoomAndInvite always calls) would reach
 // the real mesh on every test run: an earlier version of this file
 // genuinely published real facts to the live public mesh (one room_opened
@@ -8,11 +8,11 @@
 // mock without re-verifying that claim is still false.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER } from "./ring_agents/rings.js";
-import { closeMachineDb } from "./machine_transcript.js";
+import { ANSWER } from "../ring_agents/rings.js";
+import { closeMachineDb } from "./../machine_transcript.js";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
-import { closeRoster, upsertAgent } from "./roster.js";
-import { petname } from "./petname.js";
+import { closeRoster, upsertAgent } from "./../roster.js";
+import { petname } from "./../petname.js";
 
 const ME = "d".repeat(64);
 const node = (c: string) => c.repeat(64);
@@ -30,9 +30,9 @@ const mocks = vi.hoisted(() => ({
   isJoined: vi.fn(),
   actualIsJoined: undefined as ((me: string, topic: string) => boolean) | undefined,
 }));
-vi.mock("./presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
-vi.mock("./macula_ts_client.js", () => ({ call: mocks.call, publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
-vi.mock("./lobby_observer.js", () => ({
+vi.mock("./../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));
+vi.mock("./../macula_ts_client.js", () => ({ call: mocks.call, publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
+vi.mock("./watch_lobby.js", () => ({
   start: mocks.observerStart,
   tapRoom: mocks.tapRoom,
   untapRoom: mocks.untapRoom,

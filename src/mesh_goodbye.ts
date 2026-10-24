@@ -19,7 +19,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describeMeshError, errorContent, jsonContent } from "./reply.js";
 import * as presence from "./presence.js";
-import * as rooms from "./rooms.js";
+import * as rooms from "./converse_in_rooms/rooms.js";
 import { toolDescription } from "./tool_description.js";
 
 const DESCRIPTION_FULL =

@@ -37,7 +37,7 @@
 
 import type { JsonValue, Request, Served } from "@macula-io/ts";
 import { call, serve } from "../macula_ts_client.js";
-import * as rooms from "../rooms.js";
+import * as rooms from "../converse_in_rooms/rooms.js";
 import { isAllowlisted, loadContactPolicy, POLICY, policyLabel, type ContactPolicy, type Policy } from "../policy.js";
 import { ANSWER, buildRingAnswerArgs, getRing, parseRingAnswerArgs, parseRingAnswerReply, parseRingArgs, pendingSummary, ringAnswerProblems, ringProblems, ringProcedure, type Answer,
   type RingAnswerArgs,

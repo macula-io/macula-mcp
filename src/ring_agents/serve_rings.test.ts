@@ -21,7 +21,7 @@ function policyOf(contact_policy: Policy, allowlist: string[] = []): ContactPoli
 
 const mocks = vi.hoisted(() => ({ serve: vi.fn(), call: vi.fn() }));
 vi.mock("../macula_ts_client.js", () => ({ serve: mocks.serve, call: mocks.call }));
-vi.mock("../rooms.js", () => ({
+vi.mock("../converse_in_rooms/rooms.js", () => ({
   joinRoom: vi.fn(),
   isJoined: vi.fn().mockReturnValue(false),
   joinedRoomCount: vi.fn().mockReturnValue(0),
@@ -149,7 +149,7 @@ describe("handleRing: a ring", () => {
 
   it("declines an accept whose join is refused at the room limit -- the cap is decided inside the join (macula-mcp#44 step 6)", async () => {
     const { handleRing, MAX_JOINED_ROOMS } = await import("./serve_rings.js");
-    const rooms = await import("../rooms.js");
+    const rooms = await import("../converse_in_rooms/rooms.js");
     const joinRoom = vi.fn().mockRejectedValue(new rooms.RoomCapacityError(`this agent has reached its room limit (${MAX_JOINED_ROOMS})`));
     const reply = await handleRing(ringFrom(CALLER), { caller: CALLER, nodeId: ME, policy: policyOf(POLICY.open), now: NOW, joinRoom });
     expect(reply).toMatchObject({ answer: 2, reason: expect.stringContaining("room limit") });
@@ -277,7 +277,7 @@ describe("start / status / stop", () => {
     expect(status).toMatchObject({ serving: 1, procedure: ringProcedure(ME), contact_policy: POLICY.open });
     const { procedure, handler } = mocks.serve.mock.calls[0]![0] as { procedure: string; handler: (r: unknown) => Promise<unknown> };
     expect(procedure).toBe(`~${ME}/ring`);
-    const joinedVia = await import("../rooms.js");
+    const joinedVia = await import("../converse_in_rooms/rooms.js");
     vi.mocked(joinedVia.joinRoom).mockResolvedValue({} as never);
     const reply = await handler({ caller: "b".repeat(64), realm: "00".repeat(32), procedure, payload: ringFrom("b".repeat(64)), deadlineMs: NOW });
     expect(reply).toMatchObject({ answer: 1 });

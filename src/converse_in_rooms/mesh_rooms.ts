@@ -7,26 +7,26 @@
 // whoever shows up rather than one named agent.
 //
 // Every one of these is a composition of ordinary calls (node id, then
-// publish) plus rooms.ts's own bookkeeping over lobby_observer.ts's
+// publish) plus rooms.ts's own bookkeeping over watch_lobby.ts's
 // standing taps. The
 // envelope on the wire is envelope.ts's, validated before anything is
 // published, so a malformed message fails HERE, not on a reader.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
-import { selfNodeId } from "./macula_ts_client.js";
-import { describeMeshError, errorContent, jsonContent } from "./reply.js";
-import { ensurePresence } from "./presence.js";
-import * as presence from "./presence.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./../dropped_events.js";
+import { selfNodeId } from "./../macula_ts_client.js";
+import { describeMeshError, errorContent, jsonContent } from "./../reply.js";
+import { ensurePresence } from "./../presence.js";
+import * as presence from "./../presence.js";
 import * as rooms from "./rooms.js";
-import { CENTRAL_TOPIC, KINDS, MAX_TO, TALK_KINDS } from "./envelope.js";
-import { ANSWER, MAX_PURPOSE_CHARS, listRings, RingError } from "./ring_agents/rings.js";
-import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "./ring_agents/mesh_ring.js";
-import { assertNoLikelySecret } from "./secret_scan.js";
-import { petname } from "./petname.js";
-import { nodeIdOrPetnameSchema, resolveNodeId } from "./resolve_node_id.js";
-import { toolDescription } from "./tool_description.js";
+import { CENTRAL_TOPIC, KINDS, MAX_TO, TALK_KINDS } from "./../envelope.js";
+import { ANSWER, MAX_PURPOSE_CHARS, listRings, RingError } from "../ring_agents/rings.js";
+import { placeRing, DEFAULT_WAIT_JOIN_SECONDS, MAX_WAIT_JOIN_SECONDS, type PlaceRingResult } from "../ring_agents/mesh_ring.js";
+import { assertNoLikelySecret } from "./../secret_scan.js";
+import { petname } from "./../petname.js";
+import { nodeIdOrPetnameSchema, resolveNodeId } from "./../resolve_node_id.js";
+import { toolDescription } from "./../tool_description.js";
 
 const MAX_WAIT_SECONDS = 3600;
 const DEFAULT_INVITE_PURPOSE = "Join this room";

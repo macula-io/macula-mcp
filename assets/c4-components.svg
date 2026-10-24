@@ -62,11 +62,11 @@
 <text class="t-desc" x="64" y="332">mesh_watch</text>
 <rect class="b-cmp" x="356" y="214" width="288" height="126" rx="10"/>
 <text class="t-code" x="372" y="242">Rooms and rings</text>
-<text class="t-type" x="372" y="260">[mesh_rooms, mesh_ring, rooms, rings]</text>
+<text class="t-type" x="372" y="260">[converse_in_rooms/, ring_agents/]</text>
 <text class="t-desc" x="372" y="284">open/join/leave, mesh_say, read_inbox,</text>
-<text class="t-desc" x="372" y="300">wait_room; ring, answer_ring,</text>
-<text class="t-desc" x="372" y="316">wait_ring, trust_agent; envelope.ts,</text>
-<text class="t-desc" x="372" y="332">policy.ts (the contact policy)</text>
+<text class="t-desc" x="372" y="300">wait_room, observe_lobby; ring,</text>
+<text class="t-desc" x="372" y="316">answer_ring, wait_ring, trust_agent;</text>
+<text class="t-desc" x="372" y="332">envelope.ts, policy.ts</text>
 <rect class="b-cmp" x="664" y="214" width="288" height="126" rx="10"/>
 <text class="t-code" x="680" y="242">Memory, stations, role</text>
 <text class="t-type" x="680" y="260">[mesh_memory, mesh_stations]</text>
@@ -92,7 +92,7 @@
 <text class="t-code" x="680" y="384">presence.ts</text>
 <text class="t-type" x="680" y="402">[mesh_hello / goodbye / agents]</text>
 <text class="t-desc" x="680" y="426">agent.hello heartbeat and roster,</text>
-<text class="t-desc" x="680" y="442">lobby_observer (central and rooms),</text>
+<text class="t-desc" x="680" y="442">watch_lobby (central and rooms),</text>
 <text class="t-desc" x="680" y="458">serve_rings (~&lt;node_id&gt;/ring),</text>
 <text class="t-desc" x="680" y="474">citizenship, device_membership</text>
 <rect class="b-mac" x="32" y="522" width="618" height="112" rx="10"/>

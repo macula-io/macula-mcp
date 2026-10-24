@@ -2,7 +2,7 @@
 // in, threaded, plus the help_requested/help_offered broadcasts on
 // central from other agents. Instant, local, never blocks or makes a
 // mesh round trip: it reads the transcript the background taps
-// (lobby_observer.ts) are already feeding.
+// (watch_lobby.ts) are already feeding.
 //
 // "Inbox" used to mean a deterministic per-agent topic anyone could
 // write into (agents.dm.<node_id>, 2026-08-31 to 2026-09-03). That is
@@ -14,16 +14,16 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
-import { selfNodeId } from "./macula_ts_client.js";
-import { errorContent, jsonContent } from "./reply.js";
-import * as presence from "./presence.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./../dropped_events.js";
+import { selfNodeId } from "./../macula_ts_client.js";
+import { errorContent, jsonContent } from "./../reply.js";
+import * as presence from "./../presence.js";
 import * as rooms from "./rooms.js";
 import { factsAfter, recentFacts } from "./lobby_transcript.js";
-import { CENTRAL_TOPIC, LIFECYCLE_KINDS, threadEnvelopes } from "./envelope.js";
-import { answerLabel, listRings, pendingIncoming, type RingRecord } from "./ring_agents/rings.js";
-import { petname } from "./petname.js";
-import { toolDescription } from "./tool_description.js";
+import { CENTRAL_TOPIC, LIFECYCLE_KINDS, threadEnvelopes } from "./../envelope.js";
+import { answerLabel, listRings, pendingIncoming, type RingRecord } from "../ring_agents/rings.js";
+import { petname } from "./../petname.js";
+import { toolDescription } from "./../tool_description.js";
 
 function ringView(r: RingRecord) {
   return {

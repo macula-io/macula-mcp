@@ -281,8 +281,6 @@ export function ensureRingTables(db: DatabaseSync): void {
   if (!columns.has("claimed_at")) db.exec("ALTER TABLE rings ADD COLUMN claimed_at TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS rings_direction_idx ON rings (direction, recorded_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS rings_self_idx ON rings (self, direction)`);
-  // The node event log (macula-mcp#42, node_events.ts) shares this file on purpose: an entry is appended in
-  // the same transaction as the ring row it describes, which two files could not give.
 }
 
 /** The current schema, `ring_id` NOT unique alone -- see migrateToCompositeRingKey's own doc for why. */
@@ -470,5 +468,3 @@ export function pendingSummary(self: string, peer: string): { count: number; fro
   const rows = pendingIncoming(self);
   return { count: rows.length, from_peer: rows.filter((r) => r.peer.toLowerCase() === peer.toLowerCase()).length };
 }
-
-

@@ -1,7 +1,7 @@
 // Presence: this macula-mcp process's own "being on the mesh" state -- a
 // periodic agent.hello heartbeat, subscriptions to agent.hello and
 // agent.goodbye feeding the local roster (roster.ts), the lobby observer
-// (lobby_observer.ts) watching central and this agent's rooms, the ring
+// (watch_lobby.ts) watching central and this agent's rooms, the ring
 // endpoint (serve_rings.ts), realm auto-join (device_membership.ts) and
 // the citizens-directory registration (citizenship.ts). mesh_hello.ts,
 // mesh_goodbye.ts and mesh_agents.ts are thin tool wrappers around
@@ -31,12 +31,12 @@ import { droppedEvents } from "./dropped_events.js";
 import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
 import { removeAgent, upsertAgent } from "./roster.js";
 import { petname } from "./petname.js";
-import * as lobbyObserver from "./lobby_observer.js";
+import * as lobbyObserver from "./converse_in_rooms/watch_lobby.js";
 import * as ringService from "./ring_agents/serve_rings.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
 import * as deviceMembership from "./device_membership.js";
-import * as rooms from "./rooms.js";
+import * as rooms from "./converse_in_rooms/rooms.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";

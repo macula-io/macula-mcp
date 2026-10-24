@@ -15,7 +15,7 @@ vi.mock("./citizenship.js", () => ({
   stop: vi.fn(),
   displayName: (op?: string, via?: string, handle?: string) => op ?? handle ?? via ?? "macula-mcp agent",
 }));
-vi.mock("./lobby_observer.js", () => ({
+vi.mock("./converse_in_rooms/watch_lobby.js", () => ({
   LOBBY_TOPIC: "agents.lobby",
   start: vi.fn().mockResolvedValue({}),
   stop: vi.fn(),
@@ -151,9 +151,9 @@ describe("start()", () => {
   // agent was absent and unringable over a room it was not even talking in.
   it("starts even when a room it must re-watch refuses the tap", async () => {
     process.env.MACULA_MCP_RINGS_DB = ":memory:";
-    const roomMembership = await import("./room_membership.js");
+    const roomMembership = await import("./converse_in_rooms/room_membership.js");
     roomMembership.record(NODE_ID, { room_topic: `agents.room.${"e".repeat(32)}`, opened_by: NODE_ID, opened_here: 1, public: 0, joined_at: new Date().toISOString() });
-    const lobbyObserver = await import("./lobby_observer.js");
+    const lobbyObserver = await import("./converse_in_rooms/watch_lobby.js");
     vi.mocked(lobbyObserver.isTapped).mockReturnValue(false);
     vi.mocked(lobbyObserver.start).mockResolvedValue({} as never);
     vi.mocked(lobbyObserver.tapRoom).mockRejectedValue(new Error("station refused the subscription"));
@@ -272,7 +272,7 @@ describe("the lifecycle mailbox (macula-mcp#44 step 7)", () => {
     for (const sub of subs) expect(sub.stop).toHaveBeenCalledTimes(1);
     const ringService = await import("./ring_agents/serve_rings.js");
     expect(ringService.stop).toHaveBeenCalled();
-    const lobbyObserver = await import("./lobby_observer.js");
+    const lobbyObserver = await import("./converse_in_rooms/watch_lobby.js");
     expect(lobbyObserver.stop).toHaveBeenCalled();
     // ... and the teardown is complete, not a half-state a second stop has to finish.
     expect(await presence.stop()).toEqual({ said_goodbye: false });
@@ -299,7 +299,7 @@ describe("the lifecycle mailbox (macula-mcp#44 step 7)", () => {
     expect(presence.isActive()).toBe(true);
     // The restart's observer start is the LAST word on the observer: the stop that finished first cannot
     // leave the new presence unwatched.
-    const lobbyObserver = await import("./lobby_observer.js");
+    const lobbyObserver = await import("./converse_in_rooms/watch_lobby.js");
     const lastStart = vi.mocked(lobbyObserver.start).mock.invocationCallOrder.at(-1)!;
     const lastStop = vi.mocked(lobbyObserver.stop).mock.invocationCallOrder.at(-1)!;
     expect(lastStart).toBeGreaterThan(lastStop);

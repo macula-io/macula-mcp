@@ -13,7 +13,7 @@
 // you'd have to notice and go do yourself.
 //
 // (2026-08-31) mesh_hello now starts this automatically (see
-// presence.ts/lobby_observer.ts) -- an agent that's said hello is
+// presence.ts/watch_lobby.ts) -- an agent that's said hello is
 // already watching the lobby, with no separate call needed. This tool
 // still matters for: raising max_rooms above the default (20) on a
 // busy central, restarting the watch after mesh_unobserve_lobby without a
@@ -36,12 +36,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./dropped_events.js";
-import { errorContent, jsonContent } from "./reply.js";
-import * as lobbyObserver from "./lobby_observer.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./../dropped_events.js";
+import { errorContent, jsonContent } from "./../reply.js";
+import * as lobbyObserver from "./watch_lobby.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";
-import { petname } from "./petname.js";
-import { toolDescription } from "./tool_description.js";
+import { petname } from "./../petname.js";
+import { toolDescription } from "./../tool_description.js";
 
 const DEFAULT_TRANSCRIPT_LIMIT = 50;
 const MAX_TRANSCRIPT_LIMIT = 500;

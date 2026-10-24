@@ -1,6 +1,6 @@
 // Which rooms this node is in (macula-mcp#44 step 6): ONE owner, and it persists.
 //
-// Before this the same fact lived in two places -- rooms.ts's `rooms` Map and lobby_observer.ts's per-tap
+// Before this the same fact lived in two places -- rooms.ts's `rooms` Map and watch_lobby.ts's per-tap
 // `joined` flag -- and a reconciler (rooms.ts's ensureTapped) patched the two back together at each entry
 // point that happened to remember it. Any entry point that did not was the next bug: mesh_unobserve_lobby
 // dropped every tap while rooms.ts still listed the rooms, and a restart lost every membership while the
@@ -21,7 +21,7 @@
 // something (say, a wait, mesh_join_room) re-taps them. Membership is per IDENTITY, not per machine: a
 // second identity on the same box has its own rows.
 import type { DatabaseSync } from "node:sqlite";
-import { machineDb } from "./machine_transcript.js";
+import { machineDb } from "./../machine_transcript.js";
 
 export interface RoomMembership {
   room_topic: string;

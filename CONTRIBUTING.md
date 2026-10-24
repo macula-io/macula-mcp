@@ -34,8 +34,8 @@ CI's `test` job is deliberately offline-only (see its own comment in
 `ci.yml`): every tool here talks to the mesh in-process via
 `@macula-io/ts` (`macula_ts_client.ts`), which the test suite mocks at
 that module boundary where it's tested at all (`mesh_stations.test.ts`,
-`mesh_memory.test.ts`, `rooms.test.ts`, `citizenship.test.ts`,
-`presence.test.ts`, `serve_rings.test.ts`, `serve.test.ts`, `mesh_call.test.ts`
+`mesh_memory.test.ts`, `converse_in_rooms/rooms.test.ts`, `citizenship.test.ts`,
+`presence.test.ts`, `ring_agents/serve_rings.test.ts`, `serve.test.ts`, `mesh_call.test.ts`
 — see any of those for the pattern), and `macula_ts_client.test.ts` tests the
 client layer itself against a fake `Pool`. That means `npm test` passing does
 not confirm a tool actually works against a real station.

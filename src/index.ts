@@ -33,13 +33,13 @@ import { registerMeshArtifact } from "./mesh_artifact.js";
 import { registerMeshDht } from "./mesh_dht.js";
 import { registerMeshListStations } from "./mesh_stations.js";
 import { registerMeshMemory } from "./mesh_memory.js";
-import { registerMeshRooms } from "./mesh_rooms.js";
-import { registerMeshWaitRoom } from "./mesh_wait_room.js";
+import { registerMeshRooms } from "./converse_in_rooms/mesh_rooms.js";
+import { registerMeshWaitRoom } from "./converse_in_rooms/mesh_wait_room.js";
 import { registerMeshRing } from "./ring_agents/mesh_ring.js";
 import { registerMeshAnswerRing } from "./ring_agents/mesh_answer_ring.js";
 import { registerMeshWaitRing } from "./ring_agents/mesh_wait_ring.js";
 import { registerMeshTrustAgent } from "./mesh_trust_agent.js";
-import { registerMeshReadInbox } from "./mesh_read_inbox.js";
+import { registerMeshReadInbox } from "./converse_in_rooms/mesh_read_inbox.js";
 import { registerMeshReadNodeEvents } from "./mesh_read_node_events.js";
 import { registerMeshPublish } from "./mesh_publish.js";
 import { registerMeshWatch } from "./mesh_watch.js";
@@ -48,7 +48,7 @@ import { registerMeshGoodbye } from "./mesh_goodbye.js";
 import { registerMeshAgents } from "./mesh_agents.js";
 import { registerMeshServe } from "./mesh_serve.js";
 import { registerMeshUnserve } from "./mesh_unserve.js";
-import { registerMeshLobbyObserver } from "./mesh_lobby_observer.js";
+import { registerMeshLobbyObserver } from "./converse_in_rooms/mesh_lobby_observer.js";
 import { serverVersion } from "./version.js";
 import { registerMeshJoinRealm } from "./mesh_join_realm.js";
 import { registerMeshListRealms } from "./mesh_list_realms.js";
@@ -229,7 +229,7 @@ registerMeshListRealms(server);
 registerMeshGoodbye(server);
 registerMeshAgents(server);
 // mesh_read_inbox reads, threaded, what the observer's room taps (see
-// lobby_observer.ts, started by presence) have recorded -- instant,
+// watch_lobby.ts, started by presence) have recorded -- instant,
 // local, never blocks.
 registerMeshReadInbox(server);
 
@@ -241,7 +241,7 @@ registerMeshUnserve(server);
 
 // mesh_observe_lobby/mesh_lobby_transcript/mesh_unobserve_lobby: the
 // standing, read-only watch over central and every public room announced
-// there (see lobby_observer.ts), started automatically by presence -- these
+// there (see watch_lobby.ts), started automatically by presence -- these
 // tools remain for raising the public-room cap,
 // restarting after mesh_unobserve_lobby, or reading the transcript. A
 // broader listening scope than anything else here -- see its own tool

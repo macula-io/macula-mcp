@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER, getRing } from "./rings.js";
 import { closeMachineDb } from "../machine_transcript.js";
 import { newRoomTopic } from "../envelope.js";
-import { closeTranscript, recordLoss } from "../lobby_transcript.js";
+import { closeTranscript, recordLoss } from "../converse_in_rooms/lobby_transcript.js";
 import { closeRoster, upsertAgent } from "../roster.js";
 import { petname } from "../petname.js";
 
@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => ({
   currentNodeId: vi.fn(),
 }));
 vi.mock("../macula_ts_client.js", () => ({ call: mocks.call, selfNodeId: mocks.selfNodeId }));
-vi.mock("../rooms.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../rooms.js")>();
+vi.mock("../converse_in_rooms/rooms.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../converse_in_rooms/rooms.js")>();
   return { ...actual, isJoined: mocks.isJoined };
 });
 vi.mock("../presence.js", () => ({ currentNodeId: mocks.currentNodeId, ensurePresence: vi.fn() }));

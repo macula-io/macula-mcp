@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { ensureRingTables } from "./ring_agents/rings.js";
 import { ensureNodeEventsTable } from "./node_events.js";
-import { ensureRoomMembershipTable } from "./room_membership.js";
+import { ensureRoomMembershipTable } from "./converse_in_rooms/room_membership.js";
 
 function dbPath(): string {
   return process.env.MACULA_MCP_RINGS_DB ?? join(homedir(), ".macula-mcp", "rings.sqlite3");
