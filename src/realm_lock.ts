@@ -36,9 +36,17 @@ export function lockTimeoutMs(): number {
   return Number.isFinite(configured) && configured >= 0 ? configured : LOCK_TIMEOUT_MS;
 }
 
-/** Sleeps this thread only: the lock is taken synchronously, so nothing here is ever on an await. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/**
+ * Waits WITHOUT blocking the event loop (step 5 review, observation c). The lock is held by another process
+ * for as long as that process takes, so a waiter can sit here for the whole timeout -- and this is an MCP
+ * server answering other tool calls in the same process meanwhile. Sleeping synchronously froze every one of
+ * them for up to five seconds, the cache refresh and the heartbeat included.
+ *
+ * Nothing depends on the wait being synchronous: the store's read, decide and write all happen after the lock
+ * is taken and never across an await, so they still run as one uninterrupted turn.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function lockHolder(path: string): { pid?: number } | undefined {
@@ -164,7 +172,7 @@ export function reclaimAbandonedLock(lock: string): void {
 }
 
 /** Takes the credential lock, or throws: a store that cannot be sure what is on disk must not write. */
-export function acquireLock(path: string): number {
+export async function acquireLock(path: string): Promise<number> {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const deadline = Date.now() + lockTimeoutMs();
   for (;;) {
@@ -174,7 +182,7 @@ export function acquireLock(path: string): number {
     if (Date.now() >= deadline) {
       throw new Error(`realm: the credential lock ${path} is held by another process (pid ${lockHolder(path)?.pid ?? "unknown"}); gave up after ${lockTimeoutMs()} ms without writing`);
     }
-    sleepSync(LOCK_RETRY_MS);
+    await sleep(LOCK_RETRY_MS);
   }
 }
 

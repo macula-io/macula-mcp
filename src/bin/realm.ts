@@ -235,7 +235,7 @@ async function waitForConfirmation(
         ucan: outcome.ucan,
         tier: "citizen",
       };
-      storeCredential(cred, canonical);
+      await storeCredential(cred, canonical);
       emit(run.json, membershipEvent(canonical, cred));
       return;
     }

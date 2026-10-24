@@ -190,36 +190,36 @@ describe("join_confirmed in the node event log", () => {
   });
   const events = () => readNodeEvents(ringsDb(), { self: NODE, limit: 50 }).events;
 
-  it("a membership established is one entry, carrying the realm and who was bound", () => {
-    realm.storeCredential(cred());
+  it("a membership established is one entry, carrying the realm and who was bound", async () => {
+    await realm.storeCredential(cred());
     expect(events()).toHaveLength(1);
     expect(events()[0]).toMatchObject({ kind: "join_confirmed", realm: "io.macula", org_identity: "mri:org:io.macula/rgfaber", tier: "citizen" });
   });
 
-  it("a renewal of the same membership adds nothing: the token changes, the membership does not", () => {
-    realm.storeCredential(cred());
-    realm.storeCredential(cred({ ucan: "eyJ.renewed.token" }));
+  it("a renewal of the same membership adds nothing: the token changes, the membership does not", async () => {
+    await realm.storeCredential(cred());
+    await realm.storeCredential(cred({ ucan: "eyJ.renewed.token" }));
     expect(events()).toHaveLength(1);
   });
 
-  it("a citizen confirmation on top of the device tier is a second entry: a person bound this node", () => {
-    realm.storeCredential(cred({ org_identity: "mri:org:io.macula", tier: "device" }));
-    realm.storeCredential(cred());
+  it("a citizen confirmation on top of the device tier is a second entry: a person bound this node", async () => {
+    await realm.storeCredential(cred({ org_identity: "mri:org:io.macula", tier: "device" }));
+    await realm.storeCredential(cred());
     expect(events().map((e) => e.tier)).toEqual(["device", "citizen"]);
   });
 
-  it("a join from another process (the CLI) lands in the same log the server reads", () => {
+  it("a join from another process (the CLI) lands in the same log the server reads", async () => {
     // Nothing of ours holds the file, the way nothing in the server process does while macula-mcp-realm
     // joins from its own process.
     closeRings();
-    realm.storeCredential(cred({ org_identity: "mri:org:net.beam-campus/person" }), "net.beam-campus");
+    await realm.storeCredential(cred({ org_identity: "mri:org:net.beam-campus/person" }), "net.beam-campus");
     expect(events().map((e) => e.realm)).toEqual(["net.beam-campus"]);
   });
 });
 
 describe("credential store", () => {
   it("round-trips a credential, 0600, keyed by (node_id, realm), and reports it as joined", async () => {
-    const path = realm.storeCredential({
+    const path = await realm.storeCredential({
       node_id: NODE,
       portal: "https://realm.test",
       org_identity: "mri:org:io.macula/rgfaber",
@@ -251,7 +251,7 @@ describe("credential store", () => {
   });
 
   it("a credential from an older/unconfigured realm (no citizen_did/ucan) still reports joined, just without them", async () => {
-    realm.storeCredential({
+    await realm.storeCredential({
       node_id: NODE,
       portal: "https://realm.test",
       org_identity: "mri:org:io.macula/rgfaber",
@@ -286,17 +286,17 @@ describe("credential store", () => {
     tier,
   });
 
-  it("keeps a citizen credential when a device one arrives for the same node and realm", () => {
-    realm.storeCredential(membership("citizen", "citizen-token"), "net.beam-campus");
-    expect(realm.storeCredentialUnlessWeaker(membership("device", "device-token"), "net.beam-campus")).toBeUndefined();
+  it("keeps a citizen credential when a device one arrives for the same node and realm", async () => {
+    await realm.storeCredential(membership("citizen", "citizen-token"), "net.beam-campus");
+    expect(await realm.storeCredentialUnlessWeaker(membership("device", "device-token"), "net.beam-campus")).toBeUndefined();
     expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("citizen-token");
   });
 
-  it("writes a citizen credential over a device one, and one of the same tier over itself, so a renewal still lands", () => {
-    realm.storeCredential(membership("device", "old"), "net.beam-campus");
-    const path = realm.storeCredentialUnlessWeaker(membership("citizen", "new"), "net.beam-campus");
+  it("writes a citizen credential over a device one, and one of the same tier over itself, so a renewal still lands", async () => {
+    await realm.storeCredential(membership("device", "old"), "net.beam-campus");
+    const path = await realm.storeCredentialUnlessWeaker(membership("citizen", "new"), "net.beam-campus");
     expect(path).toBe(join(dir, NODE, "net.beam-campus.json"));
-    expect(realm.storeCredentialUnlessWeaker(membership("citizen", "newer"), "net.beam-campus")).toBe(path);
+    expect(await realm.storeCredentialUnlessWeaker(membership("citizen", "newer"), "net.beam-campus")).toBe(path);
     expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("newer");
   });
 
@@ -304,24 +304,24 @@ describe("credential store", () => {
   // record, so the device tier it answers on a renewal IS the truth for that membership, and guarding on
   // the new token threw a lowered assurance away for good: the citizen UCAN expired while every renewal
   // fetched a device token and discarded it.
-  it("stores what a renewal is answered, even a lower tier than the membership held", () => {
-    realm.storeCredential(membership("citizen", "citizen-token"), "net.beam-campus");
+  it("stores what a renewal is answered, even a lower tier than the membership held", async () => {
+    await realm.storeCredential(membership("citizen", "citizen-token"), "net.beam-campus");
     const held = realm.loadCredential(NODE, "net.beam-campus") as realm.RealmMembership;
-    const path = realm.storeRenewal({ ...held, realm: "net.beam-campus" }, membership("device", "renewed-device-token"));
+    const path = await realm.storeRenewal({ ...held, realm: "net.beam-campus" }, membership("device", "renewed-device-token"));
     expect(path).toBe(join(dir, NODE, "net.beam-campus.json"));
     expect(realm.loadCredential(NODE, "net.beam-campus")?.ucan).toBe("renewed-device-token");
     expect(realm.loadCredential(NODE, "net.beam-campus")?.tier).toBe("device");
   });
 
-  it("keeps a stronger credential that landed while the renewal was waiting on the realm, and says so", () => {
-    realm.storeCredential(membership("device", "device-token"), "net.beam-campus");
+  it("keeps a stronger credential that landed while the renewal was waiting on the realm, and says so", async () => {
+    await realm.storeCredential(membership("device", "device-token"), "net.beam-campus");
     const held = realm.loadCredential(NODE, "net.beam-campus") as realm.RealmMembership;
     // A person confirmed a citizen membership mid-renewal.
-    realm.storeCredential(membership("citizen", "citizen-during-renewal"), "net.beam-campus");
+    await realm.storeCredential(membership("citizen", "citizen-during-renewal"), "net.beam-campus");
     const logged: string[] = [];
     const said = vi.spyOn(console, "error").mockImplementation((line: string) => { logged.push(String(line)); });
     try {
-      expect(realm.storeRenewal({ ...held, realm: "net.beam-campus" }, membership("device", "renewal-device-token"))).toBeUndefined();
+      expect(await realm.storeRenewal({ ...held, realm: "net.beam-campus" }, membership("device", "renewal-device-token"))).toBeUndefined();
     } finally {
       said.mockRestore();
     }
@@ -333,7 +333,7 @@ describe("credential store", () => {
   it("writes through a temp file and a rename, so a reader never sees a half-written credential", async () => {
     writes.made.length = 0;
     writes.renamed.length = 0;
-    const path = realm.storeCredential(membership("citizen", "x"), "net.beam-campus");
+    const path = await realm.storeCredential(membership("citizen", "x"), "net.beam-campus");
 
     const written = writes.made.at(-1) ?? "";
     expect(written).not.toBe(path);
@@ -343,8 +343,8 @@ describe("credential store", () => {
     expect(await readdir(join(dir, NODE))).toEqual(["net.beam-campus.json"]);
   });
 
-  it("a device-tier credential (device_membership.ts's auto-join) round-trips its tier through status()", () => {
-    realm.storeCredential({
+  it("a device-tier credential (device_membership.ts's auto-join) round-trips its tier through status()", async () => {
+    await realm.storeCredential({
       node_id: NODE,
       portal: "io.macula",
       org_identity: "mri:org:io.macula",
@@ -357,12 +357,12 @@ describe("credential store", () => {
     expect(realm.status(NODE).tier).toBe("device");
   });
 
-  it("stores and loads independently under different realms for the same identity -- one does not clobber or leak into the other", () => {
-    realm.storeCredential(
+  it("stores and loads independently under different realms for the same identity -- one does not clobber or leak into the other", async () => {
+    await realm.storeCredential(
       { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_macula", joined_at: "2026-09-08T00:00:00Z", tier: "citizen" },
       "io.macula",
     );
-    realm.storeCredential(
+    await realm.storeCredential(
       { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z", tier: "citizen" },
       "net.beam-campus",
     );
@@ -372,12 +372,12 @@ describe("credential store", () => {
     expect(realm.loadCredential(NODE)?.refresh_token).toBe("mrt_macula");
   });
 
-  it("listCredentials returns every realm a node_id has a confirmed membership for, tagged by realm", () => {
-    realm.storeCredential(
+  it("listCredentials returns every realm a node_id has a confirmed membership for, tagged by realm", async () => {
+    await realm.storeCredential(
       { node_id: NODE, portal: "https://realm.beam-campus.net", org_identity: "mri:org:net.beam-campus/rgfaber", refresh_token: "mrt_beamcampus", joined_at: "2026-09-08T00:01:00Z", tier: "citizen" },
       "net.beam-campus",
     );
-    realm.storeCredential(
+    await realm.storeCredential(
       { node_id: NODE, portal: "https://realm.macula.io", org_identity: "mri:org:io.macula/rgfaber", refresh_token: "mrt_macula", joined_at: "2026-09-08T00:02:00Z", tier: "citizen" },
       "io.macula",
     );
@@ -615,7 +615,7 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     writes.renamed.length = 0;
     const { exited } = await startHolder(900, 600);
     // A device credential over a citizen one is exactly what the old read-then-write let through.
-    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBeUndefined();
+    expect(await realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBeUndefined();
     expect(realm.loadCredential(NODE, "net.beam-campus")?.refresh_token).toBe("mrt_holder");
     expect(writes.renamed.filter(([, to]) => to === credPath())).toHaveLength(0);
     await exited;
@@ -625,7 +625,7 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     const dead = spawnSync(process.execPath, ["-e", ""]).pid;
     await mkdir(join(dir, NODE), { recursive: true });
     await writeFile(lockPath(), JSON.stringify({ pid: dead, at: Date.now() }), "utf8");
-    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
+    expect(await realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
     expect(existsSync(lockPath())).toBe(false);
   });
 
@@ -634,7 +634,7 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     await writeFile(lockPath(), "{ truncated by a crash", "utf8");
     const old = new Date(Date.now() - 10 * 60_000);
     utimesSync(lockPath(), old, old);
-    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
+    expect(await realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
     expect(existsSync(lockPath())).toBe(false);
   });
 
@@ -645,7 +645,7 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     await writeFile(lockPath(), JSON.stringify({ pid: 1, at: Date.now() }), "utf8");
     const old = new Date(Date.now() - 24 * 60 * 60_000);
     utimesSync(lockPath(), old, old);
-    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
+    expect(await realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
     expect(existsSync(lockPath())).toBe(false);
   });
 
@@ -654,7 +654,7 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     try {
       await mkdir(join(dir, NODE), { recursive: true });
       await writeFile(lockPath(), JSON.stringify({ pid: process.pid, at: Date.now() }), "utf8");
-      expect(() => realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toThrow(/credential lock/);
+      await expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).rejects.toThrow(/credential lock/);
       expect(existsSync(credPath())).toBe(false);
       expect(existsSync(lockPath())).toBe(true);
     } finally {
@@ -709,6 +709,48 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     await waiting;
     expect((await reopened).session_id).toBe("s-new");
     expect(realm.status(NODE).pending?.session_id).toBe("s-new");
+  });
+
+  // Step 5 review, observation (b): an abandon arriving between clearPending() and createSession left
+  // nothing to clear, so the session the person had just dropped became current and started polling.
+  it("an abandon that arrives while a begin is opening its session is not lost: that session is never current", async () => {
+    let resolveCreate: (r: ReturnType<typeof sessionOpened>) => void = () => {};
+    const slowCreate = new Promise<ReturnType<typeof sessionOpened>>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const calls = { n: 0 };
+    const fetchImpl: realm.FetchLike = () => {
+      calls.n += 1;
+      return slowCreate;
+    };
+    const beginning = realm.begin({ fetchImpl });
+    await vi.waitFor(() => expect(calls.n).toBe(1));
+    realm.abandon(); // dropped while the realm is still opening it
+    resolveCreate(sessionOpened("s-dropped"));
+
+    // The caller still gets the link it asked for; the realm keeps the session and expires it there.
+    expect((await beginning).session_id).toBe("s-dropped");
+    expect(realm.status(NODE).pending).toBeUndefined();
+  });
+
+  // Step 5 review, observation (c): the lock wait slept synchronously, so one contended credential write
+  // froze every other tool call in this process for up to five seconds.
+  it("waiting for the credential lock does not starve the event loop", async () => {
+    process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS = "200";
+    try {
+      await mkdir(join(dir, NODE), { recursive: true });
+      await writeFile(lockPath(), JSON.stringify({ pid: process.pid, at: Date.now() }), "utf8");
+      const ticks: number[] = [];
+      const ticker = setInterval(() => ticks.push(Date.now()), 20);
+      const started = Date.now();
+      await expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).rejects.toThrow(/credential lock/);
+      clearInterval(ticker);
+      // 200 ms of waiting is about ten ticks. A synchronous sleep starves the timer completely.
+      expect(ticks.length).toBeGreaterThanOrEqual(3);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(150);
+    } finally {
+      delete process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS;
+    }
   });
 
   it("a confirmation for another realm is stored under that realm, never under the default", async () => {

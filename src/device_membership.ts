@@ -167,7 +167,7 @@ export async function ensureAutoJoin(input: { nodeId: string }): Promise<void> {
     const cred = await joinDevice({ realmName });
     // The guard is at the write, not here (macula-mcp#43): a citizen credential
     // can land while joinDevice is waiting on the realm, and it must survive.
-    storeCredentialUnlessWeaker(cred, realmName);
+    await storeCredentialUnlessWeaker(cred, realmName);
   } catch (e) {
     console.error(`device_membership: silent auto-join of ${input.nodeId} against ${realmName} failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -237,7 +237,7 @@ export async function renewMemberships(input: { nodeId: string }): Promise<void>
       // A renewal stores the tier the realm answers -- an operator lowering a member's assurance is a real
       // change (macula-mcp#43 review) -- unless a stronger credential landed during this await. The
       // decision is at the write, on the membership this renewal read.
-      storeRenewal(held, { ...cred, citizen_did: renewed.citizen_did, ucan: renewed.ucan, tier: renewed.tier });
+      await storeRenewal(held, { ...cred, citizen_did: renewed.citizen_did, ucan: renewed.ucan, tier: renewed.tier });
     } catch (e) {
       console.error(`device_membership: renewing ${input.nodeId}'s membership in ${held.realm} failed: ${e instanceof Error ? e.message : String(e)}`);
     }

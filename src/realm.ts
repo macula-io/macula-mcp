@@ -211,12 +211,12 @@ function keepsWhatIsStored(policy: StorePolicy, held: RealmCredential | undefine
 }
 
 /** Re-reads, decides and writes under the credential lock; returns the path, or undefined when it kept. */
-function storeMembership(cred: RealmCredential, realmName: string, policy: { kind: "replace" }): string;
-function storeMembership(cred: RealmCredential, realmName: string, policy: StorePolicy): string | undefined;
-function storeMembership(cred: RealmCredential, realmName: string, policy: StorePolicy): string | undefined {
+function storeMembership(cred: RealmCredential, realmName: string, policy: { kind: "replace" }): Promise<string>;
+function storeMembership(cred: RealmCredential, realmName: string, policy: StorePolicy): Promise<string | undefined>;
+async function storeMembership(cred: RealmCredential, realmName: string, policy: StorePolicy): Promise<string | undefined> {
   const path = credentialPath(cred.node_id, realmName);
   const lock = lockPath(cred.node_id, realmName);
-  const fd = acquireLock(lock);
+  const fd = await acquireLock(lock);
   try {
     const held = readCredentialFile(path);
     if (keepsWhatIsStored(policy, held, cred, realmName)) return undefined;
@@ -239,7 +239,7 @@ function storeMembership(cred: RealmCredential, realmName: string, policy: Store
  * A credential that establishes a membership is also appended to this node's event log, after the file
  * lands (recordJoinConfirmed) -- the membership is never announced before it exists.
  */
-export function storeCredential(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string {
+export async function storeCredential(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): Promise<string> {
   return storeMembership(cred, realmName, { kind: "replace" });
 }
 
@@ -252,7 +252,7 @@ export function storeCredential(cred: RealmCredential, realmName: string = DEFAU
  * answered -- so a citizen credential that landed in that window was replaced by the device-tier one the
  * call had already started, which is the one rule this store must never break.
  */
-export function storeCredentialUnlessWeaker(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): string | undefined {
+export async function storeCredentialUnlessWeaker(cred: RealmCredential, realmName: string = DEFAULT_REALM_NAME): Promise<string | undefined> {
   return storeMembership(cred, realmName, { kind: "unless-weaker" });
 }
 
@@ -271,7 +271,7 @@ export function storeCredentialUnlessWeaker(cred: RealmCredential, realmName: st
  * stricter rule (storeCredentialUnlessWeaker): it joins a realm the node does not hold yet, so anything
  * already there outranks what it is about to mint.
  */
-export function storeRenewal(held: RealmMembership, renewed: RealmCredential): string | undefined {
+export async function storeRenewal(held: RealmMembership, renewed: RealmCredential): Promise<string | undefined> {
   return storeMembership(renewed, held.realm, { kind: "renewal", renewedFrom: held.tier });
 }
 
@@ -521,6 +521,13 @@ let pending: Pending | undefined;
 let lastError: string | undefined;
 
 /**
+ * Bumped by every abandon(). A begin already past its clearPending() when the abandon arrived cannot see it
+ * in `pending` -- there was nothing there yet -- so it compares this before and after its own await and
+ * leaves the session it opened uncounted.
+ */
+let abandonEpoch = 0;
+
+/**
  * The pending session's mailbox (macula-mcp#44): begin, the background poll, a wait and an abandon are
  * transitions of ONE piece of state, so they are handled one at a time, in the order they arrived.
  *
@@ -742,17 +749,30 @@ async function openJoinSession(input: { connectedVia?: string; realm?: string; f
       qr_png_base64: await qrPngBase64(pending.join_url),
     };
   }
+  // Taken before anything is opened: an abandon() after this point is a person dropping the session this
+  // begin is about to create, and the check after createSession honours it.
+  const epoch = abandonEpoch;
   clearPending();
   // Proven right before the call, never ahead: the realm allows 60 s of skew.
   const body = joinRequest({ nodeId, publicKey: await carriedPublicKey(), connectedVia: input.connectedVia });
   const created = await createSession(await signedJoinRequest(body, realmName), fetchImpl);
   lastError = undefined;
+  // An abandon that arrived while this session was being opened is not lost (step 5 review, observation b):
+  // clearPending() above ran while there was nothing to clear, so without this the session the person had
+  // just dropped became current and started polling. The realm keeps it -- there is nothing to cancel --
+  // and it expires there; it is simply never this process's session.
+  if (abandonEpoch !== epoch) return rendered(nodeId, created, false);
   const timer = setInterval(() => void serialized(() => pollPending(fetchImpl)), POLL_INTERVAL_MS);
   timer.unref();
   pending = { node_id: nodeId, realm: realmName, ...created, timer };
+  return rendered(nodeId, created, false);
+}
+
+/** A begin's answer: the created session with its link rendered both ways. */
+async function rendered(nodeId: string, created: CreatedSession, reused: boolean): Promise<BeginResult> {
   return {
     node_id: nodeId,
-    reused: false,
+    reused,
     ...created,
     qr_terminal: await qrTerminal(created.join_url),
     qr_png_base64: await qrPngBase64(created.join_url),
@@ -783,5 +803,8 @@ export async function waitForOutcome(nodeId: string, seconds: number, fetchImpl:
  * cannot race the session that takes its place.
  */
 export function abandon(): void {
+  // A begin that is already past its clearPending() when this arrives has nothing to clear yet, so it
+  // leaves a mark instead: the session it is opening is never made current (see openJoinSession).
+  abandonEpoch += 1;
   clearPending();
 }

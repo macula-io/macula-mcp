@@ -62,35 +62,35 @@ describe("abandonedLock", () => {
 });
 
 describe("acquireLock / releaseLock", () => {
-  it("takes a free lock, records its holder, and removes the file on release", () => {
-    const fd = acquireLock(lock());
+  it("takes a free lock, records its holder, and removes the file on release", async () => {
+    const fd = await acquireLock(lock());
     expect(JSON.parse(readFileSync(lock(), "utf8")).pid).toBe(process.pid);
     releaseLock(lock(), fd);
     expect(existsSync(lock())).toBe(false);
   });
 
-  it("reclaims a lock left by a process that has exited, and leaves nothing behind", () => {
+  it("reclaims a lock left by a process that has exited, and leaves nothing behind", async () => {
     writeFileSync(lock(), JSON.stringify({ pid: deadPid(), at: 0 }));
-    const fd = acquireLock(lock());
+    const fd = await acquireLock(lock());
     releaseLock(lock(), fd);
     expect(existsSync(lock())).toBe(false);
     expect(existsSync(marker())).toBe(false);
   });
 
-  it("does not steal a lock a live process holds: it gives up after its own timeout", () => {
+  it("does not steal a lock a live process holds: it gives up after its own timeout", async () => {
     process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS = "120";
     writeFileSync(lock(), JSON.stringify({ pid: process.pid, at: Date.now() }));
-    expect(() => acquireLock(lock())).toThrow(/credential lock/);
+    await expect(acquireLock(lock())).rejects.toThrow(/credential lock/);
     expect(existsSync(lock())).toBe(true);
   });
 
-  it("a reclaim marker a live process has just taken is not transferred, so a stale lock waits instead of being stolen twice", () => {
+  it("a reclaim marker a live process has just taken is not transferred, so a stale lock waits instead of being stolen twice", async () => {
     process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS = "150";
     writeFileSync(lock(), JSON.stringify({ pid: deadPid(), at: 0 }));
     mkdirSync(dir, { recursive: true });
     // Another process is inside the reclaim right now: its marker is fresh.
     writeFileSync(marker(), JSON.stringify({ pid: process.pid, at: Date.now() }));
-    expect(() => acquireLock(lock())).toThrow(/credential lock/);
+    await expect(acquireLock(lock())).rejects.toThrow(/credential lock/);
     expect(existsSync(lock())).toBe(true);
     expect(existsSync(marker())).toBe(true);
   });
@@ -112,7 +112,7 @@ describe("eight real processes against one lock", () => {
         'import { appendFileSync } from "node:fs";',
         "const [lockPath, logPath, startAt] = process.argv.slice(2);",
         "while (Date.now() < Number(startAt)) {}",
-        "const fd = acquireLock(lockPath);",
+        "const fd = await acquireLock(lockPath);",
         "appendFileSync(logPath, `enter ${process.pid} ${Date.now()}\\n`);",
         "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40);",
         "appendFileSync(logPath, `exit ${process.pid} ${Date.now()}\\n`);",
