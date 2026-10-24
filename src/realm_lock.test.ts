@@ -29,21 +29,34 @@ afterEach(async () => {
 });
 
 describe("abandonedLock", () => {
-  it("a holder that has exited is abandoned at once; a live one never is, however old the file", async () => {
+  const ageBy = async (ms: number): Promise<void> => {
+    const old = new Date(Date.now() - ms);
+    await utimes(lock(), old, old);
+  };
+
+  it("a holder that has exited is abandoned at once, whatever the file's age", async () => {
     writeFileSync(lock(), JSON.stringify({ pid: deadPid(), at: 0 }));
     expect(abandonedLock(lock())).toBe(true);
+  });
 
+  it("a live pid is abandoned past the stale window -- after a reboot that pid belongs to a system process (r2)", async () => {
+    // The lock file lives under ~/.config and outlives a reboot; a crashed holder's pid is routinely reused.
+    // Trusting the live pid at any age wedged every later store on this file, forever.
+    writeFileSync(lock(), JSON.stringify({ pid: 1, at: 0 }));
+    await ageBy(24 * 60 * 60_000);
+    expect(abandonedLock(lock())).toBe(true);
+  });
+
+  it("a live pid inside the stale window is not abandoned -- a store takes milliseconds", async () => {
     writeFileSync(lock(), JSON.stringify({ pid: process.pid, at: 0 }));
-    const old = new Date(Date.now() - 10 * 60_000);
-    await utimes(lock(), old, old);
+    await ageBy(2_000);
     expect(abandonedLock(lock())).toBe(false);
   });
 
-  it("falls back to age only when the file names no readable pid", async () => {
+  it("a file naming no readable pid is judged by age alone", async () => {
     writeFileSync(lock(), "not json");
     expect(abandonedLock(lock())).toBe(false);
-    const old = new Date(Date.now() - 10 * 60_000);
-    await utimes(lock(), old, old);
+    await ageBy(10 * 60_000);
     expect(abandonedLock(lock())).toBe(true);
   });
 });

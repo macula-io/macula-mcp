@@ -7,8 +7,9 @@
 // Reclaiming a lock left by a crashed holder is the subtle part, and it is why this file is separate and
 // testable on its own (realm_lock.test.ts spawns real processes at it). The rule:
 //
-//   - A pid we can read decides. A LIVE holder is never stolen, however long it has held: the waiter's own
-//     timeout decides when to give up. Only a lock whose holder cannot be read at all falls back to age.
+//   - A pid that is GONE reclaims at once. Anything else -- a live pid, or one that cannot be read -- is
+//     judged by age: a store takes milliseconds, so a lock past LOCK_STALE_MS belongs to a wedged process
+//     or to a pid that a reboot handed to somebody else.
 //   - The unlink of a stale lock happens in exactly ONE place, reclaimAbandonedLock, and only the process
 //     holding <lock>.reclaim may be in there. Taken with O_EXCL, so one winner; every other waiter backs
 //     off and re-reads, by which time the lock is either gone or someone else's and no longer abandoned.
@@ -60,13 +61,21 @@ function processAlive(pid: number | undefined): boolean {
 }
 
 /**
- * A lock its holder is done with: the process that wrote it has exited (a CLI killed mid-join, the common
- * case), or -- when the file names no readable pid at all -- it is older than any store has any business
- * being. A pid we can read is authoritative: a live holder is never abandoned here, whatever its age.
+ * A lock its holder is done with.
+ *
+ * A pid that is GONE decides at once: a CLI killed mid-join is the common case, and nothing has to age for
+ * it. Otherwise age decides, and it decides for a readable pid too (review r2): the lock file lives under
+ * ~/.config and outlives a reboot, and after a reboot a crashed holder's pid is routinely REUSED by a live
+ * system process (pid 1, say). Trusting a live pid at any age wedged every later store on that file,
+ * forever -- renewals failing, a membership lapsing, until someone deleted it by hand.
+ *
+ * Age is safe here because a store is synchronous and takes milliseconds: a lock older than LOCK_STALE_MS
+ * belongs to a process that is wedged or to a pid that was reused, and a holder that overran is harmless
+ * anyway -- drop() never unlinks a lock that is no longer its own.
  */
 export function abandonedLock(path: string): boolean {
   const holder = lockHolder(path);
-  if (holder?.pid !== undefined) return !processAlive(holder.pid);
+  if (holder?.pid !== undefined && !processAlive(holder.pid)) return true;
   try {
     return Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS;
   } catch {

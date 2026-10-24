@@ -638,19 +638,15 @@ describe("one owner for realm membership (macula-mcp#44)", () => {
     expect(existsSync(lockPath())).toBe(false);
   });
 
-  it("never steals a lock whose holder is alive, however long it has held it: it gives up, loudly", async () => {
-    process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS = "150";
-    try {
-      await mkdir(join(dir, NODE), { recursive: true });
-      await writeFile(lockPath(), JSON.stringify({ pid: process.pid, at: Date.now() }), "utf8");
-      const old = new Date(Date.now() - 10 * 60_000);
-      utimesSync(lockPath(), old, old);
-      expect(() => realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toThrow(/credential lock/);
-      expect(existsSync(credPath())).toBe(false);
-      expect(existsSync(lockPath())).toBe(true);
-    } finally {
-      delete process.env.MACULA_MCP_REALM_LOCK_TIMEOUT_MS;
-    }
+  it("takes a lock whose live pid has held it far past the stale window -- a pid reused after a reboot (r2)", async () => {
+    await mkdir(join(dir, NODE), { recursive: true });
+    // The credential file outlives a reboot; the pid in a crashed holder's lock is routinely reused by a
+    // live system process, so trusting a live pid at any age wedged every later store on this file.
+    await writeFile(lockPath(), JSON.stringify({ pid: 1, at: Date.now() }), "utf8");
+    const old = new Date(Date.now() - 24 * 60 * 60_000);
+    utimesSync(lockPath(), old, old);
+    expect(realm.storeCredentialUnlessWeaker(DEVICE, "net.beam-campus")).toBe(credPath());
+    expect(existsSync(lockPath())).toBe(false);
   });
 
   it("does not steal a lock a live process is holding: it gives up loudly and writes nothing", async () => {
