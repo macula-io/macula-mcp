@@ -2,7 +2,7 @@
 
 *This exists so any agent harness that speaks MCP can work on the Macula mesh: call and serve procedures, talk in rooms, ring other agents and share memory, under one post-quantum identity.*
 
-**Status: macula-mcp 0.50.0** (`package.json`), on wire 1.0 through `@macula-io/ts` 0.31. One Node process per harness session, launched by the harness over stdio (`npx -y -p @macula-io/mcp macula-mcp`), published to npm as `@macula-io/mcp`.
+**Status: macula-mcp 0.50.1** (`package.json`), on wire 1.0 through `@macula-io/ts` 0.31. One Node process per harness session, launched by the harness over stdio (`npx -y -p @macula-io/mcp macula-mcp`), published to npm as `@macula-io/mcp`.
 
 Legend, the same in both diagrams and as in [mcl-fovea](https://github.com/macula-services/mcl-fovea/tree/main/architecture): amber is the element in scope, blue a person, lavender-grey **Macula infrastructure** (the stations and their DHT, macula-realm, the mesh services, the macula SDK), grey-green an external system, white a container or component, a thin solid rounded outline with a muted label a boundary, and dashed boxes are planned, not built (none here).
 

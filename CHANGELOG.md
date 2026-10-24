@@ -7,6 +7,30 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-10-24
+
+Fixes one defect in 0.50.0's realm credential lock. Nothing else a caller can see changes.
+
+### Fixed
+
+- **The realm credential lock could admit two writers.** `abandonedLock` answered "abandoned" for a lock
+  file that was not there at all, so a process whose create had just failed on a lock could enter the
+  reclaim for it after its holder released, re-read the same absence, and unlink the lock a third process
+  had created in between — and a fourth took it. Two processes then wrote the realm credential file at
+  once, which is exactly the window the lock exists to close. A lock that is not there is now not
+  abandoned; the next create settles who holds it. It needed a scheduler delay between the re-read and the
+  unlink, which is why a loaded CI runner hit it and a quiet box did not.
+
+  Residual, unchanged and now named in `realm_lock.ts`: a lock judged abandoned by AGE whose holder is
+  alive but wedged past 30 seconds can still be replaced between the reclaim's re-read and its unlink, and
+  that holder, waking, writes. Closing that needs inode-based ownership rather than a path guard.
+
+### Changed
+
+- Source layout only, no tool or API change: `ring_agents/` and `converse_in_rooms/` each hold their
+  capability's modules in one directory, and the per-machine SQLite file has the module named for it
+  (#44 step 8).
+
 ## [0.50.0] - 2026-10-24
 
 Steps 4-7 of the state-ownership review (macula-mcp#44): the stateful half of this server — room
