@@ -36,6 +36,7 @@ import * as ringService from "./ring_service.js";
 import * as citizenship from "./citizenship.js";
 import * as realm from "./realm.js";
 import * as deviceMembership from "./device_membership.js";
+import * as rooms from "./rooms.js";
 
 export const HELLO_TOPIC = "agent.hello";
 export const GOODBYE_TOPIC = "agent.goodbye";
@@ -181,6 +182,9 @@ async function reassertPresence(args: StartArgs, s: PresenceState): Promise<Star
   // Re-asserts lobby observing even after an explicit mesh_unobserve_lobby:
   // mesh_hello again means "make sure I'm fully present".
   await lobbyObserver.start({});
+  // Being present means watching the rooms membership already says this identity is in (macula-mcp#44 step 6
+  // review r1): membership outlives the process, the subscription does not.
+  await rooms.resumeWatching(s.nodeId);
   await deviceMembership.ensureAutoJoin({ nodeId: s.nodeId });
   const citizen = await citizenship.start({
     nodeId: s.nodeId,
@@ -207,6 +211,9 @@ async function doStart(args: StartArgs): Promise<StartResult> {
   }
 
   await lobbyObserver.start({});
+  // The first presence of this process: membership survived the restart, the subscriptions did not, so put the
+  // watch back on every room this identity is still in (macula-mcp#44 step 6 review r1).
+  await rooms.resumeWatching(nodeId);
 
   const heartbeatTimer = setInterval(() => void beat(), intervalSeconds * 1000);
   heartbeatTimer.unref(); // a pending heartbeat alone shouldn't keep the process alive

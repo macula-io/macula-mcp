@@ -179,7 +179,8 @@ const LEAVE_ROOM_DESCRIPTION_TERSE =
   "enforced even from the opener) and stops watching. Transcript stays readable via mesh_lobby_transcript.";
 
 const ROOMS_DESCRIPTION_FULL =
-  "Rooms this agent is in (opened or joined this session, still being watched), with the participants " +
+  "Rooms this agent is in -- opened or joined in this process or an earlier one, since membership is kept; " +
+  "the watch is resumed before this read -- with the participants " +
   "seen so far and how many facts arrived, plus public rooms announced on central that you have not " +
   "joined, plus rings you sent that are still awaiting the callee's model. Instant, a local read, never blocks. " +
   "Each room carries `dropped`, and `central_dropped` is central's. " +
@@ -315,6 +316,8 @@ export function registerMeshRooms(server: McpServer): void {
               rang_at: r.recorded_at,
             }))
           : [];
+        // The watch does not outlive the process the way the membership does: resume it before reporting.
+        await rooms.resumeWatching(me);
         const { joined, seen_on_central, central_dropped } = rooms.listRooms(me);
         return jsonContent({
           joined: joined.map((r) => ({

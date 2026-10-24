@@ -380,3 +380,40 @@ describe("one owner for room membership (macula-mcp#44)", () => {
     expect(again.already_joined).toBe(1);
   });
 });
+
+// Review r1 on step 6: persisting the membership without restoring the watch turned a visible loss into a
+// silent one. After a restart the rooms came back with nothing tapping them, so a read reported "no new
+// messages" while everything sent meanwhile went unrecorded.
+describe("the watch comes back with the membership (macula-mcp#44 step 6 review r1)", () => {
+  it("a restart re-taps what it lists, and what arrives next is recorded", async () => {
+    const roomDir = await mkdtemp(join(tmpdir(), "macula-mcp-rewatch-"));
+    // Fresh modules first: a module instance that already opened the in-memory file from an earlier test keeps
+    // it, whatever the env says now.
+    vi.resetModules();
+    process.env.MACULA_MCP_RINGS_DB = join(roomDir, "rings.sqlite3");
+    const first = await import("./rooms.js");
+    const { room_topic } = await first.openRoom({ purpose: "keep watching" });
+
+    // A new process: the membership is on disk, no subscription is.
+    vi.resetModules();
+    const tapped = new Set<string>();
+    mocks.isTapped.mockImplementation((topic: string) => tapped.has(topic));
+    mocks.tapRoom.mockImplementation(async (topic: string) => {
+      tapped.add(topic);
+    });
+    const restarted = await import("./rooms.js");
+    expect(restarted.listRooms(ME).joined).toEqual([expect.objectContaining({ room_topic, watched: 0 })]);
+
+    mocks.publish.mockClear();
+    expect(await restarted.resumeWatching(ME)).toEqual([room_topic]);
+    expect(restarted.listRooms(ME).joined[0]?.watched).toBe(1);
+    // It says so on the room as well, the way a fresh join would: the other side sees this agent back.
+    expect(mocks.publish).toHaveBeenCalledWith(expect.objectContaining({ topic: room_topic, fact: expect.objectContaining({ kind: "participant_joined" }) }));
+
+    // And a fact arriving now is recorded rather than lost.
+    const transcript = await import("./lobby_transcript.js");
+    transcript.recordFact({ topic: room_topic, payload: { message_id: "m1", room_topic, from: THEM, kind: "remark_made", text: "still there?" }, at: new Date().toISOString(), publisher: THEM });
+    expect(restarted.listRooms(ME).joined[0]?.messages_received).toBe(1);
+    await rm(roomDir, { recursive: true, force: true });
+  });
+});

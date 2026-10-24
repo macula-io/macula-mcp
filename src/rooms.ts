@@ -84,6 +84,26 @@ async function ensureTapped(args: { room_topic: string }): Promise<void> {
   await publish({ topic: args.room_topic, fact: { ...rejoined } });
 }
 
+/**
+ * Re-establishes the watch on every room this identity is in but that nothing is tapping: after a restart,
+ * and after mesh_unobserve_lobby stopped the observer (macula-mcp#44 step 6 review r1).
+ *
+ * Membership outlives the process, so the WATCH has to come back with it. Without this, a read after a
+ * restart listed the rooms, reported no new messages and read as quiet, while everything sent meanwhile
+ * went unrecorded -- persisting the list without restoring the tap turned a visible loss (the old "not in
+ * room, join it first") into a silent one. ensureTapped is what re-taps, and it publishes the
+ * re-affirming participant_joined, so the room's other side sees this agent back too.
+ */
+export async function resumeWatching(me: string): Promise<string[]> {
+  const resumed: string[] = [];
+  for (const membership of roomMembership.memberships(me)) {
+    if (lobbyObserver.isTapped(membership.room_topic)) continue;
+    await ensureTapped({ room_topic: membership.room_topic });
+    resumed.push(membership.room_topic);
+  }
+  return resumed;
+}
+
 export interface OpenRoomArgs {
   purpose?: string;
   public?: 0 | 1;
@@ -263,7 +283,11 @@ export interface RoomListing extends RoomMembership {
   /** Distinct senders seen on the room in this process's transcript, minus those whose last lifecycle fact was participant_left. Only ATTESTED facts (station-confirmed publisher, see envelope.ts) count. */
   participants_seen: string[];
   messages_received: number;
-  /** 0 if the observer is no longer tapping this room (crashed, restarted); say()/mesh_read_inbox will re-tap on next use. */
+  /**
+   * 0 when this process is not watching the room -- a membership that outlived the process, or one whose
+   * observer was stopped. mesh_read_inbox, mesh_rooms and presence's own start all resume the watch with
+   * resumeWatching() before they rely on this list, so a 0 here means nothing has looked yet.
+   */
   watched: 0 | 1;
   /** Events lost on the room's feed by any listener sharing the transcript (DROPPED_MEANS). */
   dropped: number;

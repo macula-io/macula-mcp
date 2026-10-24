@@ -252,6 +252,9 @@ export function registerMeshReadInbox(server: McpServer): void {
         // whole `rings` key because `me` was undefined, which a caller
         // treating a missing key as "no pending rings" reads as wrongly safe.
         const me = presence.currentNodeId() ?? (await selfNodeId());
+        // A membership outlives this process (room_membership.ts); the watch does not. Resume it here, before
+        // reporting, so a room is never listed as quiet while nothing is recording it.
+        await rooms.resumeWatching(me);
         const { joined, central_dropped } = rooms.listRooms(me);
         const selected = room_topic ? joined.filter((r) => r.room_topic === room_topic) : joined;
         if (room_topic && selected.length === 0) {

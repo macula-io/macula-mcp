@@ -83,13 +83,14 @@ const toolMocks = vi.hoisted(() => ({
   currentNodeId: vi.fn(),
   selfNodeId: vi.fn(),
   listRooms: vi.fn(),
+  resumeWatching: vi.fn(),
   recentFacts: vi.fn(),
   pendingIncoming: vi.fn(),
   listRings: vi.fn(),
 }));
 vi.mock("./presence.js", () => ({ ensurePresence: toolMocks.ensurePresence, currentNodeId: toolMocks.currentNodeId }));
 vi.mock("./macula_ts_client.js", () => ({ selfNodeId: toolMocks.selfNodeId }));
-vi.mock("./rooms.js", () => ({ listRooms: toolMocks.listRooms }));
+vi.mock("./rooms.js", () => ({ listRooms: toolMocks.listRooms, resumeWatching: toolMocks.resumeWatching }));
 vi.mock("./lobby_transcript.js", () => ({ recentFacts: toolMocks.recentFacts }));
 vi.mock("./rings.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./rings.js")>();
@@ -138,6 +139,19 @@ describe("mesh_read_inbox tool: the `me` cold-start race", () => {
     // Proves the fallback node id actually reached the local reads, not just that the key exists.
     expect(toolMocks.pendingIncoming).toHaveBeenCalledWith(ME);
     expect(toolMocks.listRings).toHaveBeenCalledWith(expect.objectContaining({ self: ME }));
+  });
+
+  it("resumes the watch on this identity's rooms before it reports on them (macula-mcp#44 step 6 r1)", async () => {
+    const { registerMeshReadInbox } = await import("./mesh_read_inbox.js");
+    const { server, getHandler } = fakeServer();
+    registerMeshReadInbox(server);
+
+    await getHandler()({});
+
+    // A membership outlives the process; the watch does not. Reporting on rooms nothing is recording would
+    // read as "no new messages" while everything sent meanwhile was being dropped.
+    expect(toolMocks.resumeWatching).toHaveBeenCalledWith(ME);
+    expect(toolMocks.resumeWatching.mock.invocationCallOrder[0]).toBeLessThan(toolMocks.listRooms.mock.invocationCallOrder[0]!);
   });
 
   it("still includes `rings` for a specific room_topic read too", async () => {
