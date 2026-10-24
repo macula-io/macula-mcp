@@ -45,17 +45,10 @@ one place and in order. No tool loses a parameter or a field; the additions are 
   they saw before they started. A lock left by a process that is gone is reclaimed at once; one whose
   holder cannot be read, or that has outlived the store by far, is reclaimed by age and by exactly one
   reclaimant, so a lock left behind after a reboot can no longer wedge every later membership write.
-  Beginning and polling a join session are serialized in the same way, and an `abandon` is no longer
-  lost if it lands while a session is being opened.
-
-### Fixed
-
-- A join confirmed at the realm while another process held the credential lock no longer loses the
-  membership: the pending session is kept and the next poll stores it. Before, the session was cleared
-  before the write, and the failed write was an unhandled rejection, which exits the server.
-- Waiting for the credential lock no longer blocks the process: the wait used to sleep synchronously, so
-  one contended membership write froze every other tool call for up to five seconds.
-- A room whose re-tap fails no longer fails presence's start or errors the whole `mesh_read_inbox` read.
+  Waiting for that lock does not block the process, so a contended membership write no longer holds up
+  other tool calls; a join confirmed at the realm while another process holds the lock keeps its pending
+  session and is stored on the next poll. Beginning and polling a join session are serialized in the
+  same way, and an `abandon` is no longer lost if it lands while a session is being opened.
 
 ### Security
 
