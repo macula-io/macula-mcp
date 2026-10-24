@@ -19,6 +19,9 @@ vi.mock("./lobby_observer.js", () => ({
   LOBBY_TOPIC: "agents.lobby",
   start: vi.fn().mockResolvedValue({}),
   stop: vi.fn(),
+  isTapped: vi.fn().mockReturnValue(true),
+  tapRoom: vi.fn(),
+  untapRoom: vi.fn(),
 }));
 vi.mock("./ring_service.js", () => ({
   start: vi.fn().mockResolvedValue({ serving: 0 }),
@@ -35,6 +38,8 @@ vi.mock("./device_membership.js", () => ({
 }));
 
 import { publish, selfNodeId, subscribe } from "./macula_ts_client.js";
+import * as ringService from "./ring_service.js";
+import { closeRings } from "./rings.js";
 import * as presence from "./presence.js";
 
 const NODE_ID = "a".repeat(64);
@@ -77,8 +82,10 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.resetAllMocks();
   closeRoster();
+  closeRings();
   delete process.env.MACULA_MCP_ROSTER_DB;
   delete process.env.MACULA_MCP_NO_CITIZENSHIP;
+  delete process.env.MACULA_MCP_RINGS_DB;
 });
 
 describe("start()", () => {
@@ -137,6 +144,23 @@ describe("start()", () => {
     await expect(presence.start({})).rejects.toThrow(/station unreachable/);
     expect(subs[0]!.stop).toHaveBeenCalledTimes(1);
     expect(presence.isActive()).toBe(false);
+  });
+
+  // Review r2 on step 6: restoring the watch used to be unguarded, so ONE stale or refused room threw out
+  // of the middle of doStart -- after hello and goodbye were subscribed, before presence existed -- and the
+  // agent was absent and unringable over a room it was not even talking in.
+  it("starts even when a room it must re-watch refuses the tap", async () => {
+    process.env.MACULA_MCP_RINGS_DB = ":memory:";
+    const roomMembership = await import("./room_membership.js");
+    roomMembership.record(NODE_ID, { room_topic: `agents.room.${"e".repeat(32)}`, opened_by: NODE_ID, opened_here: 1, public: 0, joined_at: new Date().toISOString() });
+    const lobbyObserver = await import("./lobby_observer.js");
+    vi.mocked(lobbyObserver.isTapped).mockReturnValue(false);
+    vi.mocked(lobbyObserver.start).mockResolvedValue({} as never);
+    vi.mocked(lobbyObserver.tapRoom).mockRejectedValue(new Error("station refused the subscription"));
+
+    await expect(presence.start({})).resolves.toMatchObject({ node_id: NODE_ID, already_active: false });
+    expect(presence.isActive()).toBe(true);
+    expect(ringService.start).toHaveBeenCalled();
   });
 });
 

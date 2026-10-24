@@ -416,4 +416,56 @@ describe("the watch comes back with the membership (macula-mcp#44 step 6 review 
     expect(restarted.listRooms(ME).joined[0]?.messages_received).toBe(1);
     await rm(roomDir, { recursive: true, force: true });
   });
+
+  it("a room that refuses its re-tap stays unwatched while the others come back, and nothing throws", async () => {
+    const { openRoom, listRooms, resumeWatching } = await import("./rooms.js");
+    const { room_topic: good } = await openRoom({ purpose: "taps fine" });
+    const { room_topic: bad } = await openRoom({ purpose: "refuses the subscribe" });
+
+    // A restart: nothing is tapping either room, and one of them will not let us back in.
+    const tapped = new Set<string>();
+    mocks.isTapped.mockImplementation((topic: string) => tapped.has(topic));
+    mocks.tapRoom.mockImplementation(async (topic: string) => {
+      if (topic === bad) throw new Error("station refused the subscription");
+      tapped.add(topic);
+    });
+
+    expect((await resumeWatching(ME)).sort()).toEqual([good]);
+    const watched = new Map(listRooms(ME).joined.map((r) => [r.room_topic, r.watched]));
+    expect(watched.get(good)).toBe(1);
+    expect(watched.get(bad)).toBe(0);
+  });
+
+  it("cannot re-tap a room whose leave arrives during the resume: the leave wins", async () => {
+    const { openRoom, listRooms, resumeWatching, leaveRoom } = await import("./rooms.js");
+    const { room_topic } = await openRoom({ purpose: "left mid-resume" });
+
+    // A restart, and a re-tap that is slow enough for a leave to arrive while it is in flight.
+    const tapped = new Set<string>();
+    let releaseTap!: () => void;
+    const inFlight = new Promise<void>((r) => {
+      releaseTap = r;
+    });
+    mocks.isTapped.mockImplementation((topic: string) => tapped.has(topic));
+    mocks.tapRoom.mockImplementation(async (topic: string) => {
+      await inFlight;
+      tapped.add(topic);
+    });
+    mocks.untapRoom.mockImplementation((topic: string) => {
+      tapped.delete(topic);
+    });
+
+    mocks.publish.mockClear();
+    const resuming = resumeWatching(ME);
+    const leaving = leaveRoom({ room_topic });
+    releaseTap();
+    await expect(resuming).resolves.toEqual([room_topic]);
+    await leaving;
+
+    // Left means left: no membership, no tap left behind, and no participant_joined after the leave.
+    expect(listRooms(ME).joined).toEqual([]);
+    expect(tapped.has(room_topic)).toBe(false);
+    const said = mocks.publish.mock.calls.map(([arg]) => (arg.fact as { kind: string }).kind);
+    expect(said).toEqual(["participant_joined", "participant_left"]);
+  });
 });

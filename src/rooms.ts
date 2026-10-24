@@ -95,13 +95,36 @@ async function ensureTapped(args: { room_topic: string }): Promise<void> {
  * re-affirming participant_joined, so the room's other side sees this agent back too.
  */
 export async function resumeWatching(me: string): Promise<string[]> {
+  // Inside the mailbox (review r2): a resume that read the memberships first could re-tap a room whose
+  // leave was already in flight, publishing participant_joined for a room this agent had just left and
+  // leaving a tap with no membership. One turn per resume, like every other membership transition.
+  return roomMembership.exclusive(() => resumeWatchingNow(me));
+}
+
+async function resumeWatchingNow(me: string): Promise<string[]> {
   const resumed: string[] = [];
   for (const membership of roomMembership.memberships(me)) {
     if (lobbyObserver.isTapped(membership.room_topic)) continue;
-    await ensureTapped({ room_topic: membership.room_topic });
-    resumed.push(membership.room_topic);
+    if (await retap(membership.room_topic)) resumed.push(membership.room_topic);
   }
   return resumed;
+}
+
+/**
+ * One room's re-tap, isolated (review r2): a room that refuses the subscribe must not take the caller down
+ * with it. A throw here used to fail presence's own start -- after hello and goodbye were subscribed and
+ * before presence existed, so the agent went absent and unringable -- and turned mesh_read_inbox, a local
+ * read that never blocks, into an error because of one stale room. It stays watched: 0 and the next resume
+ * or say tries it again.
+ */
+async function retap(roomTopic: string): Promise<boolean> {
+  try {
+    await ensureTapped({ room_topic: roomTopic });
+    return true;
+  } catch (e) {
+    console.error(`rooms: could not restore the watch on ${roomTopic}; it stays unwatched: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
 }
 
 export interface OpenRoomArgs {
