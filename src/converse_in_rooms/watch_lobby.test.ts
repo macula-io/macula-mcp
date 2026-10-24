@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@macula-io/ts";
 import { closeTranscript, lostOn, recentFacts } from "./lobby_transcript.js";
-import { buildEnvelope, newRoomTopic } from "./../envelope.js";
+import { buildEnvelope, newRoomTopic } from "../envelope.js";
 
 // Boundary mock: the client layer the observer subscribes through.
-vi.mock("./../macula_ts_client.js", () => ({
+vi.mock("../macula_ts_client.js", () => ({
   selfNodeId: vi.fn(),
   subscribe: vi.fn(),
 }));
 
-import { selfNodeId, subscribe } from "./../macula_ts_client.js";
+import { selfNodeId, subscribe } from "../macula_ts_client.js";
 import * as lobbyObserver from "./watch_lobby.js";
 
 const NODE_ID = "a".repeat(64);
@@ -93,7 +93,7 @@ describe("dropped()", () => {
 
   it("records a loss whoever notices it, a reader or the next delivery", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const { droppedEvents } = await import("./../dropped_events.js");
+    const { droppedEvents } = await import("../dropped_events.js");
     await lobbyObserver.start({});
     subscribedTo("agents.lobby").lost = 4;
     // What macula_ts_client.subscribe does after each delivery.

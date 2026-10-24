@@ -18,11 +18,11 @@
 // starts.
 
 import type { Event, Subscription } from "@macula-io/ts";
-import { primaryStation } from "./../mesh_config.js";
-import { droppedEvents, onLoss } from "./../dropped_events.js";
-import { selfNodeId, subscribe } from "./../macula_ts_client.js";
+import { primaryStation } from "../mesh_config.js";
+import { droppedEvents, onLoss } from "../dropped_events.js";
+import { selfNodeId, subscribe } from "../macula_ts_client.js";
 import { lostOn, recordFact, recordLoss } from "./lobby_transcript.js";
-import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "./../envelope.js";
+import { CENTRAL_TOPIC, isRoomTopic, parseEnvelope } from "../envelope.js";
 
 export const LOBBY_TOPIC = CENTRAL_TOPIC;
 

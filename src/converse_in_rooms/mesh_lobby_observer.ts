@@ -36,12 +36,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./../dropped_events.js";
-import { errorContent, jsonContent } from "./../reply.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "../dropped_events.js";
+import { errorContent, jsonContent } from "../reply.js";
 import * as lobbyObserver from "./watch_lobby.js";
 import { distinctTopics, recentFacts } from "./lobby_transcript.js";
-import { petname } from "./../petname.js";
-import { toolDescription } from "./../tool_description.js";
+import { petname } from "../petname.js";
+import { toolDescription } from "../tool_description.js";
 
 const DEFAULT_TRANSCRIPT_LIMIT = 50;
 const MAX_TRANSCRIPT_LIMIT = 500;

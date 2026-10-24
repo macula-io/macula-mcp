@@ -20,12 +20,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "./../dropped_events.js";
-import { describeMeshError, errorContent, jsonContent } from "./../reply.js";
-import { ensurePresence } from "./../presence.js";
+import { DROPPED_DESCRIPTION_TERSE, DROPPED_MEANS } from "../dropped_events.js";
+import { describeMeshError, errorContent, jsonContent } from "../reply.js";
+import { ensurePresence } from "../presence.js";
 import * as rooms from "./rooms.js";
-import { CENTRAL_TOPIC } from "./../envelope.js";
-import { toolDescription } from "./../tool_description.js";
+import { CENTRAL_TOPIC } from "../envelope.js";
+import { toolDescription } from "../tool_description.js";
 
 const MAX_WAIT_SECONDS = 3600;
 

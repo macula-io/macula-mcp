@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeTranscript, recordFact } from "./lobby_transcript.js";
-import { closeMachineDb } from "./../machine_transcript.js";
+import { closeMachineDb } from "../machine_transcript.js";
 
 const ME = "a".repeat(64);
 const THEM = "b".repeat(64);
@@ -20,8 +20,8 @@ const mocks = vi.hoisted(() => ({
 }));
 // Boundary mock, same pattern as presence.test.ts's own: replace the module
 // rooms.ts talks to the mesh THROUGH (macula_ts_client.js), not mesh_config.js
-vi.mock("./../macula_ts_client.js", () => ({ publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
-vi.mock("./../presence.js", () => ({ currentNodeId: mocks.currentNodeId }));
+vi.mock("../macula_ts_client.js", () => ({ publish: mocks.publish, selfNodeId: mocks.selfNodeId }));
+vi.mock("../presence.js", () => ({ currentNodeId: mocks.currentNodeId }));
 vi.mock("./watch_lobby.js", () => ({
   start: mocks.observerStart,
   tapRoom: mocks.tapRoom,

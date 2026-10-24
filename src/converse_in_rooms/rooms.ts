@@ -41,8 +41,8 @@
 // (isAttestedFact). There is no published seq; each envelope's own
 // message_id/sent_at is the ordering signal.
 
-import { publish, selfNodeId as ownNodeId } from "./../macula_ts_client.js";
-import * as presence from "./../presence.js";
+import { publish, selfNodeId as ownNodeId } from "../macula_ts_client.js";
+import * as presence from "../presence.js";
 import * as lobbyObserver from "./watch_lobby.js";
 import * as roomMembership from "./room_membership.js";
 import type { RoomMembership } from "./room_membership.js";
@@ -57,7 +57,7 @@ import {
   type Envelope,
   type Kind,
   type ObservedEnvelope,
-} from "./../envelope.js";
+} from "../envelope.js";
 
 /** How often the reply wait re-reads the transcript. Cheap: one indexed SQLite query per tick. */
 export const REPLY_POLL_MS = 250;
