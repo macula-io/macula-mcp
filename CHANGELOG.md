@@ -9,17 +9,22 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [0.50.1] - 2026-10-24
 
-Fixes one defect in 0.50.0's realm credential lock. Nothing else a caller can see changes.
+Fixes one defect in 0.50.0's realm credential lock. No tool, argument or behaviour changes; two tool texts
+name the renamed source file, noted under Changed.
 
 ### Fixed
 
 - **The realm credential lock could admit two writers.** `abandonedLock` answered "abandoned" for a lock
   file that was not there at all, so a process whose create had just failed on a lock could enter the
   reclaim for it after its holder released, re-read the same absence, and unlink the lock a third process
-  had created in between — and a fourth took it. Two processes then wrote the realm credential file at
-  once, which is exactly the window the lock exists to close. A lock that is not there is now not
-  abandoned; the next create settles who holds it. It needed a scheduler delay between the re-read and the
-  unlink, which is why a loaded CI runner hit it and a quiet box did not.
+  had created in between — and a fourth took it. That is the window the lock exists to close. A lock that
+  is not there is now not abandoned; the next create settles who holds it.
+
+  The credential file is written through a temp file and a rename, so it is never torn or mixed. What two
+  holders cause is a lost update: both re-read the same stored credential and decide from it, the later
+  rename wins, and the other store's decision is silently dropped — an older credential can replace a newer
+  one, or a "keep" policy can be bypassed. Both can also read "no membership" and append `join_confirmed`
+  twice to the node event log. It depends on timing, so a busy machine is likelier to hit it.
 
   Residual, unchanged and now named in `realm_lock.ts`: a lock judged abandoned by AGE whose holder is
   alive but wedged past 30 seconds can still be replaced between the reclaim's re-read and its unlink, and
@@ -27,9 +32,11 @@ Fixes one defect in 0.50.0's realm credential lock. Nothing else a caller can se
 
 ### Changed
 
-- Source layout only, no tool or API change: `ring_agents/` and `converse_in_rooms/` each hold their
-  capability's modules in one directory, and the per-machine SQLite file has the module named for it
-  (#44 step 8).
+- Source layout: `ring_agents/` and `converse_in_rooms/` each hold their capability's modules in one
+  directory, and the per-machine SQLite file has the module named for it (#44 step 8). No tool, argument or
+  behaviour change — but two tool texts name the file that was renamed on the way: `mesh_trust_agent`'s
+  closed-policy reply and one tool description say `serve_rings.ts` where 0.50.0 said
+  `ring_service.ts`.
 
 ## [0.50.0] - 2026-10-24
 
