@@ -9,14 +9,28 @@
 // How that race is judged changed after one unexplained CI failure (8 entries, 2 concurrent): the holders
 // are caught by a witness file that a holder O_EXCL-creates, not by ordering the children's Date.now()
 // readings, because a clock step between two processes can read one of them ahead of another. See `race`.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, utimes } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { acquireLock, abandonedLock, releaseLock } from "./realm_lock.js";
+import { acquireLock, abandonedLock, reclaimAbandonedLock, releaseLock } from "./realm_lock.js";
+
+// Every path the module under test unlinks, so a test can say which file a reclaim removed. The real
+// unlink still runs; this only records. Child processes in the 8-process tests import the real module.
+const unlinked = vi.hoisted(() => [] as string[]);
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    unlinkSync: (path: string) => {
+      unlinked.push(String(path));
+      return actual.unlinkSync(path);
+    },
+  };
+});
 
 let dir = "";
 const lock = () => join(dir, "cred.lock");
@@ -62,6 +76,21 @@ describe("abandonedLock", () => {
     expect(abandonedLock(lock())).toBe(false);
     await ageBy(10 * 60_000);
     expect(abandonedLock(lock())).toBe(true);
+  });
+});
+
+describe("a lock that is not there", () => {
+  it("is not abandoned, so no reclaim can unlink a lock another waiter has just taken (review r1 of this file)", () => {
+    // The interleaving this pins, which shipped in 0.50.0. A waiter's tryCreate fails on a lock, that
+    // holder releases, and by the time the waiter asks, the file is gone. If "gone" reads as abandoned the
+    // waiter enters the reclaim, whose re-read also sees nothing, and its unlink deletes the lock a third
+    // waiter created in between -- two holders at once, with no clock and no tie-break involved. It needs a
+    // scheduler delay between that re-read and the unlink, which is why a loaded runner hit it and 246
+    // quiet runs did not. Nothing is there to reclaim: the next tryCreate settles who holds it.
+    expect(abandonedLock(lock())).toBe(false);
+    unlinked.length = 0;
+    reclaimAbandonedLock(lock());
+    expect(unlinked).not.toContain(lock());
   });
 });
 

@@ -80,6 +80,19 @@ function processAlive(pid: number | undefined): boolean {
  * Age is safe here because a store is synchronous and takes milliseconds: a lock older than LOCK_STALE_MS
  * belongs to a process that is wedged or to a pid that was reused, and a holder that overran is harmless
  * anyway -- drop() never unlinks a lock that is no longer its own.
+ *
+ * A lock that is GONE is NOT abandoned (review r1 of the lock test). Saying otherwise reopens the r1
+ * window through ENOENT: a waiter's tryCreate fails on a lock, that holder releases, and by the time the
+ * waiter asks, the file is gone -- "abandoned" sends it into the reclaim, whose re-read also sees nothing,
+ * so its unlink deletes the lock a third waiter created in between, and a fourth takes it. Two holders,
+ * with no clock and no tie-break involved. It needs a scheduler delay, which is why a loaded CI runner ran
+ * into it and 246 quiet-box runs did not. A lock that is not there needs no unlink: the next tryCreate
+ * settles who holds it.
+ *
+ * One window is stated rather than closed: a lock judged abandoned by AGE whose holder is alive and wedged
+ * (past 30 s) can be replaced between the re-read under the marker and the unlink, and the old holder,
+ * waking, still writes. Closing that needs ownership that cannot be re-pointed -- an fd whose inode is
+ * compared rather than a path -- which is a redesign of this file, not a guard.
  */
 export function abandonedLock(path: string): boolean {
   const holder = lockHolder(path);
@@ -87,7 +100,8 @@ export function abandonedLock(path: string): boolean {
   try {
     return Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS;
   } catch {
-    return true;
+    // Gone, or unreadable: either way there is nothing here that is ours to reclaim.
+    return false;
   }
 }
 
