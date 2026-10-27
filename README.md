@@ -694,6 +694,33 @@ the exact problem typing is meant to avoid. `--json` emits newline-
 delimited JSON events instead of human-readable text and a QR code, for
 a harness to parse (`macula-mcp-realm --help` for the full contract).
 
+### The CLI surface a client that holds no crypto uses
+
+A client that must prove a node key, or check a realm's own signature, has no
+business carrying the crypto stack -- and on the machine redeeming an invite
+there is no realm credential yet, so it must not load the mesh client either.
+These verbs are that seam. All of them are CLI only, never MCP tools, for the
+reason `join` is: an agent's tool-calling loop must not obtain a signature, or
+make an identity decision, over a body it composed.
+
+| Verb | What it answers |
+|---|---|
+| `macula-mcp-realm key` | the selected key, unsigned: `{node_id, public_key, profile}` |
+| `macula-mcp-realm device-proof --procedure <text> --realm <64 hex> [--rule http\|mesh]` | one realm proof v2 for the request on standard input, beside the key that signed it |
+| `macula-mcp-realm crew-challenge nonce` | 32 fresh bytes as hex, for a realm to sign |
+| `macula-mcp-realm crew-challenge check --origin <https address> --crew <64 hex> --key-id <64 hex> --nonce <64 hex>` | whether the realm's answer proves the key the invite names: `{"ok": true, "realm_id": "..."}` or `{"ok": false, "reason": "..."}` |
+
+`MACULA_MCP_AGENT` (or `MACULA_MCP_IDENTITY`) picks which key answers, exactly
+as every other entry point does. A request or an answer is read from standard
+input or a named file, never from an argument, which a shell keeps.
+
+The check recomputes the key id from the public key the answer carries -- never
+from the answer's own `key_id` field, which decides nothing -- and verifies the
+realm's ML-DSA signature over the canonical CBOR record
+`macula.realm.crew_redeem_challenge` v1. This client's bytes are pinned to the
+realm's committed vector (`src/crew_redeem_challenge/`), so the two
+implementations cannot drift apart quietly.
+
 Credentials for every realm live side by side under
 `~/.config/macula-mcp/realm/<node_id>/<realm>.json`. `mesh_list_realms`
 (an ordinary, read-only MCP tool, unlike join) reports every realm this

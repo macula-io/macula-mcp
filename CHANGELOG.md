@@ -7,6 +7,19 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Added
+
+- **`macula-mcp-realm crew-challenge`: a realm's signed answer to a crew-redeem challenge is checked
+  here.** `nonce` prints 32 fresh bytes, and `check` verifies the realm's ML-DSA signature over the
+  canonical CBOR record `macula.realm.crew_redeem_challenge` v1 — the client's own nonce, the origin
+  that was called, the realm and the crew — and that the key in the answer hashes to the key id the
+  invite carries, recomputed here and never read from the answer's own `key_id` field. It answers
+  `{"ok": true, "realm_id": …}` or `{"ok": false, "reason": …}`, one of `malformed_answer`,
+  `unknown_profile`, `key_id_mismatch` or `bad_signature`. CLI only, never an MCP tool, for the reason
+  `join` and `device-proof` are. A client with no crypto of its own (`crew join`, macula-sponsors#68)
+  uses it to know the realm at an address is the realm its invite names, before the invite's secret
+  leaves the machine (macula-realm#107 R9). The bytes are pinned to the realm's committed vector.
+
 ## [0.50.1] - 2026-10-24
 
 Fixes one defect in 0.50.0's realm credential lock. No tool, argument or behaviour changes; two tool texts

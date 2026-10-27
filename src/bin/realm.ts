@@ -34,6 +34,7 @@
 // alongside it.
 
 import { isRunDirectly } from "./run_directly.js";
+import { CREW_CHALLENGE, crewChallengeMain } from "./crew_challenge.js";
 import { DEVICE_PROOF, KEY, deviceProofMain, keyMain } from "./device_proof.js";
 import { carriedPublicKey, selfNodeId } from "../connect_to_mesh.js";
 import { parseRealmName, realmBaseURL } from "../realm_name.js";
@@ -117,6 +118,23 @@ Prints the key this configuration uses, and nothing signed: {"node_id",
 "public_key", "profile"}. For a caller that must name a public key
 inside a request it then has signed.
 
+Usage: macula-mcp-realm crew-challenge nonce
+       macula-mcp-realm crew-challenge check --origin <https address>
+                                             --crew <64 hex> --key-id <64 hex>
+                                             --nonce <64 hex> [--answer-file <path>]
+                                             < answer.json
+
+The realm's signed answer to a crew-redeem challenge (macula-realm#107
+R9): nonce prints 32 fresh bytes as hex, and check verifies the
+realm's signature over that nonce, the address that was called, and the
+crew -- and that the key in the answer is the one the invite names by
+its key id, recomputed here and never read from the answer. Prints one
+JSON line, {"ok": true, "realm_id": "<64 hex>"} or {"ok": false,
+"reason": "<name>"}: malformed_answer, unknown_profile,
+key_id_mismatch or bad_signature. CLI only, for the same reason: an
+agent's tool loop must not make an identity decision over an answer it
+composed.
+
 MACULA_MCP_AGENT=<name> (or MACULA_MCP_IDENTITY=<key file>) picks WHICH
 key signs, so a launcher can sign for each of several agents without
 this ever being an MCP tool: a client that must prove a node key's
@@ -132,6 +150,7 @@ being the one the realm will rebuild.
 async function dispatched(argv: string[]): Promise<boolean> {
   if (argv[0] === DEVICE_PROOF) return await runVerb(deviceProofMain, argv);
   if (argv[0] === KEY) return await runVerb(() => keyMain(), argv);
+  if (argv[0] === CREW_CHALLENGE) return await runVerb(crewChallengeMain, argv);
   return false;
 }
 
