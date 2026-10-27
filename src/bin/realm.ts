@@ -34,6 +34,7 @@
 // alongside it.
 
 import { isRunDirectly } from "./run_directly.js";
+import { DEVICE_PROOF, KEY, deviceProofMain, keyMain } from "./device_proof.js";
 import { carriedPublicKey, selfNodeId } from "../connect_to_mesh.js";
 import { parseRealmName, realmBaseURL } from "../realm_name.js";
 import {
@@ -99,7 +100,44 @@ This is deliberately a separate binary, not an MCP tool: an agent's
 own conversation can be steered by mesh peers, and a realm to bind
 this identity to must only ever come from a human explicitly running
 this command, never from inside a model's own tool-calling loop.
+
+Usage: macula-mcp-realm device-proof --procedure <text> --realm <64 hex>
+                                    [--rule http|mesh] [--request-file <path>]
+                                    < request.json
+
+Signs ONE realm request with this configuration's key (--procedure and
+--realm are signed into the proof; --rule names how the request becomes
+bytes: "http" for a JSON body, the default, or "mesh" for a call
+payload). Prints one JSON line: the signing key's node_id and
+public_key, and the proof (v, timestamp, nonce, signature).
+
+Usage: macula-mcp-realm key
+
+Prints the key this configuration uses, and nothing signed: {"node_id",
+"public_key", "profile"}. For a caller that must name a public key
+inside a request it then has signed.
+
+MACULA_MCP_AGENT=<name> (or MACULA_MCP_IDENTITY=<key file>) picks WHICH
+key signs, so a launcher can sign for each of several agents without
+this ever being an MCP tool: a client that must prove a node key's
+possession of a request asks here instead of carrying the crypto stack
+itself (macula-sponsors#68). The request is read only from the file
+named or standard input -- never from an argument, which a shell keeps.
+It signs what it is given: the caller is responsible for the request
+being the one the realm will rebuild.
 `);
+}
+
+/** A verb that is its own whole command, when the first word says it. */
+async function dispatched(argv: string[]): Promise<boolean> {
+  if (argv[0] === DEVICE_PROOF) return await runVerb(deviceProofMain, argv);
+  if (argv[0] === KEY) return await runVerb(() => keyMain(), argv);
+  return false;
+}
+
+async function runVerb(verb: (argv: string[]) => Promise<void>, argv: string[]): Promise<true> {
+  await verb(argv.slice(1));
+  return true;
 }
 
 interface SessionEvent {
@@ -289,6 +327,7 @@ async function joinRealm(run: JoinRun): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (await dispatched(process.argv.slice(2))) return;
   const run = joinRun(process.argv.slice(2));
   if (!run) return;
   await joinRealm(run);
