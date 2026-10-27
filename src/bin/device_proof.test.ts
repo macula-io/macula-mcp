@@ -7,18 +7,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { loadOrCreate } = vi.hoisted(() => ({ loadOrCreate: vi.fn() }));
+const { load, loadOrCreate } = vi.hoisted(() => ({ load: vi.fn(), loadOrCreate: vi.fn() }));
 
 vi.mock("@macula-io/ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@macula-io/ts")>();
-  return { ...actual, NodeKey: { loadOrCreate } };
+  return { ...actual, NodeKey: { load, loadOrCreate } };
 });
 
 import { resetForTests } from "../connect_to_mesh.js";
 import { deviceProofMain, keyMain, keyMaterial, parseDeviceProofArgs, requestFromText, signRequest } from "./device_proof.js";
 
 const REALM = "a".repeat(64);
-// A real key is never touched: loadOrCreate is the only way this verb reaches
+// A real key is never touched: NodeKey.load is the only way this verb reaches
 // one, and it answers with a key that records what it was asked to sign.
 const PROOF = { v: 2 as const, timestamp: 1_788_870_000_000, nonce: "00".repeat(16), signature: "ab" };
 
@@ -40,7 +40,7 @@ const SIGNED = { node_id: NODE_ID, public_key: "AQID", proof: PROOF };
 
 const fakeKey = (proof: unknown = PROOF) => {
   const deviceRequestProof = vi.fn(async () => proof);
-  loadOrCreate.mockResolvedValue({ nodeIdHex: () => NODE_ID, publicKey: () => PUBLIC_KEY, deviceRequestProof });
+  load.mockResolvedValue({ nodeIdHex: () => NODE_ID, publicKey: () => PUBLIC_KEY, deviceRequestProof });
   return deviceRequestProof;
 };
 
@@ -113,6 +113,7 @@ describe("signRequest", () => {
   // first test's key would answer every later one.
   beforeEach(async () => {
     await resetForTests();
+    load.mockReset();
     loadOrCreate.mockReset();
   });
 
@@ -127,6 +128,7 @@ describe("signRequest", () => {
 describe("the key verb", () => {
   beforeEach(async () => {
     await resetForTests();
+    load.mockReset();
     loadOrCreate.mockReset();
   });
 
@@ -160,6 +162,7 @@ describe("deviceProofMain", () => {
     await resetForTests();
     stdout.length = 0;
     stderr.length = 0;
+    load.mockReset();
     loadOrCreate.mockReset();
     await resetForTests();
     outSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
@@ -204,11 +207,34 @@ describe("deviceProofMain", () => {
   });
 
   it("reports a key that cannot sign as one line, not as a stack trace", async () => {
-    loadOrCreate.mockRejectedValue(new Error("the key is unreadable"));
+    load.mockRejectedValue(new Error("the key is unreadable"));
     const path = requestFile("sign.json", '{"crew_id":"c"}');
     await deviceProofMain(["--procedure", "crew_redeem", "--realm", REALM, "--request-file", path]);
     expect(process.exitCode).toBe(1);
     expect(stderr.join("\n")).toMatch(/the key is unreadable/);
     expect(stdout).toEqual([]);
+  });
+
+  // The bug this verb exists to avoid (macula-sponsors#68 r2, Uranus B2): a
+  // command that merely signs must never mint a key, or a mistyped agent name
+  // creates a fresh identity and a node no session will ever run on.
+  it("loads the key and refuses when there is none: it never creates one", async () => {
+    load.mockRejectedValue(new Error("ENOENT: no such file or directory"));
+    const path = requestFile("missing.json", '{"crew_id":"c"}');
+    await deviceProofMain(["--procedure", "crew_redeem", "--realm", REALM, "--request-file", path]);
+    expect(process.exitCode).toBe(1);
+    expect(stderr.join("\n")).toMatch(/never creates one/);
+    expect(stderr.join("\n")).toMatch(/start that member once/);
+    expect(load).toHaveBeenCalled();
+    expect(loadOrCreate).not.toHaveBeenCalled();
+    expect(stdout).toEqual([]);
+  });
+
+  it("the key verb loads too: a name this machine holds no key for is refused, not invented", async () => {
+    load.mockRejectedValue(new Error("ENOENT: no such file or directory"));
+    await keyMain();
+    expect(process.exitCode).toBe(1);
+    expect(stderr.join("\n")).toMatch(/never creates one/);
+    expect(loadOrCreate).not.toHaveBeenCalled();
   });
 });

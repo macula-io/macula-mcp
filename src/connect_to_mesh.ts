@@ -55,6 +55,26 @@ export function nodeKey(): Promise<NodeKey> {
   return keyPromise;
 }
 
+/**
+ * The identity key this invocation names, LOADED and never created.
+ *
+ * A command that only signs something (`macula-mcp-realm key`, `device-proof`)
+ * must not mint a key: a mistyped agent name would then create a fresh
+ * identity and let a caller enrol a node no session will ever run on, and the
+ * "that is not a key this machine holds" refusal would never be reached.
+ * Nothing here is cached, since these run once and exit.
+ */
+export function existingNodeKey(): Promise<NodeKey> {
+  return NodeKey.load(nodeKeyPath(), KEY_PROFILE).catch((e) => {
+    const named = process.env.MACULA_MCP_AGENT ?? process.env.MACULA_MCP_IDENTITY ?? "(no agent named)";
+    throw new MeshError(
+      `there is no identity key at ${nodeKeyPath()} for ${named}, and this command never creates one: ` +
+        "start that member once so its key exists (bin/crew, or crew roster), then run this again " +
+        `(${messageOf(e)})`
+    );
+  });
+}
+
 /** This server's node_id as lowercase hex. */
 export async function selfNodeId(): Promise<string> {
   return (await nodeKey()).nodeIdHex();

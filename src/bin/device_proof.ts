@@ -31,7 +31,7 @@
 
 import { readFileSync } from "node:fs";
 import type { DeviceRequestRule, JsonValue } from "@macula-io/ts";
-import { KEY_PROFILE, nodeKey } from "../connect_to_mesh.js";
+import { KEY_PROFILE, existingNodeKey } from "../connect_to_mesh.js";
 
 /** The verb, as it is typed after the binary's name. */
 export const DEVICE_PROOF = "device-proof";
@@ -159,7 +159,7 @@ async function requestText(args: DeviceProofArgs): Promise<string> {
  * as the server would load it.
  */
 export async function signRequest(args: DeviceProofArgs, request: { [field: string]: JsonValue }) {
-  const key = await nodeKey();
+  const key = await existingNodeKey();
   return {
     node_id: await key.nodeIdHex(),
     public_key: Buffer.from(key.publicKey()).toString("base64"),
@@ -178,7 +178,7 @@ export async function signRequest(args: DeviceProofArgs, request: { [field: stri
  * matches it coming from the same place.
  */
 export async function keyMaterial() {
-  const key = await nodeKey();
+  const key = await existingNodeKey();
   return {
     node_id: await key.nodeIdHex(),
     public_key: Buffer.from(key.publicKey()).toString("base64"),
