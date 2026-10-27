@@ -7,8 +7,27 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-28
+
+The realm CLI a client that carries no crypto of its own uses: three verbs that sign and check where the
+key already is, so `crew join` (macula-sponsors#68) can prove two node keys and check a realm's own
+signature without a realm credential, without the mesh SDK, and without a key of its own. No MCP tool
+gains, loses or changes a parameter. Also in this release: the rest of #44 step 8's layout, presence in
+one directory and the SDK client named for what it does.
+
 ### Added
 
+- **`macula-mcp-realm key` and `macula-mcp-realm device-proof`: the key and the signature, without the
+  mesh.** A machine redeeming an invite holds no realm credential and, by crew-code's rule, no crypto, so
+  it must not load the mesh client either: the key and the signing stay here, where the key is.
+  `key` prints one key unsigned — `{node_id, public_key, profile}` — for a caller that must put a public
+  key INSIDE the request it signs. `device-proof --procedure <text> --realm <64 hex> [--rule http|mesh]`
+  answers `{node_id, public_key, proof}` from ONE key load, so a public key can never be paired with a
+  proof another key made; the bytes are `NodeKey.deviceRequestProof` under `pq_hybrid`, so they are the
+  realm's own message by construction. A request is read from standard input or a named file, never from
+  an argument: it carries an invite secret, and a shell keeps a command line in its history and the
+  process list. CLI only, never an MCP tool, for `bin/realm.ts`'s own reason: an agent's tool-calling loop
+  must not obtain a signature over a body it composed.
 - **`macula-mcp-realm crew-challenge`: a realm's signed answer to a crew-redeem challenge is checked
   here.** `nonce` prints 32 fresh bytes, and `check` verifies the realm's ML-DSA signature over the
   canonical CBOR record `macula.realm.crew_redeem_challenge` v1 — the client's own nonce, the origin
@@ -19,6 +38,25 @@ fires on a `v*` tag push, not on every commit to `main`).
   `join` and `device-proof` are. A client with no crypto of its own (`crew join`, macula-sponsors#68)
   uses it to know the realm at an address is the realm its invite names, before the invite's secret
   leaves the machine (macula-realm#107 R9). The bytes are pinned to the realm's committed vector.
+
+### Changed
+
+- **The presence slice is one directory** (#44 step 8, the rest of it). `presence.ts`, `mesh_hello.ts`,
+  `mesh_goodbye.ts`, `mesh_agents.ts`, `roster.ts`, `citizenship.ts` and `device_membership.ts`, with
+  their tests, are in `src/be_present/`. A move only: no rename, no behaviour change, and every relative
+  specifier was resolved and rewritten from the file's new directory rather than by string replacement.
+  The architecture component table names the slice, and the C4 components diagram's presence box follows.
+- **`macula_ts_client.ts` is `connect_to_mesh.ts`** (#44 step 8). The review lists that name as one that
+  fails — "(framework name)" — and gives `connect_to_mesh` as the target. It stays a top-level module
+  rather than a slice, because 49 files import it: it is the shared SDK client, not something presence or
+  the ring desk owns. Rename only, plus the docs that name it; the C4 SVG was regenerated.
+
+### Fixed
+
+- **`macula-mcp-realm key` and `device-proof` no longer mint a key for a name this machine does not
+  hold.** Both went through `NodeKey.loadOrCreate`, so an agent name with no key signed under a brand-new
+  identity and the caller enrolled a node no session will ever run on. They now load only
+  (`existingNodeKey`), and a name with no key is a refusal that says how to create one.
 
 ## [0.50.1] - 2026-10-24
 
