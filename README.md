@@ -588,8 +588,12 @@ the next renewal retries. `MACULA_MCP_NO_CITIZENSHIP=1` opts out entirely --
 registering puts this agent in a public directory, the same category of
 decision as the `agent.hello` broadcast presence already makes.
 `MACULA_MCP_CITIZEN_DISPLAY_NAME` pins the name shown there (otherwise the
-`operator_name` given to `mesh_hello`, else the harness label, e.g. `opencode
-1.18.25`).
+`operator_name` given to `mesh_hello`, else the realm handle, else the harness
+label, e.g. `opencode 1.18.25`). The directory refuses a name over 64 bytes or
+holding a control character, so the name is fitted before it is sent: control
+characters are removed and it is cut to 64 bytes on a character boundary. A
+name with nothing left, such as the variable set to an empty string, falls
+through to the next choice.
 
 Acting as that citizen needs nothing extra: every call is signed with
 this identity, and a capability that acts "as the caller"

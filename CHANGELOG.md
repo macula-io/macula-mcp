@@ -7,6 +7,15 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **An agent with a long, empty or odd operator name stays a citizen** (#66). mcl-citizens 0.6 refuses
+  a `display_name` over 64 bytes or holding a control character, and refuses the whole registration
+  with it, so such an agent silently dropped out of the directory. The name is now fitted first:
+  control characters (C0, DEL, C1) and unpaired surrogates are removed, it is cut to 64 bytes on a
+  character boundary, and a name with nothing left (for example `MACULA_MCP_CITIZEN_DISPLAY_NAME=""`)
+  falls through to the next choice instead of being sent empty.
+
 ## [0.51.0] - 2026-10-28
 
 The realm CLI a client that carries no crypto of its own uses: three verbs that sign and check where the
