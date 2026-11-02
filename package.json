@@ -80,6 +80,7 @@
     "node": ">=24.18.1"
   },
   "overrides": {
-    "fast-uri": "^4.2.3"
+    "fast-uri": "^4.2.3",
+    "minimatch": "^11.0.4"
   }
 }
