@@ -7,6 +7,10 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.51.1] - 2026-11-02
+
+A fix and a security patch. No MCP tool gains, loses or changes a parameter.
+
 ### Fixed
 
 - **An agent with a long, empty or odd operator name stays a citizen** (#66). mcl-citizens 0.6 refuses
