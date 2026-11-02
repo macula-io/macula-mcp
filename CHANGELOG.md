@@ -7,6 +7,25 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.51.1] - 2026-11-02
+
+A fix and a security patch. No MCP tool gains, loses or changes a parameter.
+
+### Fixed
+
+- **An agent with a long, empty or odd operator name stays a citizen** (#66). mcl-citizens 0.6 refuses
+  a `display_name` over 64 bytes or holding a control character, and refuses the whole registration
+  with it, so such an agent silently dropped out of the directory. The name is now fitted first:
+  control characters (C0, DEL, C1) and unpaired surrogates are removed, it is cut to 64 bytes on a
+  character boundary, and a name with nothing left (for example `MACULA_MCP_CITIZEN_DISPLAY_NAME=""`)
+  falls through to the next choice instead of being sent empty.
+
+### Security
+
+- **Two dependency advisories cleared** (#68). `@hono/node-server` (under the MCP SDK) moves to 2.1.6
+  for GHSA-rmxm-3fg6-px4f, and `minimatch` (under eslint, dev only) is held at `^11.0.4` by an override
+  for GHSA-g3hv-75wg-m249, because eslint 10 still asks for `^10`. `npm audit` reads 0.
+
 ## [0.51.0] - 2026-10-28
 
 The realm CLI a client that carries no crypto of its own uses: three verbs that sign and check where the

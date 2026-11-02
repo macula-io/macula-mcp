@@ -74,13 +74,52 @@ export function disabled(): boolean {
   return Boolean(process.env.MACULA_MCP_NO_CITIZENSHIP);
 }
 
+/** mcl-citizens refuses a display_name over this many UTF-8 bytes (display_name_too_long). */
+export const MAX_DISPLAY_NAME_BYTES = 64;
+const FALLBACK_DISPLAY_NAME = "macula-mcp agent";
+
+// mcl-citizens refuses a name holding a control character: C0, DEL or C1
+// (invalid_display_name). Matches its control/1 exactly.
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+// A surrogate half with no partner has no UTF-8 encoding (Node would send U+FFFD in its place).
+const LONE_SURROGATES = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Make a candidate fit what mcl-citizens accepts: drop control characters
+ * and lone surrogates (they cannot be encoded as UTF-8), trim, and cut to at
+ * most MAX_DISPLAY_NAME_BYTES on a character boundary. Returns undefined when
+ * nothing is left, so the caller moves on to the next candidate.
+ */
+export function fitDisplayName(candidate: string | undefined): string | undefined {
+  if (candidate === undefined) return undefined;
+  const cleaned = candidate.replace(LONE_SURROGATES, "").replace(CONTROL_CHARS, "").trim();
+  let out = "";
+  let bytes = 0;
+  for (const ch of cleaned) {
+    const size = Buffer.byteLength(ch, "utf8");
+    if (bytes + size > MAX_DISPLAY_NAME_BYTES) break;
+    out += ch;
+    bytes += size;
+  }
+  out = out.trimEnd();
+  return out === "" ? undefined : out;
+}
+
 /**
  * What a citizen shows up as in the directory: the operator's name if
  * any, else the realm handle this identity joined under (realm.ts), else
- * the harness that runs this agent, else a plain label.
+ * the harness that runs this agent, else a plain label. Each candidate is
+ * fitted to mcl-citizens' bounds first (fitDisplayName); one with nothing
+ * left, such as an empty env var, falls through to the next. Sending a name
+ * the directory refuses would silently stop this agent being a citizen.
  */
 export function displayName(operatorName: string | undefined, connectedVia: string | undefined, realmHandle?: string): string {
-  return process.env.MACULA_MCP_CITIZEN_DISPLAY_NAME ?? operatorName ?? realmHandle ?? connectedVia ?? "macula-mcp agent";
+  const candidates = [process.env.MACULA_MCP_CITIZEN_DISPLAY_NAME, operatorName, realmHandle, connectedVia];
+  for (const c of candidates) {
+    const fitted = fitDisplayName(c);
+    if (fitted !== undefined) return fitted;
+  }
+  return FALLBACK_DISPLAY_NAME;
 }
 
 /**
