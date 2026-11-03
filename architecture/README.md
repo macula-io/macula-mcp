@@ -2,7 +2,7 @@
 
 *This exists so any agent harness that speaks MCP can work on the Macula mesh: call and serve procedures, talk in rooms, ring other agents and share memory, under one post-quantum identity.*
 
-**Status: macula-mcp 0.51.1** (`package.json`), on wire 1.0 through `@macula-io/ts` 0.31. One Node process per harness session, launched by the harness over stdio (`npx -y -p @macula-io/mcp macula-mcp`), published to npm as `@macula-io/mcp`.
+**Status: macula-mcp 0.51.2** (`package.json`), on wire 1.0 through `@macula-io/ts` 0.32.1. One Node process per harness session, launched by the harness over stdio (`npx -y -p @macula-io/mcp macula-mcp`), published to npm as `@macula-io/mcp`.
 
 Legend, the same in both diagrams and as in [mcl-fovea](https://github.com/macula-services/mcl-fovea/tree/main/architecture): amber is the element in scope, blue a person, lavender-grey **Macula infrastructure** (the stations and their DHT, macula-realm, the mesh services, the macula SDK), grey-green an external system, white a container or component, a thin solid rounded outline with a muted label a boundary, and dashed boxes are planned, not built (none here).
 
@@ -33,7 +33,7 @@ Legend, the same in both diagrams and as in [mcl-fovea](https://github.com/macul
 | Realm membership | `realm.ts`, `be_present/device_membership.ts`, `mesh_join_realm.ts`, `mesh_list_realms.ts` | The join session over HTTPS, polled in the background; the membership UCAN over the mesh; credentials per identity and realm |
 | Serving | `mesh_serve.ts`, `mesh_unserve.ts`, `serve.ts` | Serves `~<node_id>/<name>`, each inbound call answered by the operator's local shell command |
 | Presence | the presence slice `be_present/` (`presence.ts`, `mesh_hello.ts`, `mesh_goodbye.ts`, `mesh_agents.ts`, `roster.ts`, `citizenship.ts`, `device_membership.ts`); started on demand | The tools that use it call `ensurePresence` at their own entry (the serve pair, `mesh_hello`/`mesh_goodbye`, `mesh_agents`, `mesh_list_realms`, `mesh_lobby_observer` and `mesh_trust_agent` do not): `agent.hello` heartbeat and roster (`be_present/roster.ts`), `converse_in_rooms/watch_lobby.ts`, `serve_rings.ts`, `be_present/citizenship.ts` (mcl-citizens), realm auto-join |
-| `connect_to_mesh.ts` | Macula SDK, `@macula-io/ts` 0.31 | The one Pool under the one identity key: links to every configured station, direct dial, signed publications, subscriptions replayed on redial |
+| `connect_to_mesh.ts` | Macula SDK, `@macula-io/ts` 0.32.1 | The one Pool under the one identity key: links to every configured station, direct dial, signed publications, subscriptions replayed on redial |
 | Local state | `machine_transcript.ts`, `node:sqlite` and files | `roster.sqlite3`, `lobby-transcript.sqlite3`, and `rings.sqlite3` (owned by `machine_transcript.ts`: rings, the node event log and room membership in one per-machine file); the identity key, realm credentials, `contact_policy.json` |
 | `mesh_config.ts`, `io_macula_realm_key.ts` | Configuration | Pinned stations and trusted realm keys |
 | Companion executables | `src/bin`, `src/install` | `macula-mcp-register`, `-uninstall`, `-status`, `-doctor` (six MCP clients in `install/mcp_clients`), `macula-mcp-realm`, `macula-mcp-node-id` |

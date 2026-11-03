@@ -967,7 +967,7 @@ installing without registering any client) and troubleshooting.
 
 ## Status
 
-**On wire 1.0 (macula 15)** since 0.48.0, through `@macula-io/ts` 0.31 (see [CHANGELOG](CHANGELOG.md)):
+**On wire 1.0 (macula 15)** since 0.48.0, through `@macula-io/ts` 0.32.1 (see [CHANGELOG](CHANGELOG.md)):
 one pool, one identity key, calls by direct dial, signed publications,
 serving in this agent's own namespace, node-served artifacts, and realm
 requests signed with realm proof v2. Releases before 0.48.0 speak an
