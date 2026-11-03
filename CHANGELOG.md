@@ -7,6 +7,16 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+### Security
+
+- **A `sealed_required` refusal is resealed instead of failing** (#70). `@macula-io/ts` moves to
+  `^0.32.1`, whose native library is macula-go v0.29.0: a caller that a keyed provider refuses with
+  `sealed_required` now seals again to the key in the refusal's signed tbs — the key the provider
+  holds now — and is answered. Release A of sealed-by-default makes providers refuse every clear
+  call, so a server built on 0.31.0 or below would fail against all of them. Nothing else moves;
+  `npm test` gains a test that holds the resolution at or above the A0 release, failing with what
+  the server can no longer do if it slips back.
+
 ## [0.51.1] - 2026-11-02
 
 A fix and a security patch. No MCP tool gains, loses or changes a parameter.
