@@ -7,6 +7,10 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.51.2] - 2026-11-03
+
+A dependency patch. No MCP tool gains, loses or changes a parameter.
+
 ### Security
 
 - **A `sealed_required` refusal is resealed instead of failing** (#70). `@macula-io/ts` moves to
