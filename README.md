@@ -940,6 +940,10 @@ installing without registering any client) and troubleshooting.
 
 ## Environment
 
+File and directory overrides below expand a leading `~` or `$HOME` using the
+absolute `HOME` environment variable. The server rejects such an override at
+startup when `HOME` is missing or relative. Other paths are used as given.
+
 | Variable                       | Purpose                                                                                                                                                              | Default                                      |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | `MACULA_MESH_STATIONS`         | Comma-separated stations to link to, each as `host:port@<node_id hex>` (an IPv6 host in brackets). A station is only trusted by the node_id it proves, so an entry without one is refused by name. The pool links to every one and redials a dropped link. | the six fleet stations (Frankfurt, Nuremberg, Falkenstein, Helsinki, Paris, Amsterdam), each pinned by its node_id |

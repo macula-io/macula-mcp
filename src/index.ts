@@ -54,6 +54,7 @@ import { registerMeshJoinRealm } from "./mesh_join_realm.js";
 import { registerMeshListRealms } from "./mesh_list_realms.js";
 import * as serve from "./serve.js";
 import { closePool } from "./connect_to_mesh.js";
+import { validateConfiguredPaths } from "./configured_path.js";
 
 // Surfaced by every MCP client at connect time (the SDK's own
 // ServerOptions.instructions), not something a model has to think to go
@@ -289,6 +290,7 @@ async function shutdown(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  validateConfiguredPaths();
   const transport = new StdioServerTransport();
   // Belt-and-suspenders: wired for whatever SDK version/code path DOES call
   // Server#close() explicitly.
