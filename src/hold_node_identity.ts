@@ -33,8 +33,14 @@ import { acquireLock, releaseLock } from "./realm_lock.js";
 export type IdentityHeld = { heldBy: number | undefined };
 /** An identity this process holds until it releases it or exits. */
 export type IdentityHold = { release(): Promise<void> };
+/**
+ * Test-only pause points inside a reclaim, which is otherwise decided in a few syscalls no test can come between:
+ * after the leftover was asked and before it is unlinked, and after the unlink and before the listen. Each is
+ * awaited while .reclaim is held. Nothing outside the tests passes them.
+ */
+export type ReclaimPauses = { askedToUnlink?: () => Promise<void>; unlinkedToListen?: () => Promise<void> };
 /** Where this machine holds node identities: the platform's mechanism and the directory it holds them in. */
-export type HoldPlace = { platform: NodeJS.Platform; directory: string };
+export type HoldPlace = { platform: NodeJS.Platform; directory: string; pausesForTests?: ReclaimPauses };
 
 /** How long a newcomer waits for a holder to say its pid before taking it as held by a process that did not say. */
 export const HOLDER_ANSWER_MS = 2_000;
@@ -164,29 +170,31 @@ async function listenedHold(address: string): Promise<IdentityHold | "in_use"> {
  * A file socket no process answers on: under the reclaim lock, asked again, unlinked, and listened on before the
  * lock is let go, so nobody else can decide it is a leftover once this process is listening there.
  */
-async function reclaimedHold(address: string): Promise<IdentityHold | "in_use"> {
+async function reclaimedHold(address: string, pauses: ReclaimPauses): Promise<IdentityHold | "in_use"> {
   const lock = `${address}.reclaim`;
   const fd = await acquireLock(lock);
   try {
     if ((await askHolder(address)) !== "none") return "in_use";
+    await pauses.askedToUnlink?.();
     try {
       unlinkSync(address);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
+    await pauses.unlinkedToListen?.();
     return await listenedHold(address);
   } finally {
     releaseLock(lock, fd);
   }
 }
 
-async function holdSocketFile(address: string): Promise<IdentityHold | IdentityHeld> {
+async function holdSocketFile(address: string, pauses: ReclaimPauses): Promise<IdentityHold | IdentityHeld> {
   for (let attempt = 1; attempt <= HOLD_ATTEMPTS; attempt += 1) {
     const first = await listenedHold(address);
     if (first !== "in_use") return first;
     const holder = await askHolder(address);
     if (holder !== "none") return { heldBy: holder };
-    const reclaimed = await reclaimedHold(address);
+    const reclaimed = await reclaimedHold(address, pauses);
     if (reclaimed !== "in_use") return reclaimed;
   }
   return { heldBy: undefined };
@@ -232,5 +240,5 @@ export async function holdNodeIdentity(
 ): Promise<IdentityHold | IdentityHeld> {
   ownerOnlyDirectory(place);
   const address = identityAddress(nodeIdHex, place);
-  return place.platform === "win32" ? holdLockedFile(address) : holdSocketFile(address);
+  return place.platform === "win32" ? holdLockedFile(address) : holdSocketFile(address, place.pausesForTests ?? {});
 }

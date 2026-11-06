@@ -6,7 +6,18 @@
 // Every test holds in its own owner-only directory under the temp dir, never in this user's real hold directory.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,6 +29,10 @@ const ON_WINDOWS = process.platform === "win32";
 const RACERS = 8;
 const RACE_TRIALS = 5;
 const RACE_TEST_MS = 60_000;
+/** Long enough for a reclaimer waiting on .reclaim to have taken it if it were free: many times its retry. */
+const LOCK_WAITER_GRACE_MS = 300;
+/** Longer than any platform's socket path limit (Linux 108 bytes, macOS 104), so the test path exceeds both. */
+const SUN_PATH_LIMIT_PROBE = 108;
 
 const freshId = () => randomBytes(32).toString("hex");
 const isHold = (h: unknown): h is IdentityHold => typeof (h as IdentityHold).release === "function";
@@ -205,4 +220,94 @@ describe.runIf(!ON_WINDOWS)("a socket file a killed holder left behind", () => {
     },
     RACE_TEST_MS,
   );
+});
+
+/** A pause a reclaim waits in, and a promise that it has reached it. */
+function gate() {
+  let reach!: () => void;
+  let open!: () => void;
+  const reached = new Promise<void>((resolve) => (reach = resolve));
+  const opened = new Promise<void>((resolve) => (open = resolve));
+  return {
+    reached,
+    open,
+    pause: () => {
+      reach();
+      return opened;
+    },
+  };
+}
+
+/** A leftover socket file at the identity's address: a holder that was killed with SIGKILL. */
+async function leftoverAt(id: string, place: HoldPlace): Promise<number> {
+  await killed(await childHolding(id, place));
+  return lstatSync(identityAddress(id, place)).ino;
+}
+
+// Review r=2 (required 1 and 2): the reclaim decided by pauses, not by timing.
+describe.runIf(!ON_WINDOWS)("a reclaim, paused where nothing else can come between", () => {
+  it("a second reclaimer waits until the first is listening, so it never unlinks a live hold", async () => {
+    const id = freshId();
+    const place = freshPlace();
+    await leftoverAt(id, place);
+    const firstAsked = gate();
+    const firstUnlinked = gate();
+    const first = held(id, { ...place, pausesForTests: { askedToUnlink: firstAsked.pause, unlinkedToListen: firstUnlinked.pause } });
+    await firstAsked.reached;
+    const secondAsked = gate();
+    const second = held(id, { ...place, pausesForTests: { askedToUnlink: secondAsked.pause } });
+    // The second has seen the leftover and waits for .reclaim; the first unlinks it and stops short of listening.
+    firstAsked.open();
+    await firstUnlinked.reached;
+    // Had the first let go of .reclaim before listening, the second would now be asking an empty address.
+    const secondGotIn = await Promise.race([secondAsked.reached.then(() => true), firstUnlinkedSettles()]);
+    expect(secondGotIn, "the second reclaimer got into .reclaim before the first was listening").toBe(false);
+    firstUnlinked.open();
+    secondAsked.open();
+    const [a, b] = await Promise.all([first, second]);
+    expect([a, b].filter(isHold)).toHaveLength(1);
+    expect(isHold(a) ? b : a).toEqual({ heldBy: process.pid });
+  });
+
+  it("a file that was not the leftover it asked is never unlinked: its live holder keeps the identity", async () => {
+    const id = freshId();
+    const place = freshPlace();
+    await leftoverAt(id, place);
+    const asked = gate();
+    const reclaim = held(id, { ...place, pausesForTests: { askedToUnlink: asked.pause } });
+    await asked.reached;
+    // Between the reclaimer's ask and its unlink, the leftover goes and another process binds the address: a
+    // newcomer that listens outside .reclaim on a free path, caught in its bind-to-listen gap.
+    unlinkSync(identityAddress(id, place));
+    const live = await childHolding(id, place);
+    asked.open();
+    expect(await reclaim).toEqual({ heldBy: live.pid });
+    expect(await held(id, place)).toEqual({ heldBy: live.pid });
+  });
+});
+
+/** Settles false after the event loop has had every chance to let a waiting reclaimer in. */
+function firstUnlinkedSettles(): Promise<false> {
+  return new Promise((resolve) => setTimeout(() => resolve(false), LOCK_WAITER_GRACE_MS));
+}
+
+// Review r=2 (required 3) and the Supervisor's fold-in.
+describe.runIf(!ON_WINDOWS)("where a hold directory may be", () => {
+  it("under a parent reached through a symbolic link, as ~/.config/macula-mcp often is", async () => {
+    const real = join(scratch(), "real-config");
+    mkdirSync(real, { mode: 0o700 });
+    const linked = join(scratch(), "linked-config");
+    symlinkSync(real, linked);
+    const place: HoldPlace = { platform: process.platform, directory: join(linked, "holds") };
+    expect(isHold(await held(freshId(), place))).toBe(true);
+  });
+
+  it("a socket path longer than the platform allows is refused by name, before any listen", async () => {
+    let deep = scratch();
+    while (Buffer.byteLength(join(deep, "holds", `${"a".repeat(24)}.sock`)) <= SUN_PATH_LIMIT_PROBE) {
+      deep = join(deep, "d".repeat(16));
+    }
+    const place: HoldPlace = { platform: process.platform, directory: join(deep, "holds") };
+    await expect(holdNodeIdentity(freshId(), place)).rejects.toThrow(/longer than the \d+ bytes a socket path/);
+  });
 });
