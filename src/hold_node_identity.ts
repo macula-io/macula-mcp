@@ -19,9 +19,9 @@
 // No import from this package's own modules: realm_lock.ts is loaded only on the file-socket path, so a test can
 // load this file in a plain child process.
 import { createConnection, createServer, type Server } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { unlinkSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 
 /** What a refused hold knows: the holder's pid, or undefined when the holder did not say. */
 export type IdentityHeld = { heldBy: number | undefined };
@@ -35,12 +35,21 @@ const HOLD_ATTEMPTS = 3;
 /** A socket file path stays under the 104 bytes macOS allows: the node id is cut to this many hex digits. */
 const FILE_SOCKET_ID_HEX = 24;
 
+/** Where this machine holds node identities: the platform's mechanism and the directory it holds them in. */
+export type HoldPlace = { platform: NodeJS.Platform; directory: string };
+
+/** This process's hold place. */
+export function holdPlace(): HoldPlace {
+  return { platform: process.platform, directory: join(homedir(), ".config", "macula-mcp", "holds") };
+}
+
 /** Where one node identity is held on this machine. */
-export function identityAddress(nodeIdHex: string, platform: NodeJS.Platform = process.platform): string {
+export function identityAddress(nodeIdHex: string, place: HoldPlace = holdPlace()): string {
   const id = nodeIdHex.toLowerCase();
-  if (platform === "linux") return `\0macula-mcp/identity/${id}`;
-  if (platform === "win32") return `\\\\.\\pipe\\macula-mcp-identity-${id}`;
-  return join(tmpdir(), `macula-mcp-identity-${id.slice(0, FILE_SOCKET_ID_HEX)}.sock`);
+  if (place.platform === "linux") return `\0macula-mcp/identity/${id}`;
+  if (place.platform === "win32") return `\\\\.\\pipe\\macula-mcp-identity-${id}`;
+  mkdirSync(place.directory, { recursive: true });
+  return join(place.directory || tmpdir(), `macula-mcp-identity-${id.slice(0, FILE_SOCKET_ID_HEX)}.sock`);
 }
 
 const leavesAFile = (address: string) => !address.startsWith("\0") && !address.startsWith("\\\\.\\pipe\\");
@@ -116,8 +125,11 @@ function holding(server: Server): IdentityHold {
  * Takes this node identity for this process, or says which process holds it. Never throws for a held identity;
  * an address that cannot be listened on for any other reason (permissions, a full temp dir) does throw.
  */
-export async function holdNodeIdentity(nodeIdHex: string): Promise<IdentityHold | IdentityHeld> {
-  const address = identityAddress(nodeIdHex);
+export async function holdNodeIdentity(
+  nodeIdHex: string,
+  place: HoldPlace = holdPlace(),
+): Promise<IdentityHold | IdentityHeld> {
+  const address = identityAddress(nodeIdHex, place);
   for (let attempt = 1; attempt <= HOLD_ATTEMPTS; attempt += 1) {
     const server = createServer((socket) => socket.end(`${process.pid}\n`));
     if ((await listen(server, address)) === "listening") return holding(server);
