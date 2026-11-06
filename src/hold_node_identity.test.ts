@@ -282,7 +282,8 @@ describe.runIf(!ON_WINDOWS)("a reclaim, paused where nothing else can come betwe
     const reclaim = held(id, { ...place, pausesForTests: { askedToUnlink: asked.pause } });
     await asked.reached;
     // Between the reclaimer's ask and its unlink, the leftover goes and something that does not take .reclaim
-    // binds the address and answers there. dev:ino is the second guard, for whatever ignores the lock.
+    // binds the address and answers there. The file's identity (device, inode, change time) is the second
+    // guard, for whatever ignores the lock; the inode alone is not, since the new file may get the freed one.
     unlinkSync(identityAddress(id, place));
     const outsider = await answeringAt(identityAddress(id, place));
     asked.open();

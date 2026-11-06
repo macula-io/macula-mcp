@@ -207,11 +207,15 @@ function unlinkedIfThere(address: string): void {
   }
 }
 
-/** The file at `address` as device and inode, or undefined when there is none. */
+/**
+ * The file at `address` as device, inode and change time in nanoseconds, or undefined when there is none. The inode
+ * alone is not enough: a filesystem hands a freed inode straight to the next file made (ext4 on CI did, run
+ * 42243533658), while the new file's change time is stamped when it is made.
+ */
 function fileAt(address: string): string | undefined {
   try {
-    const st = lstatSync(address);
-    return `${st.dev}:${st.ino}`;
+    const st = lstatSync(address, { bigint: true });
+    return `${st.dev}:${st.ino}:${st.ctimeNs}`;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw e;
@@ -225,7 +229,7 @@ function fileAt(address: string): string | undefined {
  * holding the lock itself.
  *
  * A live holder answers with its pid. A leftover is unlinked only if it is still the file that did not answer
- * (dev:ino, read before the ask), a second guard for anything that binds the address without the lock; a different
+ * (device, inode and change time, read before the ask), a second guard for anything that binds the address without the lock; a different
  * file, or a listen that finds the address taken, is "retry", and the next attempt asks whoever is there.
  */
 async function lockedHold(address: string, pauses: ReclaimPauses): Promise<IdentityHold | IdentityHeld | "retry"> {
