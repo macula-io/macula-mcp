@@ -13,9 +13,9 @@
 //
 //   - Everywhere but Windows, the hold is a listening socket FILE in the hold directory, which must be a real
 //     directory this user owns that nobody else can enter, under a parent nobody else can write to. A holder that
-//     dies leaves its file. Whoever comes next and finds nobody answering on it unlinks it and listens, both while
-//     holding <file>.reclaim (realm_lock.ts's O_EXCL lock): a listen outside that lock can only take a path no
-//     file is at, and a file is only unlinked inside it, so two newcomers never both hold.
+//     dies leaves its file. Every look at the address, unlink and listen happens while holding <file>.reclaim
+//     (realm_lock.ts's O_EXCL lock), so a file nobody answers on under the lock is always a dead holder's, and two
+//     newcomers never both hold.
 //   - On Windows, where a socket is always a pipe in the shared namespace, the hold is a file in the hold
 //     directory opened with no sharing (UV_FS_O_EXLOCK), which the kernel closes when its holder exits however it
 //     exits. The directory sits in the user's profile and inherits its owner-only ACL; the holder's pid is
@@ -54,7 +54,7 @@ export type HoldPlace = { platform: NodeJS.Platform; directory: string; pausesFo
 
 /** How long a newcomer waits for a holder to say its pid before taking it as held by a process that did not say. */
 export const HOLDER_ANSWER_MS = 2_000;
-/** Attempts at holding: a leftover file socket reclaimed, or a holder that left between listen and ask, retries. */
+/** Attempts at holding: a file that changed under the reclaimer, or a listen that found the address taken, retries. */
 const HOLD_ATTEMPTS = 3;
 /** A socket file path stays short (see socketPathMaxBytes): the node id is cut to this many hex digits. */
 const HOLD_ID_HEX = 24;
@@ -219,25 +219,30 @@ function fileAt(address: string): string | undefined {
 }
 
 /**
- * A file socket no process answers on: under the reclaim lock, asked again, unlinked, and listened on before the
- * lock is let go, so nobody else can decide it is a leftover once this process is listening there.
+ * One attempt at holding, entirely under <socket>.reclaim (review r=3): every bind of the address happens with the
+ * lock held, from the first look at the address to the listen. So a file nobody answers on, seen under the lock, is
+ * always a holder's leftover, never a newcomer caught between its bind and its listen: that newcomer would be
+ * holding the lock itself.
  *
- * Only the file that did not answer is unlinked (review r=2). A newcomer outside the lock may take the address the
- * moment it is free, and between its bind and its listen it does not answer either: its file is a different inode,
- * so it stands, and the next ask finds it.
+ * A live holder answers with its pid. A leftover is unlinked only if it is still the file that did not answer
+ * (dev:ino, read before the ask), a second guard for anything that binds the address without the lock; a different
+ * file, or a listen that finds the address taken, is "retry", and the next attempt asks whoever is there.
  */
-async function reclaimedHold(address: string, pauses: ReclaimPauses): Promise<IdentityHold | "in_use"> {
+async function lockedHold(address: string, pauses: ReclaimPauses): Promise<IdentityHold | IdentityHeld | "retry"> {
   const lock = `${address}.reclaim`;
   const fd = await acquireLock(lock);
   try {
     const asked = fileAt(address);
-    if ((await askHolder(address)) !== "none") return "in_use";
-    await pauses.askedToUnlink?.();
-    const now = fileAt(address);
-    if (now !== asked) return "in_use";
-    if (now !== undefined) unlinkedIfThere(address);
+    if (asked !== undefined) {
+      const holder = await askHolder(address);
+      if (holder !== "none") return { heldBy: holder };
+      await pauses.askedToUnlink?.();
+      if (fileAt(address) !== asked) return "retry";
+      unlinkedIfThere(address);
+    }
     await pauses.beforeListen?.();
-    return await listenedHold(address);
+    const hold = await listenedHold(address);
+    return hold === "in_use" ? "retry" : hold;
   } finally {
     releaseLock(lock, fd);
   }
@@ -245,13 +250,8 @@ async function reclaimedHold(address: string, pauses: ReclaimPauses): Promise<Id
 
 async function holdSocketFile(address: string, pauses: ReclaimPauses): Promise<IdentityHold | IdentityHeld> {
   for (let attempt = 1; attempt <= HOLD_ATTEMPTS; attempt += 1) {
-    await pauses.beforeListen?.();
-    const first = await listenedHold(address);
-    if (first !== "in_use") return first;
-    const holder = await askHolder(address);
-    if (holder !== "none") return { heldBy: holder };
-    const reclaimed = await reclaimedHold(address, pauses);
-    if (reclaimed !== "in_use") return reclaimed;
+    const outcome = await lockedHold(address, pauses);
+    if (outcome !== "retry") return outcome;
   }
   return { heldBy: undefined };
 }
