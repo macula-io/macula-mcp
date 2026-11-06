@@ -142,13 +142,22 @@ function askHolder(address: string): Promise<number | undefined | "none"> {
   });
 }
 
+/**
+ * A hold whose release lets go once: a second release does nothing, so it can never close a descriptor or unlink a
+ * file that by then belongs to whoever holds the identity next.
+ */
+function releasedOnce(letGo: () => Promise<void>): IdentityHold {
+  let released: Promise<void> | undefined;
+  return { release: () => (released ??= letGo()) };
+}
+
 /** A socket hold at `address`, or "in_use" when a file is already there. */
 async function listenedHold(address: string): Promise<IdentityHold | "in_use"> {
   const server = createServer((socket) => socket.end(`${process.pid}\n`));
   if ((await listen(server, address)) === "in_use") return "in_use";
   // The hold never keeps the process alive on its own.
   server.unref();
-  return { release: () => new Promise((resolve) => server.close(() => resolve())) };
+  return releasedOnce(() => new Promise((resolve) => server.close(() => resolve())));
 }
 
 /**
@@ -203,16 +212,14 @@ function holdLockedFile(address: string): IdentityHold | IdentityHeld {
     return { heldBy: pidOnFile(pidFile) };
   }
   writeFileSync(pidFile, `${process.pid}\n`);
-  return {
-    release: async () => {
-      try {
-        unlinkSync(pidFile);
-      } catch {
-        // never written, or already gone: nothing of this hold is left in it
-      }
-      closeSync(fd);
-    },
-  };
+  return releasedOnce(async () => {
+    try {
+      unlinkSync(pidFile);
+    } catch {
+      // never written, or already gone: nothing of this hold is left in it
+    }
+    closeSync(fd);
+  });
 }
 
 /**

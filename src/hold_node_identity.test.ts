@@ -115,6 +115,17 @@ describe("holdNodeIdentity", () => {
     expect(isHold(await held(id, place))).toBe(true);
   });
 
+  it("a second release does nothing: the identity's next holder keeps it", async () => {
+    const id = freshId();
+    const place = freshPlace();
+    const first = (await held(id, place)) as IdentityHold;
+    await first.release();
+    const next = await held(id, place);
+    expect(isHold(next)).toBe(true);
+    await first.release();
+    expect(await holdNodeIdentity(id, place)).toEqual({ heldBy: process.pid });
+  });
+
   it("an identity another live process holds is refused with that process's pid", async () => {
     const id = freshId();
     const place = freshPlace();
