@@ -58,6 +58,19 @@ jobs:
       # by hand, not in CI.
       - run: npm test
 
+  # The identity hold (#80) has its own mechanism on Windows (a file opened
+  # with no sharing, not a socket), so its tests run there too.
+  identity-hold-windows:
+    name: identity hold on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.20.0"
+      - run: npm ci
+      - run: npx vitest run src/hold_node_identity.test.ts
+
   shellcheck:
     name: shellcheck install.sh / uninstall.sh
     runs-on: ubuntu-latest

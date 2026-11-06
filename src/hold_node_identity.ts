@@ -7,52 +7,90 @@
 // as both live, and every call in flight on the dropped link fails or times out. So before it links, a process
 // takes its identity here, and a second process is told who holds it instead of fighting for the link.
 //
-// The hold is a listening socket the KERNEL releases when its holder exits, however it exits: a SIGKILL or a crash
-// leaves no lock to reclaim and nothing to race over. On Linux the socket is abstract (no file at all); on Windows
-// it is a named pipe, which has none either. Anywhere else (macOS) it is a socket file under the temp dir, and a
-// file a crashed holder left behind is unlinked only by whoever holds <file>.reclaim (realm_lock.ts's O_EXCL lock),
-// after checking again that nobody answers on it, so two newcomers can never both unlink and both hold.
+// The hold sits where only its owner can reach it (review r=1). A name in a namespace every local user shares (a
+// Linux abstract socket, a Windows pipe) lets any of them take a node's identity first and keep it, or answer for
+// it with a pid of their choosing. So:
+//
+//   - Everywhere but Windows, the hold is a listening socket FILE in the hold directory, which must be a real
+//     directory this user owns that nobody else can enter, under a parent nobody else can write to. A holder that
+//     dies leaves its file. Whoever comes next and finds nobody answering on it unlinks it and listens, both while
+//     holding <file>.reclaim (realm_lock.ts's O_EXCL lock): a listen outside that lock can only take a path no
+//     file is at, and a file is only unlinked inside it, so two newcomers never both hold.
+//   - On Windows, where a socket is always a pipe in the shared namespace, the hold is a file in the hold
+//     directory opened with no sharing (UV_FS_O_EXLOCK), which the kernel closes when its holder exits however it
+//     exits. The directory sits in the user's profile and inherits its owner-only ACL; the holder's pid is
+//     written to a file beside it.
 //
 // Whoever asks an identity's holder who it is gets the holder's pid as one line, and nothing else is ever read
 // from or written to the socket.
-//
-// No import from this package's own modules: realm_lock.ts is loaded only on the file-socket path, so a test can
-// load this file in a plain child process.
 import { createConnection, createServer, type Server } from "node:net";
-import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
-import { mkdirSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
+import { closeSync, constants, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { acquireLock, releaseLock } from "./realm_lock.js";
 
 /** What a refused hold knows: the holder's pid, or undefined when the holder did not say. */
 export type IdentityHeld = { heldBy: number | undefined };
 /** An identity this process holds until it releases it or exits. */
 export type IdentityHold = { release(): Promise<void> };
+/** Where this machine holds node identities: the platform's mechanism and the directory it holds them in. */
+export type HoldPlace = { platform: NodeJS.Platform; directory: string };
 
 /** How long a newcomer waits for a holder to say its pid before taking it as held by a process that did not say. */
 export const HOLDER_ANSWER_MS = 2_000;
 /** Attempts at holding: a leftover file socket reclaimed, or a holder that left between listen and ask, retries. */
 const HOLD_ATTEMPTS = 3;
 /** A socket file path stays under the 104 bytes macOS allows: the node id is cut to this many hex digits. */
-const FILE_SOCKET_ID_HEX = 24;
+const HOLD_ID_HEX = 24;
+/** Permission bits that let anyone but the owner into the hold directory. */
+const NOT_OWNER_BITS = 0o077;
+/** Permission bits that let anyone but the owner write to the hold directory's parent. */
+const OTHERS_WRITE_BITS = 0o022;
 
-/** Where this machine holds node identities: the platform's mechanism and the directory it holds them in. */
-export type HoldPlace = { platform: NodeJS.Platform; directory: string };
+/**
+ * The hold directory: under $XDG_RUNTIME_DIR when it is set (a per-user directory on local storage, emptied at
+ * logout), else under the user's config directory, beside the keys.
+ */
+export function holdDirectory(env: NodeJS.ProcessEnv = process.env): string {
+  const runtime = env.XDG_RUNTIME_DIR;
+  if (runtime && isAbsolute(runtime)) return join(runtime, "macula-mcp", "holds");
+  return join(homedir(), ".config", "macula-mcp", "holds");
+}
 
 /** This process's hold place. */
 export function holdPlace(): HoldPlace {
-  return { platform: process.platform, directory: join(homedir(), ".config", "macula-mcp", "holds") };
+  return { platform: process.platform, directory: holdDirectory() };
 }
 
-/** Where one node identity is held on this machine. */
+const holdName = (nodeIdHex: string) => nodeIdHex.toLowerCase().slice(0, HOLD_ID_HEX);
+
+/** Where one node identity is held: a socket file, or on Windows the locked file. */
 export function identityAddress(nodeIdHex: string, place: HoldPlace = holdPlace()): string {
-  const id = nodeIdHex.toLowerCase();
-  if (place.platform === "linux") return `\0macula-mcp/identity/${id}`;
-  if (place.platform === "win32") return `\\\\.\\pipe\\macula-mcp-identity-${id}`;
-  mkdirSync(place.directory, { recursive: true });
-  return join(place.directory || tmpdir(), `macula-mcp-identity-${id.slice(0, FILE_SOCKET_ID_HEX)}.sock`);
+  const suffix = place.platform === "win32" ? "hold" : "sock";
+  return join(place.directory, `${holdName(nodeIdHex)}.${suffix}`);
 }
 
-const leavesAFile = (address: string) => !address.startsWith("\0") && !address.startsWith("\\\\.\\pipe\\");
+function notOwnerOnly(directory: string, why: string): Error {
+  return new Error(
+    `the identity hold directory ${directory} is not owner-only (${why}), so another user could take this node's ` +
+      `identity or answer for it: make it a directory you own with mode 0700 (chmod 700 ${directory}), or remove it`,
+  );
+}
+
+/** Makes the hold directory owner-only if it is new, and refuses one anybody else could reach. */
+function ownerOnlyDirectory(place: HoldPlace): void {
+  mkdirSync(place.directory, { recursive: true, mode: 0o700 });
+  if (place.platform === "win32") return;
+  const uid = process.getuid!();
+  const dir = lstatSync(place.directory);
+  if (!dir.isDirectory()) throw notOwnerOnly(place.directory, "it is not a directory");
+  if (dir.uid !== uid) throw notOwnerOnly(place.directory, `owned by uid ${dir.uid}`);
+  if ((dir.mode & NOT_OWNER_BITS) !== 0) throw notOwnerOnly(place.directory, `mode ${(dir.mode & 0o777).toString(8)}`);
+  const parent = lstatSync(dirname(place.directory));
+  if ((parent.mode & OTHERS_WRITE_BITS) !== 0) {
+    throw notOwnerOnly(place.directory, `others can write to its parent, mode ${(parent.mode & 0o777).toString(8)}`);
+  }
+}
 
 function listen(server: Server, address: string): Promise<"listening" | "in_use"> {
   return new Promise((resolve, reject) => {
@@ -71,6 +109,11 @@ function listen(server: Server, address: string): Promise<"listening" | "in_use"
   });
 }
 
+function pidIn(said: string): number | undefined {
+  const pid = Number(said.trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
 /** The pid the identity's holder answers with; "none" when nobody listens there (gone, or a leftover file). */
 function askHolder(address: string): Promise<number | undefined | "none"> {
   return new Promise((resolve) => {
@@ -86,58 +129,96 @@ function askHolder(address: string): Promise<number | undefined | "none"> {
     socket.on("data", (chunk: string) => {
       said += chunk;
     });
-    socket.on("end", () => {
-      const pid = Number(said.trim());
-      done(Number.isInteger(pid) && pid > 0 ? pid : undefined);
-    });
+    socket.on("end", () => done(pidIn(said)));
     socket.on("error", (e: NodeJS.ErrnoException) =>
       done(e.code === "ECONNREFUSED" || e.code === "ENOENT" ? "none" : undefined),
     );
   });
 }
 
-/** A file socket no process answers on, unlinked under the reclaim lock and only after asking again. */
-async function reclaimLeftover(address: string): Promise<void> {
-  const { acquireLock, releaseLock } = await import("./realm_lock.js");
+/** A socket hold at `address`, or "in_use" when a file is already there. */
+async function listenedHold(address: string): Promise<IdentityHold | "in_use"> {
+  const server = createServer((socket) => socket.end(`${process.pid}\n`));
+  if ((await listen(server, address)) === "in_use") return "in_use";
+  // The hold never keeps the process alive on its own.
+  server.unref();
+  return { release: () => new Promise((resolve) => server.close(() => resolve())) };
+}
+
+/**
+ * A file socket no process answers on: under the reclaim lock, asked again, unlinked, and listened on before the
+ * lock is let go, so nobody else can decide it is a leftover once this process is listening there.
+ */
+async function reclaimedHold(address: string): Promise<IdentityHold | "in_use"> {
   const lock = `${address}.reclaim`;
   const fd = await acquireLock(lock);
   try {
-    if ((await askHolder(address)) !== "none") return;
+    if ((await askHolder(address)) !== "none") return "in_use";
     try {
       unlinkSync(address);
-    } catch {
-      // already gone: the next listen settles who holds it
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
+    return await listenedHold(address);
   } finally {
     releaseLock(lock, fd);
   }
 }
 
-function holding(server: Server): IdentityHold {
-  // The hold never keeps the process alive on its own.
-  server.unref();
+async function holdSocketFile(address: string): Promise<IdentityHold | IdentityHeld> {
+  for (let attempt = 1; attempt <= HOLD_ATTEMPTS; attempt += 1) {
+    const first = await listenedHold(address);
+    if (first !== "in_use") return first;
+    const holder = await askHolder(address);
+    if (holder !== "none") return { heldBy: holder };
+    const reclaimed = await reclaimedHold(address);
+    if (reclaimed !== "in_use") return reclaimed;
+  }
+  return { heldBy: undefined };
+}
+
+function pidOnFile(pidFile: string): number | undefined {
+  try {
+    return pidIn(readFileSync(pidFile, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Windows: a file opened with no sharing, which no other process can open until this one closes it or exits. */
+function holdLockedFile(address: string): IdentityHold | IdentityHeld {
+  const noSharing = (constants as { UV_FS_O_EXLOCK?: number }).UV_FS_O_EXLOCK;
+  if (noSharing === undefined) throw new Error("this Node has no UV_FS_O_EXLOCK, so an identity cannot be held here");
+  const pidFile = `${address}.pid`;
+  let fd: number;
+  try {
+    fd = openSync(address, constants.O_CREAT | constants.O_WRONLY | noSharing);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EBUSY") throw e;
+    return { heldBy: pidOnFile(pidFile) };
+  }
+  writeFileSync(pidFile, `${process.pid}\n`);
   return {
-    release: () => new Promise((resolve) => server.close(() => resolve())),
+    release: async () => {
+      try {
+        unlinkSync(pidFile);
+      } catch {
+        // never written, or already gone: nothing of this hold is left in it
+      }
+      closeSync(fd);
+    },
   };
 }
 
 /**
  * Takes this node identity for this process, or says which process holds it. Never throws for a held identity;
- * an address that cannot be listened on for any other reason (permissions, a full temp dir) does throw.
+ * a hold directory others could reach, or one that cannot be made or listened in, does throw.
  */
 export async function holdNodeIdentity(
   nodeIdHex: string,
   place: HoldPlace = holdPlace(),
 ): Promise<IdentityHold | IdentityHeld> {
+  ownerOnlyDirectory(place);
   const address = identityAddress(nodeIdHex, place);
-  for (let attempt = 1; attempt <= HOLD_ATTEMPTS; attempt += 1) {
-    const server = createServer((socket) => socket.end(`${process.pid}\n`));
-    if ((await listen(server, address)) === "listening") return holding(server);
-    const holder = await askHolder(address);
-    if (holder !== "none") return { heldBy: holder };
-    // Nobody answers, yet the address is in use: a file socket a crashed holder left (abstract sockets and pipes
-    // leave none, so there it was a holder that left between our listen and our ask, and listening again settles it).
-    if (leavesAFile(address)) await reclaimLeftover(address);
-  }
-  return { heldBy: undefined };
+  return place.platform === "win32" ? holdLockedFile(address) : holdSocketFile(address);
 }

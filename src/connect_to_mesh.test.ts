@@ -3,7 +3,10 @@
 // or the key file; everything this module does on top of them (one pool
 // shared by every caller, the io.macula default realm, errors as
 // MeshError, DHT records decoded) is exercised for real.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { poolConnect, loadOrCreate } = vi.hoisted(() => ({ poolConnect: vi.fn(), loadOrCreate: vi.fn() }));
 
@@ -58,6 +61,20 @@ function fakePool() {
 }
 
 let pool: ReturnType<typeof fakePool>;
+
+// The pool holds this node's identity before it links (#80): hold in a directory of this file's own, never in the
+// user's real hold directory, and remove it after.
+const realRuntimeDir = process.env.XDG_RUNTIME_DIR;
+let runtimeDir: string;
+beforeAll(() => {
+  runtimeDir = mkdtempSync(join(tmpdir(), "macula-mcp-runtime-"));
+  process.env.XDG_RUNTIME_DIR = runtimeDir;
+});
+afterAll(() => {
+  if (realRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
+  else process.env.XDG_RUNTIME_DIR = realRuntimeDir;
+  rmSync(runtimeDir, { recursive: true, force: true });
+});
 
 beforeEach(() => {
   pool = fakePool();

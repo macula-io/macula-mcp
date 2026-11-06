@@ -18,10 +18,13 @@ A fix. No MCP tool gains, loses or changes a parameter.
   so two servers sharing a key (a configured server and a plugin's copy in one Claude Code session,
   both reading the same `MACULA_MCP_IDENTITY` or session id) dropped each other's link for as long as
   both lived, and every call in flight failed or timed out. A process now holds its node identity
-  before it links, through a socket the kernel releases when it exits (abstract on Linux, a named
-  pipe on Windows, a socket file elsewhere). A second process on the same key does not link: every
-  mesh tool fails with `code=identity_held`, naming the process that holds it, and links once that
-  process is gone.
+  before it links, in a hold directory only its owner can reach (`$XDG_RUNTIME_DIR/macula-mcp/holds`
+  when that is set, else `~/.config/macula-mcp/holds`), so no other user can take a node's identity
+  first or answer for it. The hold is a socket file there; one a killed holder left behind is
+  reclaimed by exactly one newcomer. On Windows it is a file opened with no sharing, which the kernel
+  lets go of when its holder exits. A hold directory others could reach is refused by name. A second
+  process on the same key does not link: every mesh tool fails with `code=identity_held`, naming the
+  process that holds it, and links once that process is gone.
 
 ## [0.51.2] - 2026-11-03
 
