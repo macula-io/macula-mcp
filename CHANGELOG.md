@@ -22,7 +22,8 @@ A fix. No MCP tool gains, loses or changes a parameter.
   when that is set, else `~/.config/macula-mcp/holds`), so no other user can take a node's identity
   first or answer for it. The hold is a socket file there; one a killed holder left behind is
   reclaimed by exactly one newcomer. On Windows it is a file opened with no sharing, which the kernel
-  lets go of when its holder exits. A hold directory others could reach is refused by name. A second
+  lets go of when its holder exits. A hold directory others could reach, or a socket path longer
+  than the platform allows, is refused by name. A second
   process on the same key does not link: every mesh tool fails with `code=identity_held`, naming the
   process that holds it, and links once that process is gone.
 

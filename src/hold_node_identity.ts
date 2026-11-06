@@ -26,7 +26,17 @@
 import { createConnection, createServer, type Server } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import { closeSync, constants, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { acquireLock, releaseLock } from "./realm_lock.js";
 
 /** What a refused hold knows: the holder's pid, or undefined when the holder did not say. */
@@ -46,8 +56,13 @@ export type HoldPlace = { platform: NodeJS.Platform; directory: string; pausesFo
 export const HOLDER_ANSWER_MS = 2_000;
 /** Attempts at holding: a leftover file socket reclaimed, or a holder that left between listen and ask, retries. */
 const HOLD_ATTEMPTS = 3;
-/** A socket file path stays under the 104 bytes macOS allows: the node id is cut to this many hex digits. */
+/** A socket file path stays short (see socketPathMaxBytes): the node id is cut to this many hex digits. */
 const HOLD_ID_HEX = 24;
+/** sizeof(sun_path) in <sys/un.h>: 108 on Linux, 104 on macOS and the BSDs. */
+const SUN_PATH_LINUX = 108;
+const SUN_PATH_BSD = 104;
+/** The bytes sun_path keeps for the terminating NUL. */
+const SUN_PATH_NUL = 1;
 /** Permission bits that let anyone but the owner into the hold directory. */
 const NOT_OWNER_BITS = 0o077;
 /** Permission bits that let anyone but the owner write to the hold directory's parent. */
@@ -89,6 +104,22 @@ function notOwnerOnly(directory: string, why: string): Error {
   );
 }
 
+/** The longest socket file path this platform takes, in bytes. */
+export function socketPathMaxBytes(platform: NodeJS.Platform): number {
+  return (platform === "linux" ? SUN_PATH_LINUX : SUN_PATH_BSD) - SUN_PATH_NUL;
+}
+
+/** Refuses, by name, a socket path the kernel would refuse with a bare EINVAL or cut short. */
+function shortEnoughSocketPath(address: string, platform: NodeJS.Platform): void {
+  const bytes = Buffer.byteLength(address);
+  const max = socketPathMaxBytes(platform);
+  if (bytes <= max) return;
+  throw new Error(
+    `the identity hold socket ${address} is ${bytes} bytes, longer than the ${max} bytes a socket path may have ` +
+      `on ${platform}: hold identities in a shorter directory (set XDG_RUNTIME_DIR to one)`,
+  );
+}
+
 /** Makes the hold directory owner-only if it is new, and refuses one anybody else could reach. */
 function ownerOnlyDirectory(place: HoldPlace): void {
   mkdirSync(place.directory, { recursive: true, mode: 0o700 });
@@ -98,7 +129,9 @@ function ownerOnlyDirectory(place: HoldPlace): void {
   if (!dir.isDirectory()) throw notOwnerOnly(place.directory, "it is not a directory");
   if (dir.uid !== uid) throw notOwnerOnly(place.directory, `owned by uid ${dir.uid}`);
   if ((dir.mode & NOT_OWNER_BITS) !== 0) throw notOwnerOnly(place.directory, `mode ${(dir.mode & 0o777).toString(8)}`);
-  const parent = lstatSync(dirname(place.directory));
+  // The parent may be reached through a link (a ~/.config kept elsewhere): what counts is the directory it is.
+  const parent = statSync(dirname(place.directory));
+  if (parent.uid !== uid) throw notOwnerOnly(place.directory, `its parent is owned by uid ${parent.uid}`);
   if ((parent.mode & OTHERS_WRITE_BITS) !== 0) {
     throw notOwnerOnly(place.directory, `others can write to its parent, mode ${(parent.mode & 0o777).toString(8)}`);
   }
@@ -166,21 +199,43 @@ async function listenedHold(address: string): Promise<IdentityHold | "in_use"> {
   return releasedOnce(() => new Promise((resolve) => server.close(() => resolve())));
 }
 
+function unlinkedIfThere(address: string): void {
+  try {
+    unlinkSync(address);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+}
+
+/** The file at `address` as device and inode, or undefined when there is none. */
+function fileAt(address: string): string | undefined {
+  try {
+    const st = lstatSync(address);
+    return `${st.dev}:${st.ino}`;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw e;
+  }
+}
+
 /**
  * A file socket no process answers on: under the reclaim lock, asked again, unlinked, and listened on before the
  * lock is let go, so nobody else can decide it is a leftover once this process is listening there.
+ *
+ * Only the file that did not answer is unlinked (review r=2). A newcomer outside the lock may take the address the
+ * moment it is free, and between its bind and its listen it does not answer either: its file is a different inode,
+ * so it stands, and the next ask finds it.
  */
 async function reclaimedHold(address: string, pauses: ReclaimPauses): Promise<IdentityHold | "in_use"> {
   const lock = `${address}.reclaim`;
   const fd = await acquireLock(lock);
   try {
+    const asked = fileAt(address);
     if ((await askHolder(address)) !== "none") return "in_use";
     await pauses.askedToUnlink?.();
-    try {
-      unlinkSync(address);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-    }
+    const now = fileAt(address);
+    if (now !== asked) return "in_use";
+    if (now !== undefined) unlinkedIfThere(address);
     await pauses.unlinkedToListen?.();
     return await listenedHold(address);
   } finally {
@@ -240,5 +295,6 @@ export async function holdNodeIdentity(
 ): Promise<IdentityHold | IdentityHeld> {
   ownerOnlyDirectory(place);
   const address = identityAddress(nodeIdHex, place);
+  if (place.platform !== "win32") shortEnoughSocketPath(address, place.platform);
   return place.platform === "win32" ? holdLockedFile(address) : holdSocketFile(address, place.pausesForTests ?? {});
 }

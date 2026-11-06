@@ -21,7 +21,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { holdNodeIdentity, identityAddress, type HoldPlace, type IdentityHold } from "./hold_node_identity.js";
+import {
+  holdNodeIdentity,
+  identityAddress,
+  socketPathMaxBytes,
+  type HoldPlace,
+  type IdentityHold,
+} from "./hold_node_identity.js";
 
 const SRC_URL = new URL("./hold_node_identity.ts", import.meta.url).href;
 const ON_WINDOWS = process.platform === "win32";
@@ -31,8 +37,6 @@ const RACE_TRIALS = 5;
 const RACE_TEST_MS = 60_000;
 /** Long enough for a reclaimer waiting on .reclaim to have taken it if it were free: many times its retry. */
 const LOCK_WAITER_GRACE_MS = 300;
-/** Longer than any platform's socket path limit (Linux 108 bytes, macOS 104), so the test path exceeds both. */
-const SUN_PATH_LIMIT_PROBE = 108;
 
 const freshId = () => randomBytes(32).toString("hex");
 const isHold = (h: unknown): h is IdentityHold => typeof (h as IdentityHold).release === "function";
@@ -304,7 +308,7 @@ describe.runIf(!ON_WINDOWS)("where a hold directory may be", () => {
 
   it("a socket path longer than the platform allows is refused by name, before any listen", async () => {
     let deep = scratch();
-    while (Buffer.byteLength(join(deep, "holds", `${"a".repeat(24)}.sock`)) <= SUN_PATH_LIMIT_PROBE) {
+    while (Buffer.byteLength(join(deep, "holds", `${"a".repeat(24)}.sock`)) <= socketPathMaxBytes(process.platform)) {
       deep = join(deep, "d".repeat(16));
     }
     const place: HoldPlace = { platform: process.platform, directory: join(deep, "holds") };
