@@ -46,6 +46,12 @@ const HOLD_ID_HEX = 24;
 const NOT_OWNER_BITS = 0o077;
 /** Permission bits that let anyone but the owner write to the hold directory's parent. */
 const OTHERS_WRITE_BITS = 0o022;
+/**
+ * libuv's open flag for "no sharing" on Windows, UV_FS_O_EXLOCK in libuv's include/uv/win.h; its fs__open opens the
+ * file with share mode 0 when it is set. Node passes numeric open flags through to libuv but does not export this one
+ * in fs.constants (Node 24 on windows-latest has none), so it is used only where Node gives no value of its own.
+ */
+const LIBUV_WIN_O_EXLOCK = 0x10000000;
 
 /**
  * The hold directory: under $XDG_RUNTIME_DIR when it is set (a per-user directory on local storage, emptied at
@@ -187,8 +193,7 @@ function pidOnFile(pidFile: string): number | undefined {
 
 /** Windows: a file opened with no sharing, which no other process can open until this one closes it or exits. */
 function holdLockedFile(address: string): IdentityHold | IdentityHeld {
-  const noSharing = (constants as { UV_FS_O_EXLOCK?: number }).UV_FS_O_EXLOCK;
-  if (noSharing === undefined) throw new Error("this Node has no UV_FS_O_EXLOCK, so an identity cannot be held here");
+  const noSharing = (constants as { UV_FS_O_EXLOCK?: number }).UV_FS_O_EXLOCK ?? LIBUV_WIN_O_EXLOCK;
   const pidFile = `${address}.pid`;
   let fd: number;
   try {
