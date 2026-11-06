@@ -38,6 +38,7 @@ import {
   type Subscription,
 } from "@macula-io/ts";
 import { droppedEvents } from "./dropped_events.js";
+import { holdNodeIdentity, type IdentityHold } from "./hold_node_identity.js";
 import { IO_MACULA_REALM_ID, MeshError, kemAdvertise, nodeKeyPath, realmTrust, seeds } from "./mesh_config.js";
 
 /** The fleet's crypto profile, which macula-realm verifies key-possession proofs under too. */
@@ -45,6 +46,7 @@ export const KEY_PROFILE = "pq_hybrid";
 
 let keyPromise: Promise<NodeKey> | undefined;
 let poolPromise: Promise<Pool> | undefined;
+let identityHold: IdentityHold | undefined;
 
 /** This server's identity key, loaded from nodeKeyPath() or generated and saved there on first use. */
 export function nodeKey(): Promise<NodeKey> {
@@ -81,30 +83,64 @@ export async function selfNodeId(): Promise<string> {
 }
 
 /**
+ * This node's identity, held for this process before it links (#80): the
+ * station keeps one link per node id, so a second process on this key would
+ * knock this one's link off and be knocked off in turn. A held identity is
+ * refused with code=identity_held, naming the process that holds it, and
+ * nothing links; the next call asks again, so it links once that process exits.
+ */
+async function holdIdentity(key: NodeKey): Promise<void> {
+  if (identityHold) return;
+  const hold = await holdNodeIdentity(key.nodeIdHex());
+  if ("release" in hold) {
+    identityHold = hold;
+    return;
+  }
+  throw new MeshError(
+    `this node's identity (${key.nodeIdHex()}, key ${nodeKeyPath()}) is held by process ${hold.heldBy ?? "(it did not say)"}, ` +
+      "another macula-mcp on the same key: the station keeps one link per node id, so this one does not link. " +
+      "Run one macula-mcp per key (for a second agent, give it its own MACULA_MCP_AGENT), or stop that process",
+    "identity_held",
+  );
+}
+
+/**
  * The shared pool. Concurrent first callers share one in-flight connect; a
  * failed connect is forgotten so the next caller tries again rather than
  * inheriting the rejection forever.
  */
 export function sharedPool(): Promise<Pool> {
-  poolPromise ??= (async () =>
-    Pool.connect(await nodeKey(), seeds(), { realmTrust: realmTrust(), kemAdvertise: kemAdvertise() }))().catch((e) => {
+  poolPromise ??= (async () => {
+    const key = await nodeKey();
+    await holdIdentity(key);
+    return Pool.connect(key, seeds(), { realmTrust: realmTrust(), kemAdvertise: kemAdvertise() });
+  })().catch((e) => {
     poolPromise = undefined;
     throw toMeshError(e);
   });
   return poolPromise;
 }
 
-/** Closes the pool, if one was ever connected. */
+/** Lets go of this node's identity, if this process holds it. */
+async function releaseIdentity(): Promise<void> {
+  const hold = identityHold;
+  identityHold = undefined;
+  await hold?.release();
+}
+
+/** Closes the pool, if one was ever connected, and lets go of the identity. */
 export async function closePool(): Promise<void> {
   const p = poolPromise;
   poolPromise = undefined;
   if (p) await (await p.catch(() => undefined))?.close();
+  await releaseIdentity();
 }
 
-/** Test hook: forget the pool and the key without touching either. */
+/** Test hook: forget the pool and the key without touching either, and let go of the identity. */
 export async function resetForTests(): Promise<void> {
   poolPromise = undefined;
   keyPromise = undefined;
+  await releaseIdentity();
 }
 
 /** A confidentiality refusal, keeping the provider's named/found keys in the message. */
