@@ -6,12 +6,12 @@
     "url": "https://github.com/macula-io/macula-mcp",
     "source": "github"
   },
-  "version": "0.51.2",
+  "version": "0.51.3",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@macula-io/mcp",
-      "version": "0.51.2",
+      "version": "0.51.3",
       "transport": {
         "type": "stdio"
       }

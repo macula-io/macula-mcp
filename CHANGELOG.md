@@ -7,6 +7,22 @@ fires on a `v*` tag push, not on every commit to `main`).
 
 ## [Unreleased]
 
+## [0.51.3] - 2026-11-06
+
+A fix. No MCP tool gains, loses or changes a parameter.
+
+### Fixed
+
+- **Two macula-mcp processes on one node key no longer knock each other off the station** (#80).
+  macula-station keeps one link per node id and closes the older with `replaced_by_newer_handshake`,
+  so two servers sharing a key (a configured server and a plugin's copy in one Claude Code session,
+  both reading the same `MACULA_MCP_IDENTITY` or session id) dropped each other's link for as long as
+  both lived, and every call in flight failed or timed out. A process now holds its node identity
+  before it links, through a socket the kernel releases when it exits (abstract on Linux, a named
+  pipe on Windows, a socket file elsewhere). A second process on the same key does not link: every
+  mesh tool fails with `code=identity_held`, naming the process that holds it, and links once that
+  process is gone.
+
 ## [0.51.2] - 2026-11-03
 
 A dependency patch. No MCP tool gains, loses or changes a parameter.
