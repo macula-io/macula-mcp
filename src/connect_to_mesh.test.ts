@@ -38,6 +38,7 @@ import {
   watch,
 } from "./connect_to_mesh.js";
 import { droppedEvents, onLoss } from "./dropped_events.js";
+import { holdNodeIdentity } from "./hold_node_identity.js";
 import { DEFAULT_SEEDS, IO_MACULA_REALM_ID, IO_MACULA_REALM_KEY, MeshError } from "./mesh_config.js";
 
 const SELF = "00".repeat(31) + "01";
@@ -93,6 +94,22 @@ describe("the shared pool", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("never links while another process holds this node's identity, and names that process (#80)", async () => {
+    const other = await holdNodeIdentity(SELF);
+    if (!("release" in other)) throw new Error("the test could not hold the identity first");
+    try {
+      const refused = await call({ procedure: "mcl-echo/echo" }).catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(MeshError);
+      expect((refused as MeshError).code).toBe("identity_held");
+      expect((refused as MeshError).message).toMatch(new RegExp(`held by process ${process.pid}`));
+      expect(poolConnect).not.toHaveBeenCalled();
+    } finally {
+      await other.release();
+    }
+    await expect(call({ procedure: "mcl-echo/echo" })).resolves.toMatchObject({ payload: { ok: 1 } });
+    expect(poolConnect).toHaveBeenCalledTimes(1);
   });
 
   it("is connected again after a failed connect, not stuck with the rejection", async () => {
