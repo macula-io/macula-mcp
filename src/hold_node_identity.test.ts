@@ -18,6 +18,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -256,7 +257,7 @@ describe.runIf(!ON_WINDOWS)("a reclaim, paused where nothing else can come betwe
     await leftoverAt(id, place);
     const firstAsked = gate();
     const firstUnlinked = gate();
-    const first = held(id, { ...place, pausesForTests: { askedToUnlink: firstAsked.pause, unlinkedToListen: firstUnlinked.pause } });
+    const first = held(id, { ...place, pausesForTests: { askedToUnlink: firstAsked.pause, beforeListen: firstUnlinked.pause } });
     await firstAsked.reached;
     const secondAsked = gate();
     const second = held(id, { ...place, pausesForTests: { askedToUnlink: secondAsked.pause } });
@@ -280,15 +281,48 @@ describe.runIf(!ON_WINDOWS)("a reclaim, paused where nothing else can come betwe
     const asked = gate();
     const reclaim = held(id, { ...place, pausesForTests: { askedToUnlink: asked.pause } });
     await asked.reached;
-    // Between the reclaimer's ask and its unlink, the leftover goes and another process binds the address: a
-    // newcomer that listens outside .reclaim on a free path, caught in its bind-to-listen gap.
+    // Between the reclaimer's ask and its unlink, the leftover goes and something that does not take .reclaim
+    // binds the address and answers there. dev:ino is the second guard, for whatever ignores the lock.
     unlinkSync(identityAddress(id, place));
-    const live = await childHolding(id, place);
+    const outsider = await answeringAt(identityAddress(id, place));
     asked.open();
-    expect(await reclaim).toEqual({ heldBy: live.pid });
-    expect(await held(id, place)).toEqual({ heldBy: live.pid });
+    expect(await reclaim).toEqual({ heldBy: process.pid });
+    expect(existsSync(identityAddress(id, place))).toBe(true);
+    await closed(outsider);
+  });
+
+  it("a racer that has decided to listen holds .reclaim until it listens, so nobody holds in between", async () => {
+    const id = freshId();
+    const place = freshPlace();
+    const decided = gate();
+    const racer = held(id, { ...place, pausesForTests: { beforeListen: decided.pause } });
+    await decided.reached;
+    // A process that bound outside .reclaim and stalled before listen() is a file nobody answers on: another
+    // process under the lock would take it for a leftover. So no one else may get anywhere while the racer stalls.
+    let otherSettled = false;
+    const other = held(id, place).then((h) => {
+      otherSettled = true;
+      return h;
+    });
+    await new Promise((resolve) => setTimeout(resolve, LOCK_WAITER_GRACE_MS));
+    expect(otherSettled, "another process settled while the racer was between deciding and listening").toBe(false);
+    decided.open();
+    const [a, b] = await Promise.all([racer, other]);
+    expect(isHold(a)).toBe(true);
+    expect(b).toEqual({ heldBy: process.pid });
   });
 });
+
+/** A plain socket at `address` answering with this pid, bound without .reclaim. */
+function answeringAt(address: string): Promise<Server> {
+  const server = createServer((socket) => socket.end(`${process.pid}\n`));
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(address, () => resolve(server));
+  });
+}
+
+const closed = (server: Server) => new Promise<void>((resolve) => server.close(() => resolve()));
 
 /** Settles false after the event loop has had every chance to let a waiting reclaimer in. */
 function firstUnlinkedSettles(): Promise<false> {

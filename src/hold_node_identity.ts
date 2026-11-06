@@ -44,11 +44,11 @@ export type IdentityHeld = { heldBy: number | undefined };
 /** An identity this process holds until it releases it or exits. */
 export type IdentityHold = { release(): Promise<void> };
 /**
- * Test-only pause points inside a reclaim, which is otherwise decided in a few syscalls no test can come between:
- * after the leftover was asked and before it is unlinked, and after the unlink and before the listen. Each is
- * awaited while .reclaim is held. Nothing outside the tests passes them.
+ * Test-only pause points inside a hold, which is otherwise decided in a few syscalls no test can come between:
+ * after a leftover was asked and before it is unlinked, and before every listen. Nothing outside the tests passes
+ * them.
  */
-export type ReclaimPauses = { askedToUnlink?: () => Promise<void>; unlinkedToListen?: () => Promise<void> };
+export type ReclaimPauses = { askedToUnlink?: () => Promise<void>; beforeListen?: () => Promise<void> };
 /** Where this machine holds node identities: the platform's mechanism and the directory it holds them in. */
 export type HoldPlace = { platform: NodeJS.Platform; directory: string; pausesForTests?: ReclaimPauses };
 
@@ -236,7 +236,7 @@ async function reclaimedHold(address: string, pauses: ReclaimPauses): Promise<Id
     const now = fileAt(address);
     if (now !== asked) return "in_use";
     if (now !== undefined) unlinkedIfThere(address);
-    await pauses.unlinkedToListen?.();
+    await pauses.beforeListen?.();
     return await listenedHold(address);
   } finally {
     releaseLock(lock, fd);
@@ -245,6 +245,7 @@ async function reclaimedHold(address: string, pauses: ReclaimPauses): Promise<Id
 
 async function holdSocketFile(address: string, pauses: ReclaimPauses): Promise<IdentityHold | IdentityHeld> {
   for (let attempt = 1; attempt <= HOLD_ATTEMPTS; attempt += 1) {
+    await pauses.beforeListen?.();
     const first = await listenedHold(address);
     if (first !== "in_use") return first;
     const holder = await askHolder(address);
