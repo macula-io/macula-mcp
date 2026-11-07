@@ -21,9 +21,11 @@ import { dirname, join } from "node:path";
 import { ensureRingTables } from "./ring_agents/rings.js";
 import { ensureNodeEventsTable } from "./node_events.js";
 import { ensureRoomMembershipTable } from "./converse_in_rooms/room_membership.js";
+import { configuredPath } from "./configured_path.js";
 
 function dbPath(): string {
-  return process.env.MACULA_MCP_RINGS_DB ?? join(homedir(), ".macula-mcp", "rings.sqlite3");
+  const path = process.env.MACULA_MCP_RINGS_DB;
+  return path === undefined ? join(homedir(), ".macula-mcp", "rings.sqlite3") : configuredPath("MACULA_MCP_RINGS_DB", path);
 }
 
 let db: DatabaseSync | undefined;

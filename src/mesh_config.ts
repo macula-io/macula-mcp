@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { IO_MACULA_REALM_KEY } from "./io_macula_realm_key.js";
+import { configuredPath } from "./configured_path.js";
 
 export { IO_MACULA_REALM_KEY };
 
@@ -154,7 +155,7 @@ export function nodeKeyPath(): string {
       `MACULA_MCP_AGENT ("${agent}") and MACULA_MCP_IDENTITY ("${pinned}") are both set: set one of them`,
     );
   }
-  if (pinned) return pinned;
+  if (pinned) return configuredPath("MACULA_MCP_IDENTITY", pinned);
   const file = agent ? `agent-${agent}.key` : `${scopeKey}.key`;
   return join(homedir(), ".config", "macula-mcp", "keys", file);
 }

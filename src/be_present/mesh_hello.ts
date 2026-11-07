@@ -51,6 +51,7 @@ import { describeMeshError, errorContent, jsonContent } from "../reply.js";
 import * as presence from "./presence.js";
 import { assertNoLikelySecret } from "../secret_scan.js";
 import { toolDescription } from "../tool_description.js";
+import { configuredPath } from "../configured_path.js";
 
 const DEFAULT_BANNER = `
    __  __   _   ___ _   _ _      _
@@ -61,8 +62,9 @@ const DEFAULT_BANNER = `
 `;
 
 function banner(): string {
-  const path = process.env.MACULA_MCP_BANNER_FILE;
-  if (!path) return DEFAULT_BANNER;
+  const value = process.env.MACULA_MCP_BANNER_FILE;
+  if (!value) return DEFAULT_BANNER;
+  const path = configuredPath("MACULA_MCP_BANNER_FILE", value);
   try {
     return readFileSync(path, "utf8");
   } catch {

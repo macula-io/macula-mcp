@@ -19,6 +19,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { configuredPath } from "./configured_path.js";
 
 /** No booleans: the policy is one of these integers, advertised as contact_policy. */
 export const POLICY = { open: 1, ask: 2, allowlist: 3, closed: 4 } as const;
@@ -43,7 +44,8 @@ export interface ContactPolicy {
 }
 
 export function policyFilePath(): string {
-  return process.env.MACULA_MCP_CONTACT_POLICY_FILE ?? join(homedir(), ".config", "macula-mcp", "contact_policy.json");
+  const path = process.env.MACULA_MCP_CONTACT_POLICY_FILE;
+  return path === undefined ? join(homedir(), ".config", "macula-mcp", "contact_policy.json") : configuredPath("MACULA_MCP_CONTACT_POLICY_FILE", path);
 }
 
 const POLICY_BY_NAME = new Map<string, Policy>([

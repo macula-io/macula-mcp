@@ -31,9 +31,11 @@ import { DatabaseSync } from "node:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { configuredPath } from "../configured_path.js";
 
 function dbPath(): string {
-  return process.env.MACULA_MCP_ROSTER_DB ?? join(homedir(), ".macula-mcp", "roster.sqlite3");
+  const path = process.env.MACULA_MCP_ROSTER_DB;
+  return path === undefined ? join(homedir(), ".macula-mcp", "roster.sqlite3") : configuredPath("MACULA_MCP_ROSTER_DB", path);
 }
 
 let db: DatabaseSync | undefined;
