@@ -25,7 +25,7 @@ function restoring(...names: string[]): () => void {
 }
 
 describe("nodeKeyPath", () => {
-  const restore = restoring("MACULA_MCP_IDENTITY", "MACULA_MCP_AGENT");
+  const restore = restoring("MACULA_MCP_IDENTITY", "MACULA_MCP_AGENT", "HOME");
   afterEach(restore);
 
   it("is one key per session scope, persisted under the config directory, never the temp dir", () => {
@@ -41,6 +41,13 @@ describe("nodeKeyPath", () => {
     delete process.env.MACULA_MCP_AGENT;
     process.env.MACULA_MCP_IDENTITY = "/tmp/pinned.key";
     expect(nodeKeyPath()).toBe("/tmp/pinned.key");
+  });
+
+  it("expands a home-relative pinned identity", () => {
+    delete process.env.MACULA_MCP_AGENT;
+    process.env.HOME = tmpdir();
+    process.env.MACULA_MCP_IDENTITY = "~/keys/agent.key";
+    expect(nodeKeyPath()).toBe(join(tmpdir(), "keys", "agent.key"));
   });
 
   it("MACULA_MCP_AGENT names one key per agent, the same in every session that agent runs", () => {

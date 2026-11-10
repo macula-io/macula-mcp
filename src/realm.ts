@@ -46,6 +46,7 @@ import { appendNodeEvent, NODE_EVENT } from "./node_events.js";
 import { acquireLock, releaseLock } from "./realm_lock.js";
 import { machineDb } from "./machine_transcript.js";
 import { serverVersion } from "./version.js";
+import { configuredPath } from "./configured_path.js";
 
 export const DEFAULT_REALM_URL = "https://realm.macula.io";
 export const POLL_INTERVAL_MS = 4_000;
@@ -60,7 +61,8 @@ export function realmUrl(): string {
 }
 
 export function realmDir(): string {
-  return process.env.MACULA_MCP_REALM_DIR ?? join(homedir(), ".config", "macula-mcp", "realm");
+  const path = process.env.MACULA_MCP_REALM_DIR;
+  return path === undefined ? join(homedir(), ".config", "macula-mcp", "realm") : configuredPath("MACULA_MCP_REALM_DIR", path);
 }
 
 /**

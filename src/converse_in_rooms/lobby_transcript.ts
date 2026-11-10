@@ -22,9 +22,11 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { configuredPath } from "../configured_path.js";
 
 function dbPath(): string {
-  return process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB ?? join(homedir(), ".macula-mcp", "lobby-transcript.sqlite3");
+  const path = process.env.MACULA_MCP_LOBBY_TRANSCRIPT_DB;
+  return path === undefined ? join(homedir(), ".macula-mcp", "lobby-transcript.sqlite3") : configuredPath("MACULA_MCP_LOBBY_TRANSCRIPT_DB", path);
 }
 
 let db: DatabaseSync | undefined;
