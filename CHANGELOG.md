@@ -2772,6 +2772,9 @@ org doesn't exist on npm and can't be created via CLI).
   `hecate-daemon` dependency — `hecate-daemon` is a leftover of an
   abandoned local browser/UI plan. `macula-mcp` is a thin client from
   here on: it shells out to `macula-cli`, one subprocess per tool call.
+  *Superseded: 0.18.0 cut the mesh operations over to `@macula-io/ts`,
+  in-process; the current package has no `macula-cli` dependency at all.
+  This entry describes 0.3.1, not the present.*
 - `mesh_watch` (bounded, blocks up to 120s, call again to keep watching)
   replaces the old standing-subscription quartet: `mesh_subscribe`,
   `mesh_unsubscribe`, `mesh_subscriptions`, `mesh_inbox`.
